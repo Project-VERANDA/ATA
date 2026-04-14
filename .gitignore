@@ -1,3 +1,4 @@
 pipeline/model/*
 .GitCreateDir
 !pipeline/model/.GithubCreateDir
+pipeline_Test.py
