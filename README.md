@@ -25,6 +25,13 @@ It may not be necessary to install the whisper-large-v3 file to the models folde
 # Running the script
 
 Open the pipeline script and update all fields marked with *** and save your changes. 
-Run the script. In your command-line, type: python pipeline.py 
+Run the script. In your command-line, type: python process.py 
 
 
+# Pending updates
+
+* Re-adding the anonymization process.
+** This is pending the addition of anonymization models.
+
+* Adding the models to the Github Repo.
+* Add a web interface.
