@@ -263,8 +263,7 @@ def process_audios():
         from pyannote.audio import Pipeline
         
         diarize_pipeline = Pipeline.from_pretrained(
-            str(DIARIZATION_MODEL_PATH),
-            local_files_only=True
+            str(DIARIZATION_MODEL_PATH)
         )
         
         diarize_model = diarize_pipeline
