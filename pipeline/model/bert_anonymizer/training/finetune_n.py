@@ -1,4 +1,49 @@
+import os
+import torch
+from transformers import BertForTokenClassification, BertTokenizerFast, Trainer, TrainingArguments
+from torch.utils.data import Dataset
+import json
+from sklearn.model_selection import train_test_split
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+class AnonymizationDataset(Dataset):
+    def __init__(self, encodings, labels):
+        self.encodings = encodings
+        self.labels = labels
+
+    def __getitem__(self, idx):
+        item = {key: torch.tensor(val[idx]) for key, val in self.encodings.items()}
+        item['labels'] = torch.tensor(self.labels[idx])
+        return item
+
+    def __len__(self):
+        return len(self.labels)
+
 def load_data(data_dir):
+    """Loads UIMA CAS JSON data and converts it for BERT token classification."""
+    texts = []
+    annotations = []
+    for filename in os.listdir(data_dir):
+        if filename.endswith(".json"):
+            with open(os.path.join(data_dir, filename), 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            
+            sofa_string = ""
+            for item in data['_referenced_fss']:
+                if item['_type'] == 'uima.cas.Sofa':
+                    sofa_string = item['sofaString']
+                    break
+            
+            texts.append(sofa_string)
+            ents = []
+            for item in data['_referenced_fss']:
+                if item['_type'] == 'custom.Span':
+                    ents.append({'label': item['label'], 'begin': item['begin'], 'end': item['end']})
+            annotations.append(ents)
+    return texts, annotationdef load_data(data_dir):
     """Loads UIMA CAS JSON data, skipping type system definitions."""
     texts = []
     annotations = []
@@ -94,52 +139,7 @@ def load_data(data_dir):
         annotations.append(ents)
         logger.debug(f"Processed {filename}: {len(ents)} entities found.")
 
-    return texts, annotationsimport os
-import torch
-from transformers import BertForTokenClassification, BertTokenizerFast, Trainer, TrainingArguments
-from torch.utils.data import Dataset
-import json
-from sklearn.model_selection import train_test_split
-import logging
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-class AnonymizationDataset(Dataset):
-    def __init__(self, encodings, labels):
-        self.encodings = encodings
-        self.labels = labels
-
-    def __getitem__(self, idx):
-        item = {key: torch.tensor(val[idx]) for key, val in self.encodings.items()}
-        item['labels'] = torch.tensor(self.labels[idx])
-        return item
-
-    def __len__(self):
-        return len(self.labels)
-
-def load_data(data_dir):
-    """Loads UIMA CAS JSON data and converts it for BERT token classification."""
-    texts = []
-    annotations = []
-    for filename in os.listdir(data_dir):
-        if filename.endswith(".json"):
-            with open(os.path.join(data_dir, filename), 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            
-            sofa_string = ""
-            for item in data['_referenced_fss']:
-                if item['_type'] == 'uima.cas.Sofa':
-                    sofa_string = item['sofaString']
-                    break
-            
-            texts.append(sofa_string)
-            ents = []
-            for item in data['_referenced_fss']:
-                if item['_type'] == 'custom.Span':
-                    ents.append({'label': item['label'], 'begin': item['begin'], 'end': item['end']})
-            annotations.append(ents)
-    return texts, annotations
+    return texts, annotationss
 
 def main():
     # --- Configuration ---
