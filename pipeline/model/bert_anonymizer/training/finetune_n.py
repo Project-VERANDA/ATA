@@ -136,9 +136,9 @@ def load_data(data_dir):
 def main():
     # --- Configuration ---
     MODEL_NAME = 'bert-base-german-cased'
-    TRAIN_DIR = 'bert_anonymizer/training/data/train'
-    TEST_DIR = 'bert_anonymizer/training/data/test'
-    OUTPUT_DIR = 'bert_anonymizer/training/bert_model_finetuned'
+    TRAIN_DIR = 'data/train'
+    TEST_DIR = 'data/test'
+    OUTPUT_DIR = 'bert_model_finetuned'
 
     # --- Load and Prepare Data ---
     logger.info("Loading and preparing data...")
