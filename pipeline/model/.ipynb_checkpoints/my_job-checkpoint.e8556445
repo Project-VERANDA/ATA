@@ -1,0 +1,11 @@
+Traceback (most recent call last):
+  File "/home/lufl11/ATA/pipeline/model/spacy_anonymizer/training/finetune.py", line 2, in <module>
+    import spacy
+ModuleNotFoundError: No module named 'spacy'
+srun: error: s-sc-gpu005: task 0: Exited with exit code 1
+srun: Step created for StepId=8556445.1
+Traceback (most recent call last):
+  File "/home/lufl11/ATA/pipeline/model/bert_anonymizer/training/finetune.py", line 2, in <module>
+    import torch
+ModuleNotFoundError: No module named 'torch'
+srun: error: s-sc-gpu005: task 0: Exited with exit code 1
