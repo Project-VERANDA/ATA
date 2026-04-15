@@ -1,0 +1,865 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Speech Anonymizer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #003366 0%, #0066cc 50%, #4da6ff 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 25px 50px rgba(0, 51, 102, 0.2);
+            padding: 40px;
+            max-width: 900px;
+            width: 100%;
+            border: 3px solid #0066cc;
+        }
+
+        h1 {
+            text-align: center;
+            color: #003366;
+            margin-bottom: 10px;
+            font-size: 2.8em;
+            font-weight: 600;
+            text-shadow: 0 2px 4px rgba(0, 51, 102, 0.1);
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #0066cc;
+            margin-bottom: 40px;
+            font-size: 1.2em;
+            font-weight: 500;
+        }
+
+        .section {
+            margin-bottom: 30px;
+            padding: 25px;
+            border-radius: 15px;
+            background: linear-gradient(135deg, #f8fbff 0%, #e6f3ff 100%);
+            border: 2px solid #b3d9ff;
+            box-shadow: 0 4px 8px rgba(0, 51, 102, 0.1);
+        }
+
+        .section h3 {
+            color: #003366;
+            margin-bottom: 20px;
+            font-size: 1.4em;
+            display: flex;
+            align-items: center;
+            font-weight: 600;
+        }
+
+        .section h3:before {
+            content: "🎙️";
+            margin-right: 12px;
+            font-size: 1.3em;
+            background: #0066cc;
+            padding: 8px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 40px;
+            height: 40px;
+        }
+
+        .language-selector {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 20px;
+            padding: 10px;
+            background-color: #e6f3ff;
+            border-radius: 10px;
+            border: 1px solid #b3d9ff;
+        }
+
+        .language-selector label {
+            font-weight: 600;
+            color: #003366;
+        }
+
+        .language-selector select {
+            padding: 8px 12px;
+            border-radius: 8px;
+            border: 2px solid #b3d9ff;
+            background: white;
+            color: #003366;
+            font-size: 15px;
+        }
+
+        .section:nth-child(3) h3:before {
+            content: "📝";
+        }
+
+        .section:nth-child(4) h3:before {
+            content: "🔒";
+        }
+
+        .section:nth-child(5) h3:before {
+            content: "🔊";
+        }
+
+        .button {
+            background: linear-gradient(135deg, #003366 0%, #0066cc 100%);
+            color: white;
+            border: none;
+            padding: 14px 28px;
+            border-radius: 30px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            margin: 5px;
+            box-shadow: 0 4px 12px rgba(0, 51, 102, 0.3);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .button:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 20px rgba(0, 51, 102, 0.4);
+            background: linear-gradient(135deg, #004080 0%, #0080ff 100%);
+        }
+
+        .button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .file-input {
+            margin: 10px 0;
+        }
+
+        .file-input input[type="file"] {
+            display: none;
+        }
+
+        .file-input label {
+            background: linear-gradient(135deg, #f0f8ff 0%, #e6f3ff 100%);
+            border: 3px dashed #0066cc;
+            border-radius: 15px;
+            padding: 25px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: block;
+            color: #003366;
+            font-weight: 500;
+        }
+
+        .file-input label:hover {
+            border-color: #003366;
+            background: linear-gradient(135deg, #e6f3ff 0%, #cce6ff 100%);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 15px rgba(0, 51, 102, 0.2);
+        }
+
+        .controls {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            justify-content: center; /* Center items */
+            flex-wrap: wrap;
+        }
+
+        .separator {
+            display: flex;
+            align-items: center;
+            text-align: center;
+            color: #0066cc;
+            font-weight: 600;
+            margin: 0 10px;
+        }
+
+        .separator::before, .separator::after {
+            content: '';
+            flex: 1;
+            border-bottom: 2px solid #b3d9ff;
+        }
+
+        .separator:not(:empty)::before {
+            margin-right: .5em;
+        }
+
+        .separator:not(:empty)::after {
+            margin-left: .5em;
+        }
+
+        .button-wrapper {
+            text-align: center;
+            margin-top: 20px;
+        }
+
+        .timer {
+            background: linear-gradient(135deg, #003366 0%, #0066cc 100%);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 25px;
+            font-family: monospace;
+            font-size: 18px;
+            font-weight: bold;
+            box-shadow: 0 4px 8px rgba(0, 51, 102, 0.3);
+        }
+
+        .recording {
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0% { 
+                background: linear-gradient(135deg, #003366 0%, #0066cc 100%);
+                transform: scale(1);
+            }
+            50% { 
+                background: linear-gradient(135deg, #cc0000 0%, #ff3333 100%);
+                transform: scale(1.05);
+            }
+            100% { 
+                background: linear-gradient(135deg, #003366 0%, #0066cc 100%);
+                transform: scale(1);
+            }
+        }
+
+        .text-area {
+            width: 100%;
+            min-height: 150px;
+            padding: 20px;
+            border: 2px solid #b3d9ff;
+            border-radius: 15px;
+            font-size: 15px;
+            font-family: inherit;
+            resize: vertical;
+            margin: 15px 0;
+            background: #f8fbff;
+            color: #003366;
+            transition: all 0.3s ease;
+        }
+
+        .text-area:focus {
+            outline: none;
+            border-color: #0066cc;
+            box-shadow: 0 0 10px rgba(0, 102, 204, 0.3);
+            background: white;
+        }
+
+        .anonymization-controls, .tts-controls {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+            margin: 20px 0;
+            flex-wrap: wrap;
+        }
+
+        .level-selector {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+
+        #anonymization-level-radios label {
+            margin-right: 15px; /* Add space between level options */
+        }
+
+        .level-selector label {
+            font-weight: 600;
+            color: #003366;
+            font-size: 16px;
+        }
+
+        .level-selector select {
+            padding: 12px 16px;
+            border: 2px solid #b3d9ff;
+            border-radius: 10px;
+            font-size: 15px;
+            background: white;
+            color: #003366;
+            font-weight: 500;
+            transition: all 0.3s ease;
+        }
+
+        .level-selector select:focus {
+            outline: none;
+            border-color: #0066cc;
+            box-shadow: 0 0 8px rgba(0, 102, 204, 0.3);
+        }
+
+        .status {
+            padding: 18px;
+            border-radius: 15px;
+            margin: 20px 0;
+            font-size: 16px;
+            background: #e6f3ff;
+            border: 2px solid #b3d9ff;
+            color: #003366;
+            display: none; /* Hidden by default */
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 8px rgba(0, 51, 102, 0.1);
+        }
+
+        .status.error {
+            background-color: #ffcccc;
+            border-color: #cc3333;
+            color: #990000;
+        }
+
+        .status.success {
+            background-color: #ccffcc;
+            border-color: #339966;
+            color: #006633;
+        }
+
+        .loader {
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #0066cc;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+            display: none; /* Initially hidden */
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        #tts-container {
+            margin-top: 20px;
+        }
+
+        #audio-player {
+            width: 100%;
+            margin-top: 10px;
+            background: linear-gradient(135deg, #f8fbff 0%, #e6f3ff 100%);
+            border-radius: 50px;
+            box-shadow: 0 4px 12px rgba(0, 51, 102, 0.2);
+            padding: 5px;
+        }
+
+        .icon {
+            font-size: 20px;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Speech Anonymizer</h1>
+        <p class="subtitle">Record, upload, transcribe, and anonymize speech with advanced AI models.</p>
+
+        <div class="loader" id="loader"></div>
+        <div id="status" class="status"></div>
+
+            <div class="section">
+            <h3>Transcription Settings</h3>
+            <div class="language-selector">
+                <label for="transcription-language">Transcription Language:</label>
+                <select id="transcription-language">
+                    <option value="de" selected>German</option>
+                    <option value="en">English</option>
+                </select>
+                </div>
+            <div class="level-selector" style="margin-top: 15px;">
+                <label for="whisper-model-select">Whisper Model:</label>
+                <select id="whisper-model-select">
+                    <!-- Loaded via JS -->
+                </select>
+            </div>
+        </div>
+
+            <div class="section">
+            <h3>Input Audio</h3>
+            <div class="controls">
+                <button id="record-btn" class="button">
+                    <span class="icon" id="record-icon">🎤</span> Start Recording
+                </button>
+                <div id="timer" class="timer">00:00</div>
+                <div class="separator">OR</div>
+                <div class="file-input">
+                    <input type="file" id="file-input" accept="audio/*" />
+                    <label for="file-input" id="upload-label">
+                        <span class="icon">📁</span> Click to Upload Audio
+                    </label>
+                </div>
+            </div>
+            <div id="filename-display" style="margin-top: 10px; color: #003366; font-weight: 500; text-align: center;"></div>
+            <div class="button-wrapper">
+                <button id="transcribe-btn" class="button" disabled>
+                    <span class="icon">▶️</span> Transcribe
+                </button>
+            </div>
+        </div>
+
+        <div class="section">
+            <h3>Transcribed Text</h3>
+            <textarea id="transcribed-text" class="text-area" placeholder="Transcription will appear here..."></textarea>
+            <div class="anonymization-controls">
+                <div class="level-selector" id="privacy-level-selector">
+                    <label for="anonymization-level">Privacy Level:</label>
+                    <div id="anonymization-level-radios">
+                        <input type="radio" id="level-basic" name="anonymization-level" value="basic">
+                        <label for="level-basic">Basic</label>
+                        <input type="radio" id="level-standard" name="anonymization-level" value="standard" checked>
+                        <label for="level-standard">Standard</label>
+                        <input type="radio" id="level-strict" name="anonymization-level" value="strict">
+                        <label for="level-strict">Strict</label>
+                    </div>
+                </div>
+                <div class="level-selector">
+                    <label for="model-select">Models:</label>
+                    <select id="model-select">
+                        <!-- Loaded via JS -->
+                    </select>
+                </div>
+            </div>
+             <button id="anonymize-btn" class="button" disabled>Anonymize Text</button>
+        </div>
+
+        <div class="section">
+            <h3>Anonymized Text</h3>
+            <textarea id="anonymized-text" class="text-area" placeholder="Anonymized text will appear here..." readonly></textarea>
+            <div id="tts-container" class="hidden">
+                 <button id="generate-speech-btn" class="button">Generate Speech</button>
+                <audio id="audio-player" controls class="hidden"></audio>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // --- DOM Elements ---
+            const recordBtn = document.getElementById('record-btn');
+            const recordIcon = document.getElementById('record-icon');
+            const timerDiv = document.getElementById('timer');
+            const fileInput = document.getElementById('file-input');
+            const uploadLabel = document.getElementById('upload-label');
+            const filenameDisplay = document.getElementById('filename-display');
+            const transcribeBtn = document.getElementById('transcribe-btn');
+            const transcribedText = document.getElementById('transcribed-text');
+            const whisperModelSelect = document.getElementById('whisper-model-select');
+            const transcriptionLanguageSelect = document.getElementById('transcription-language');
+            
+            const anonymizeBtn = document.getElementById('anonymize-btn');
+            const anonymizedText = document.getElementById('anonymized-text');
+            const modelSelect = document.getElementById('model-select');
+            const privacyLevelSelector = document.getElementById('privacy-level-selector');
+
+            const ttsContainer = document.getElementById('tts-container');
+            const generateSpeechBtn = document.getElementById('generate-speech-btn');
+            const audioPlayer = document.getElementById('audio-player');
+            const statusDiv = document.getElementById('status');
+            const loader = document.getElementById('loader');
+
+            // --- State Variables ---
+            let mediaRecorder;
+            let audioChunks = [];
+            let timerInterval;
+            let seconds = 0;
+            let isRecording = false;
+            let audioBlob = null;
+            let uploadedFile = null;
+
+            // --- Core Functions ---
+
+            function updateStatus(message, isError = false) {
+                statusDiv.textContent = message;
+                statusDiv.className = `status ${isError ? 'error' : 'success'}`;
+                statusDiv.style.display = 'block';
+                setTimeout(() => {
+                    statusDiv.style.display = 'none';
+                }, 5000);
+            }
+
+            function showLoader(show) {
+                loader.style.display = show ? 'block' : 'none';
+        }
+
+            // --- Recording ---
+            async function toggleRecording() {
+                if (isRecording) {
+                    stopRecording();
+                } else {
+                    await startRecording();
+                }
+            }
+
+            async function startRecording() {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+                
+                mediaRecorder.ondataavailable = event => {
+                    if (event.data.size > 0) {
+                            audioChunks.push(event.data);
+                    }
+                };
+                
+                mediaRecorder.onstop = () => {
+                        audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                        audioChunks = [];
+                        updateUIForTranscription();
+                        stream.getTracks().forEach(track => track.stop()); // Release microphone
+                    };
+
+                    audioBlob = null;
+                    uploadedFile = null;
+                    filenameDisplay.textContent = '';
+                    audioChunks = [];
+                    mediaRecorder.start();
+                    isRecording = true;
+                    recordBtn.classList.add('recording');
+                    recordIcon.textContent = '⏹️';
+                    recordBtn.childNodes[1].nodeValue = " Stop Recording";
+                    
+                    startTimer();
+                } catch (err) {
+                    console.error("Error starting recording:", err);
+                    updateStatus("Microphone access denied or not available. Please check browser permissions.", true);
+                }
+            }
+
+            function stopRecording() {
+                if (mediaRecorder && mediaRecorder.state !== "inactive") {
+                    mediaRecorder.stop();
+                    isRecording = false;
+                    recordBtn.classList.remove('recording');
+                    recordIcon.textContent = '🎤';
+                    recordBtn.childNodes[1].nodeValue = " Start Recording";
+                    stopTimer();
+                }
+            }
+
+            // --- Timer ---
+            function startTimer() {
+                seconds = 0;
+                timerDiv.textContent = '00:00';
+                timerInterval = setInterval(() => {
+                    seconds++;
+                    const minutes = Math.floor(seconds / 60);
+                    const displaySeconds = seconds % 60;
+                    timerDiv.textContent = 
+                        `${String(minutes).padStart(2, '0')}:${String(displaySeconds).padStart(2, '0')}`;
+                }, 1000);
+            }
+
+            function stopTimer() {
+                clearInterval(timerInterval);
+            }
+
+            // --- File Handling ---
+            function handleFileUpload() {
+                const file = fileInput.files[0];
+                if (file) {
+                    audioBlob = null;
+                    uploadedFile = file;
+                    filenameDisplay.textContent = `Selected file: ${file.name}`;
+                    updateUIForTranscription();
+            }
+            }
+
+            function updateUIForTranscription() {
+                if (audioBlob || uploadedFile) {
+                    transcribeBtn.disabled = false;
+                    transcribedText.value = '';
+                    anonymizedText.value = '';
+                    anonymizeBtn.disabled = true;
+                    ttsContainer.classList.add('hidden');
+                }
+            }
+            
+            // --- API Calls ---
+
+            async function transcribe() {
+                if (!audioBlob && !uploadedFile) {
+                    updateStatus("No audio to transcribe. Please record or upload an audio file.", true);
+                return;
+            }
+
+                showLoader(true);
+                transcribeBtn.disabled = true;
+                recordBtn.disabled = true;
+                fileInput.disabled = true;
+                whisperModelSelect.disabled = true;
+                transcriptionLanguageSelect.disabled = true;
+                updateStatus("Transcription in progress...", false);
+            
+            const formData = new FormData();
+                const fileToTranscribe = audioBlob || uploadedFile;
+                const fileName = audioBlob ? 'recording.webm' : uploadedFile.name;
+                
+                formData.append('audio', fileToTranscribe, fileName);
+                
+                // Add selected model size and language
+                const modelSize = whisperModelSelect.value;
+                formData.append('model_size', modelSize);
+                const language = transcriptionLanguageSelect.value;
+                formData.append('language', language);
+
+                try {
+                    const endpoint = audioBlob ? '/transcribe_recording' : '/upload';
+                    const response = await fetch(endpoint, {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                    if (response.ok && result.success) {
+                        transcribedText.value = result.transcription;
+                        anonymizeBtn.disabled = false;
+                        updateStatus("Transcription successful!", false);
+                } else {
+                        throw new Error(result.error || "An unknown error occurred during transcription.");
+                }
+            } catch (error) {
+                    console.error('Transcription error:', error);
+                    updateStatus(`Transcription failed: ${error.message}`, true);
+            } finally {
+                    showLoader(false);
+                    transcribeBtn.disabled = true; // Keep disabled until new file is loaded
+                    recordBtn.disabled = false;
+                    fileInput.disabled = false;
+                    whisperModelSelect.disabled = false;
+                    transcriptionLanguageSelect.disabled = false;
+                    // Reset blobs/files to prevent re-transcription
+                    audioBlob = null;
+                    uploadedFile = null;
+                }
+            }
+
+            async function anonymizeText() {
+                const text = transcribedText.value;
+                if (!text.trim()) {
+                    updateStatus("No text to anonymize.", true);
+                return;
+            }
+            
+                showLoader(true);
+                anonymizeBtn.disabled = true;
+                updateStatus("Anonymization in progress...", false);
+            
+                const selectedModel = modelSelect.value;
+                const selectedLevel = document.querySelector('input[name="anonymization-level"]:checked').value;
+            
+            try {
+                    const response = await fetch('/anonymize', {
+                    method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ 
+                            text: text, 
+                            level: selectedLevel,
+                            model: selectedModel
+                        })
+                });
+                
+                const result = await response.json();
+                
+                    if (response.ok && result.success) {
+                        anonymizedText.value = result.anonymized_text;
+                        updateStatus(`Anonymization successful with ${result.model_used}.`, false);
+                        if (result.tts_available) {
+                            ttsContainer.classList.remove('hidden');
+                            audioPlayer.classList.add('hidden');
+                        }
+                } else {
+                        throw new Error(result.error || "An unknown error occurred during anonymization.");
+                }
+            } catch (error) {
+                    console.error('Anonymization error:', error);
+                    updateStatus(`Anonymization failed: ${error.message}`, true);
+            } finally {
+                    showLoader(false);
+                    anonymizeBtn.disabled = false;
+            }
+            }
+
+            async function generateSpeech() {
+                const text = anonymizedText.value;
+                if (!text.trim()) {
+                    updateStatus("No anonymized text to generate speech from.", true);
+                return;
+            }
+            
+                showLoader(true);
+                generateSpeechBtn.disabled = true;
+                updateStatus("Generating speech...", false);
+
+                const language = transcriptionLanguageSelect.value;
+            
+            try {
+                    const response = await fetch('/generate_speech', {
+                    method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            text: text,
+                            voice_settings: { voice: language }
+                        })
+                });
+                
+                const result = await response.json();
+                
+                    if (response.ok && result.success) {
+                        audioPlayer.src = result.audio_url;
+                        audioPlayer.classList.remove('hidden');
+                        updateStatus("Speech generated successfully!", false);
+                        generateSpeechBtn.disabled = false; // Re-enable the button
+                } else {
+                        throw new Error(result.error || "Failed to generate speech.");
+                }
+            } catch (error) {
+                    console.error('Speech generation error:', error);
+                    updateStatus(`Speech generation failed: ${error.message}`, true);
+                    generateSpeechBtn.disabled = false; // Also re-enable on error
+            } finally {
+                    showLoader(false);
+                }
+            }
+
+            // --- Event Listeners ---
+            recordBtn.addEventListener('click', toggleRecording);
+            fileInput.addEventListener('change', handleFileUpload);
+            transcribeBtn.addEventListener('click', transcribe);
+            anonymizeBtn.addEventListener('click', anonymizeText);
+            generateSpeechBtn.addEventListener('click', generateSpeech);
+            
+            modelSelect.addEventListener('change', () => {
+                const selectedOption = modelSelect.options[modelSelect.selectedIndex];
+                const isLlmSelected = selectedOption.parentElement.label.startsWith('LLM');
+                privacyLevelSelector.style.display = isLlmSelected ? 'flex' : 'none';
+            });
+
+            // --- Initialization ---
+            function initialize() {
+                loadAnonymizationModels();
+                loadTranscriptionModels();
+                checkServerHealth();
+            }
+            
+            async function loadAnonymizationModels() {
+                try {
+                    const response = await fetch('/models');
+                    const data = await response.json();
+                    
+                    modelSelect.innerHTML = ''; // Clear existing options
+
+                    const availableModels = data.available_models;
+                    const localModelsData = availableModels.local_models || {};
+
+                    // Manually add BERT model if it exists at the top level (from older backend versions)
+                    if (availableModels['bert-base-ner'] && !localModelsData['bert-base-ner']) {
+                        localModelsData['bert-base-ner'] = availableModels['bert-base-ner'];
+                    }
+
+                    // Handle Local Models
+                    if (Object.keys(localModelsData).length > 0) {
+                        const localOptgroup = document.createElement('optgroup');
+                        localOptgroup.label = 'Local Models';
+                        for (const key in localModelsData) {
+                            const option = document.createElement('option');
+                            option.value = key;
+                            option.textContent = localModelsData[key];
+                            localOptgroup.appendChild(option);
+                        }
+                        modelSelect.appendChild(localOptgroup);
+                    }
+
+                    // Handle LLM Models from API
+                    const llmOptgroup = document.createElement('optgroup');
+                    llmOptgroup.label = 'LLM Models (API)';
+                    let hasLlmModels = false;
+                    
+                    for (const key in availableModels) {
+                        // Skip keys that are part of local models to avoid duplication
+                        if (key === 'local_models' || key === 'bert-base-ner' || localModelsData[key]) continue;
+
+                        const option = document.createElement('option');
+                        option.value = key;
+                        option.textContent = availableModels[key];
+                        llmOptgroup.appendChild(option);
+                        hasLlmModels = true;
+                    }
+
+                    if (hasLlmModels) {
+                        modelSelect.appendChild(llmOptgroup);
+                    }
+
+                    // Set default model
+                    if (data.default_model) {
+                        modelSelect.value = data.default_model;
+                    }
+                    
+                    // Trigger update of privacy controls based on initial model
+                    updatePrivacyControls();
+                } catch (error) {
+                    console.error('Error loading anonymization models:', error);
+                
+                }
+            }
+
+            async function loadTranscriptionModels() {
+                try {
+                    const response = await fetch('/transcription_models');
+                    const data = await response.json();
+                    whisperModelSelect.innerHTML = '';
+                    for (const [key, value] of data.whisper_models) {
+                        const option = document.createElement('option');
+                        option.value = key;
+                        option.textContent = value;
+                        if (key === data.default_whisper_model) {
+                            option.selected = true;
+                        }
+                        whisperModelSelect.appendChild(option);
+                    }
+                } catch (error) {
+                    console.error('Error loading transcription models:', error);
+                    updateStatus('Error loading transcription models.', true);
+                }
+            }
+
+            async function checkServerHealth() {
+            try {
+                const response = await fetch('/health');
+                    const data = await response.json();
+                    console.log('Server health:', data);
+                    if (!data.chat_ai_configured) {
+                        updateStatus("Warning: Chat AI API key not configured. LLM anonymization will not work.", true);
+                    }
+                } catch (error) {
+                    console.error('Health check failed:', error);
+                    updateStatus("Could not connect to the server.", true);
+            }
+            }
+            
+            initialize();
+        });
+    </script>
+</body>
+</html> 

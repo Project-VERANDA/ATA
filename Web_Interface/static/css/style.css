@@ -1,0 +1,15 @@
+body { font-family: sans-serif; background: #f4f4f9; color: #333; margin: 0; padding: 20px; }
+.container { max-width: 800px; margin: 0 auto; }
+header { text-align: center; margin-bottom: 30px; }
+.card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin-bottom: 20px; }
+h2 { margin-top: 0; color: #2c3e50; }
+button { background: #3498db; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-size: 16px; }
+button:hover { background: #2980b9; }
+button:disabled { background: #bdc3c7; cursor: not-allowed; }
+.status-box { background: #ecf0f1; padding: 15px; border-radius: 4px; margin-bottom: 10px; }
+.progress-bar { height: 10px; background: #ddd; border-radius: 5px; overflow: hidden; margin-top: 10px; }
+.fill { height: 100%; width: 0%; background: #2ecc71; transition: width 0.3s; }
+.list-container { max-height: 300px; overflow-y: auto; }
+.list-item { display: flex; justify-content: space-between; padding: 8px; border-bottom: 1px solid #eee; }
+.message { margin-top: 10px; font-weight: bold; }
+.error-log { color: #e74c3c; background: #fadbd8; padding: 10px; border-radius: 4px; margin-top: 10px; }
