@@ -24,8 +24,19 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Path Definitions
-BASE_PATH_STR = "/mnt/Data_Mount/VERANDA_DataMount/pipeline"
-BASE_PATH = Path(BASE_PATH_STR).resolve()
+SCRIPT_DIR = Path(__file__).resolve().parent
+BASE_PATH = SCRIPT_DIR
+
+# Traverse up until we find a folder named 'MAIN' or hit the root
+while BASE_PATH.name != "MAIN" and BASE_PATH != BASE_PATH.parent:
+    BASE_PATH = BASE_PATH.parent
+
+if BASE_PATH.name != "MAIN":
+    logger.critical(f"Could not locate 'MAIN' folder. Script expects to be run from within .../MAIN/")
+    sys.exit(1)
+
+logger.info(f"Base path detected: {BASE_PATH}")
+
 
 # Derived paths
 VIDEOS_FOLDER = BASE_PATH / "videos"
@@ -47,6 +58,16 @@ BATCH_SIZE = 32
 COMPUTE_TYPE = "float16"
 MIN_SPEAKERS = 2
 MAX_SPEAKERS = 4
+
+# Anonymization Configuration
+ANONYMIZATION_ENABLED = True
+ANONYMIZATION_LEVEL = "standard"  # Options: 'basic', 'standard', 'strict'
+ANONYMIZATION_METHOD = "local_ensemble"  # Options: 'local_bert', 'local_spacy', 'local_ensemble', 'remote_chat_ai'
+
+# Remote Chat AI API Configuration
+CHAT_AI_API_KEY = os.getenv('CHAT_AI_API_KEY', '')
+CHAT_AI_ENDPOINT = os.getenv('CHAT_AI_ENDPOINT', 'https://chat-ai.academiccloud.de/v1')
+DEFAULT_CHAT_AI_MODEL = os.getenv('CHAT_AI_MODEL', 'llama-3.1-8b-instruct')
 
 # Local Model Paths
 WHISPERX_MODEL_PATH = MODEL_FOLDER / "models--Systran--faster-whisper-large-v3"
@@ -292,10 +313,8 @@ def process_audios():
             # Convert list to Pandas DataFrame (Required by whisperx)
             import pandas as pd
             diarize_df = pd.DataFrame(segments_list)
-            
             # Now assign speakers to transcribed segments
             result = whisperx.assign_word_speakers(diarize_df, result)
-
             result["segments"] = merge_consecutive_speaker_segments(result["segments"])
 
             base_name = sanitize_filename(file.stem)
@@ -314,7 +333,6 @@ def process_audios():
                 logger.error(f"I/O error writing transcript: {e}")
 
             del model_a, diarize_output, speaker_diarization, segments_list, diarize_df, result
-
             cleanup_gpu_resources()
 
         except Exception as e:
@@ -325,34 +343,347 @@ def process_audios():
 
     del model, diarize_model
     cleanup_gpu_resources()
-    logger.info("All processing complete.")
+    logger.info("Transcription phase complete. Run 'process_anonymization()' next to anonymize the transcript(s).")
 
-def Anonymize_Transcript
-    if ANONYMIZATION_ENABLED:
-     logger.info(f"Anonymizing transcript: {base_name}")
-        anonymized_text, status = anonymize_transcript(transcript_text)
-                
-        if anonymized_text:                   
-            anon_transcript_file = ANON_TRANSCRIPTS_FOLDER / f"{base_name}_anon.txt"
-                try:
-                    with open(anon_transcript_file, "w", encoding="utf-8") as f:
-                        f.write(anonymized_text)
-                    logger.info(f"Anonymized transcript saved: {anon_transcript_file}")
-                except PermissionError:
-                        logger.error(f"Permission denied writing to {anon_transcript_file}")
-                except IOError as e:
-                        logger.error(f"I/O error writing anonymized transcript: {e}")
+# --- Anonymization Engine Class ---
+
+class AnonymizationEngine:
+    """
+    Encapsulates all logic related to text anonymization.
+    Handles local models (BERT, spaCy, Ensemble) and remote API calls.
+    """
+    
+    def __init__(self, method="local_ensemble", level="standard", api_key="", endpoint="", default_model=""):
+        self.method = method
+        self.level = level
+        self.api_key = api_key or CHAT_AI_API_KEY
+        self.endpoint = endpoint or CHAT_AI_ENDPOINT
+        self.default_model = default_model or DEFAULT_CHAT_AI_MODEL
+        self.local_availability = self._check_local_availability()
+        
+        if ANONYMIZATION_ENABLED:
+            logger.info(f"AnonymizationEngine initialized: Method={self.method}, Level={self.level}")
+            self._validate_configuration()
+
+    def _check_local_availability(self):
+        """Checks which local anonymizers are available."""
+        availability = {'bert': False, 'spacy': False, 'ensemble': False}
+        
+        try:
+            from bert_anonymizer.anonymizer import anonymize_text_with_bert
+            availability['bert'] = True
+            logger.debug("Local BERT anonymizer available")
+        except (ImportError, OSError) as e:
+            logger.debug(f"BERT Anonymizer not available: {e}")
+        
+        try:
+            from spacy_anonymizer.anonymizer import anonymize_text_with_spacy, is_spacy_model_available
+            availability['spacy'] = is_spacy_model_available()
+            if availability['spacy']:
+                logger.debug("Local spaCy anonymizer available")
+        except (ImportError, OSError) as e:
+            logger.debug(f"spaCy Anonymizer not available: {e}")
+        
+        availability['ensemble'] = availability['bert'] and availability['spacy']
+        if availability['ensemble']:
+            logger.debug("Local Ensemble anonymizer available")
+            
+        return availability
+
+    def _validate_configuration(self):
+        """Validates that the chosen method is actually available."""
+        if self.method == 'local_ensemble' and not self.local_availability['ensemble']:
+            logger.warning("Method 'local_ensemble' requested but unavailable. Falling back to 'remote_chat_ai' if key exists.")
+            if self.api_key:
+                self.method = 'remote_chat_ai'
             else:
-                logger.warning(f"Anonymization failed for {base_name}: {status}")
-        else:
-            logger.info("Anonymization disabled, skipping...")
+                logger.error("No fallback available. Anonymization will be skipped.")
+                self.method = None
+        elif self.method == 'local_bert' and not self.local_availability['bert']:
+            logger.warning("Method 'local_bert' requested but unavailable.")
+            self.method = None
+        elif self.method == 'local_spacy' and not self.local_availability['spacy']:
+            logger.warning("Method 'local_spacy' requested but unavailable.")
+            self.method = None
+        elif self.method == 'remote_chat_ai' and not self.api_key:
+            logger.warning("Method 'remote_chat_ai' requested but no API key configured.")
+            self.method = None
+
+    def anonymize(self, text):
+        """
+        Main entry point for anonymization.
+        Routes to the appropriate handler based on configuration.
+        
+        Returns:
+            tuple: (anonymized_text, success_status, message)
+        """
+        if not self.method:
+            return None, False, "Anonymization method not configured or unavailable."
+
+        logger.info(f"Running anonymization via {self.method}...")
+
+        try:
+            if self.method == 'local_ensemble':
+                return self._run_local_ensemble(text)
+            elif self.method == 'local_bert':
+                return self._run_local_bert(text)
+            elif self.method == 'local_spacy':
+                return self._run_local_spacy(text)
+            elif self.method == 'remote_chat_ai':
+                return self._run_remote_llm(text)
+            else:
+                return None, False, f"Unknown method: {self.method}"
+        except Exception as e:
+            logger.error(f"Anonymization failed unexpectedly: {e}")
+            return None, False, str(e)
+
+    def _run_local_ensemble(self, text):
+        try:
+            from ensemble_anonymizer.anonymizer import anonymize_text_with_ensemble
+            result = anonymize_text_with_ensemble(text)
+            return result, True, "Success"
+        except Exception as e:
+            logger.error(f"Ensemble error: {e}")
+            return None, False, f"Ensemble error: {e}"
+
+    def _run_local_bert(self, text):
+        try:
+            from bert_anonymizer.anonymizer import anonymize_text_with_bert
+            result, _ = anonymize_text_with_bert(text)
+            return result, True, "Success"
+        except Exception as e:
+            logger.error(f"BERT error: {e}")
+            return None, False, f"BERT error: {e}"
+
+    def _run_local_spacy(self, text):
+        try:
+            from spacy_anonymizer.anonymizer import anonymize_text_with_spacy
+            result, _ = anonymize_text_with_spacy(text)
+            return result, True, "Success"
+        except Exception as e:
+            logger.error(f"spaCy error: {e}")
+            return None, False, f"spaCy error: {e}"
+
+    def _run_remote_llm(self, text):
+        import requests
+        
+        prompts = {
+            'basic': """
+            Anonymize the following text by replacing only the most obvious personally identifiable information (PII) using these specific labels:
+            - Patient names with [NAME_PATIENT]
+            - Doctor names with [NAME_DOCTOR]
+            - Phone numbers with [CONTACT_PHONE]
+            - Email addresses with [CONTACT_EMAIL]
+            - Street addresses with [LOCATION_STREET]
+            - Cities with [LOCATION_CITY]
+            
+            CRITICAL INSTRUCTIONS: 
+            - Do NOT anonymize or modify speaker identification tags like SPEAKER_00, SPEAKER_01, etc.
+            - Do NOT translate any text. Keep ALL text in its original language.
+            - Return ONLY the anonymized text.
+            """,
+            'standard': """
+            Anonymize the following text by replacing personally identifiable information (PII) using these specific labels:
+            - Patient names with [NAME_PATIENT]
+            - Doctor names with [NAME_DOCTOR]
+            - Relative names with [NAME_RELATIVE]
+            - Other names with [NAME_OTHER]
+            - Professions with [PROFESSION]
+            - Phone numbers with [CONTACT_PHONE]
+            - Email addresses with [CONTACT_EMAIL]
+            - Fax numbers with [CONTACT_FAX]
+            - Street addresses with [LOCATION_STREET]
+            - Cities with [LOCATION_CITY]
+            - ZIP codes with [LOCATION_ZIP]
+            - Hospitals with [LOCATION_HOSPITAL]
+            - Organizations with [LOCATION_ORGANISATION]
+            - Dates with [DATE]
+            - Ages with [AGE]
+            - ID numbers with [ID]
+            
+            CRITICAL INSTRUCTIONS: 
+            - Do NOT anonymize or modify speaker identification tags like SPEAKER_00, SPEAKER_01, etc.
+            - Do NOT translate any text. Keep ALL text in its original language.
+            - Return ONLY the anonymized text.
+            """,
+            'strict': """
+            Thoroughly anonymize the following text by replacing all personally identifiable information (PII) using these specific labels:
+            - Patient names with [NAME_PATIENT]
+            - Doctor names with [NAME_DOCTOR]
+            - Relative names with [NAME_RELATIVE]
+            - External names with [NAME_EXT]
+            - Usernames with [NAME_USERNAME]
+            - Other names with [NAME_OTHER]
+            - Titles with [NAME_TITLE]
+            - Professions with [PROFESSION]
+            - Dates with [DATE]
+            - Ages with [AGE]
+            - Street addresses with [LOCATION_STREET]
+            - Cities with [LOCATION_CITY]
+            - ZIP codes with [LOCATION_ZIP]
+            - Countries with [LOCATION_COUNTRY]
+            - States with [LOCATION_STATE]
+            - Hospitals with [LOCATION_HOSPITAL]
+            - Organizations with [LOCATION_ORGANISATION]
+            - Other locations with [LOCATION_OTHER]
+            - ID numbers with [ID]
+            - Phone numbers with [CONTACT_PHONE]
+            - Email addresses with [CONTACT_EMAIL]
+            - Fax numbers with [CONTACT_FAX]
+            - URLs with [CONTACT_URL]
+            - Other contact information with [CONTACT_OTHER]
+            
+            CRITICAL INSTRUCTIONS: 
+            - Do NOT anonymize or modify speaker identification tags like SPEAKER_00, SPEAKER_01, etc.
+            - Do NOT translate any text. Keep ALL text in its original language.
+            - Return ONLY the anonymized text.
+            """
+        }
+        
+        prompt = prompts.get(self.level, prompts['standard'])
+        
+        headers = {
+            'Authorization': f'Bearer {self.api_key}',
+            'Content-Type': 'application/json'
+        }
+        
+        payload = {
+            "model": self.default_model,
+            "messages": [
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": f"Text to anonymize:\n\n{text}"}
+            ],
+            "max_tokens": 8000,
+            "temperature": 0.1
+        }
+        
+        max_retries = 3
+        timeout = 360
+        
+        for attempt in range(max_retries):
+            try:
+                response = requests.post(
+                    f"{self.endpoint}/chat/completions",
+                    headers=headers,
+                    json=payload,
+                    timeout=timeout
+                )
+                break
+            except requests.exceptions.Timeout:
+                if attempt < max_retries - 1:
+                    logger.warning(f"Request timeout on attempt {attempt + 1}, retrying...")
+                    time.sleep(2)
+                    continue
+                else:
+                    return None, False, "Timeout after retries"
+            except requests.exceptions.RequestException as e:
+                return None, False, f"Connection error: {str(e)}"
+        
+        if response.status_code != 200:
+            return None, False, f"API error: {response.status_code}"
+        
+        response_data = response.json()
+        anonymized_text = response_data['choices'][0]['message']['content'].strip()
+        
+        # Remove any <thought> tags
+        anonymized_text = re.sub(r'<thought>.*?</thought>', '', anonymized_text, flags=re.DOTALL).strip()
+        
+        return anonymized_text, True, "Success"
+
+    def save_anonymized_file(self, base_name, anonymized_text):
+        """Saves the anonymized text to the 'annonym' folder."""
+        if not anonymized_text:
+            logger.warning("No text to save.")
+            return False
+            
+        output_filename = f"{base_name}_anon.txt"
+        output_path = ANONYM_OUTPUT_DIR / output_filename
+        
+        try:
+            with open(output_path, "w", encoding="utf-8") as f:
+                f.write(anonymized_text)
+            logger.info(f"Anonymized transcript saved to: {output_path}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to save anonymized file: {e}")
+            return False
+
+# --- Step 3: Anonymize Existing Transcripts ---
+
+def process_anonymization():
+    """
+    Reads raw transcripts from the 'transcripts' folder, anonymizes them,
+    and saves the results to the 'annonym' folder.
+    This step is independent of audio processing.
+    """
+    if not TRANSCRIPTS_FOLDER.exists():
+        logger.warning(f"No 'transcripts' folder found at {TRANSCRIPTS_FOLDER}. Skipping anonymization.")
+        return
+
+    logger.info(f"Found 'transcripts' folder at {TRANSCRIPTS_FOLDER}. Starting anonymization process...")
+
+    # Initialize Anonymization Engine
+    if not ANONYMIZATION_ENABLED:
+        logger.info("Anonymization is disabled in configuration.")
+        return
+
+    anonymizer = AnonymizationEngine(
+        method=ANONYMIZATION_METHOD,
+        level=ANONYMIZATION_LEVEL,
+        api_key=CHAT_AI_API_KEY,
+        endpoint=CHAT_AI_ENDPOINT,
+        default_model=DEFAULT_CHAT_AI_MODEL
+    )
+
+    if not anonymizer.method:
+        logger.error("Anonymization engine failed to initialize a valid method. Aborting.")
+        return
+
+    processed_count = 0
+    failed_count = 0
+
+    for file in TRANSCRIPTS_FOLDER.iterdir():
+        if not file.is_file() or not file.suffix.lower() == ".txt":
+            continue
+        
+        # Skip files that are already anonymized (optional safety check)
+        if "_anon" in file.name:
+            logger.debug(f"Skipping already anonymized file: {file.name}")
+            continue
+
+        base_name = file.stem
+        logger.info(f"Processing transcript: {file.name}")
+
+        try:
+            with open(file, "r", encoding="utf-8") as f:
+                transcript_text = f.read()
+
+            if not transcript_text.strip():
+                logger.warning(f"Transcript {file.name} is empty. Skipping.")
+                continue
+
+            anonymized_text, success, msg = anonymizer.anonymize(transcript_text)
+            
+            if success and anonymized_text:
+                anonymizer.save_anonymized_file(base_name, anonymized_text)
+                processed_count += 1
+            else:
+                logger.warning(f"Anonymization failed for {base_name}: {msg}")
+                failed_count += 1
+
+        except Exception as e:
+            logger.error(f"Error processing transcript {file.name}: {e}")
+            failed_count += 1
+
+    logger.info(f"Anonymization phase complete. Processed: {processed_count}, Failed: {failed_count}")
 
 # --- Main Execution ---
 
 if __name__ == "__main__":
-    logger.info("Starting VERANDA Pipeline (Offline Mode - Fixed Diarization)...")
+    logger.info("Starting Audio Anonymizer full pipeline...")
     
     process_videos()
     process_audios()
+    process_anonymization()
     
     logger.info("Pipeline finished.")
