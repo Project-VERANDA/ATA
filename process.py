@@ -71,7 +71,7 @@ DEFAULT_CHAT_AI_MODEL = os.getenv('CHAT_AI_MODEL', 'llama-3.1-8b-instruct')
 
 # Local Model Paths
 WHISPERX_MODEL_PATH = MODEL_FOLDER / "models--Systran--faster-whisper-large-v3"
-DIARIZATION_MODEL_PATH = MODEL_FOLDER / "pyannote-SpeakerDiarization"
+DIARIZATION_MODEL_PATH = MODEL_FOLDER / "models--pyannote--speaker-diarization-community-1"
 
 # --- Helper Functions ---
 
@@ -150,15 +150,17 @@ def verify_diarization_model(model_path):
         return False
     
     config_files = list(path.glob("config.*"))
+    pyannote_yaml = path / "pyannote.yaml"
     if not config_files:
-        logger.error(f"Diarization model missing config file")
+        logger.error(f"Diarization model missing config files (config.* or pyannote.yaml)")
         return False
     
     required_subdirs = ['embedding', 'plda', 'segmentation']
     missing_subdirs = [d for d in required_subdirs if not (path / d).exists()]
     
     if missing_subdirs:
-        logger.warning(f"Diarization model missing subdirectories: {missing_subdirs}")
+        logger.warning(f"Diarization model missing subdirectories: {missing_subdirs}"
+            f"This might cause loading failures if the model structure is non-standard.")
     
     logger.info(f"Diarization model verified at: {model_path}")
     return True
@@ -257,11 +259,12 @@ def process_audios():
 
     # Load Diarization Pipeline from local model
     try:
-        logger.info("Loading Diarization Pipeline from local model...")
+        logger.info(f"Loading Diarization Pipeline from local model: {DIARIZATION_MODEL_PATH}")
         from pyannote.audio import Pipeline
         
         diarize_pipeline = Pipeline.from_pretrained(
-            str(DIARIZATION_MODEL_PATH)
+            str(DIARIZATION_MODEL_PATH),
+            local_files_only=True
         )
         
         diarize_model = diarize_pipeline
@@ -269,7 +272,8 @@ def process_audios():
         
     except Exception as e:
         logger.critical(f"Failed to load local Diarization Pipeline: {e}")
-        del model
+        if 'model' in locals():
+            del model
         cleanup_gpu_resources()
         return
 
