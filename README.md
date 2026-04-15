@@ -15,7 +15,7 @@ Speaker diarization via Pyannote.audio
 
 To run the transcription pipeline you'll need Python 3.10. and Anaconda.
 
-ATA_Setup.sh is a bash script that will install all the relevant files EXCEPT for the required models.
+ATA_Setup.sh is a bash script that will install all the relevant files EXCEPT for the required models. Run the setup by typing into your command line: ./ATA_Setup.sh
 
 This script requires models--Systran--faster-whisper-large-v3 and pyannote-SpeakerDiarization (https://huggingface.co/pyannote/speaker-diarization) to be downloaded to the pipeline/model/ folder. These must be downloaded separately from Huggingface after accepting the pre-requisite agreements and providing the requested information.
 
@@ -23,7 +23,8 @@ It may not be necessary to install the whisper-large-v3 file to the models folde
 
 
 # Running the script
-Place the script into a folder along with the subfolders 'audios' (for mp3) and/or 'videos' (for mp4) and add your media to the respective folder.
 
-Open the script and update all fields marked with *** and save your changes. 
-Run the script. 
+Open the pipeline script and update all fields marked with *** and save your changes. 
+Run the script. In your command-line, type: python pipeline.py 
+
+
