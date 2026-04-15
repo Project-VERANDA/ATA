@@ -68,6 +68,7 @@ Run the script. In your command-line, type: python process.py
 * [ ] Add arguments for a debug running of the pipeline.
 * [ ] Add text to speech for the output transcripts.
 * [x] Switch the diarization to speaker-diarization-community-1 from the older diarization model.
+* [ ] Automate the downloading of WhisperX models.
 
 # Future additions
 
