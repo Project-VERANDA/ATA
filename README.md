@@ -39,6 +39,7 @@ Run the script. In your command-line, type: python process.py
 * Add automatic cleanup of the input video/audio folders. 
 * Add arguments for a debug running of the pipeline.
 * Add text to speech for the output transcripts.
+* Switch the diarization to speaker-diarization-community-1 from the older diarization model.
 
 # Future additions
 
