@@ -23,12 +23,14 @@ class AnonymizationDataset(Dataset):
         return len(self.labels)
 
 def load_data(data_dir):
-
-    """Loads UIMA CAS JSON data, skipping type system definitions."""
+    """Loads UIMA CAS JSON data with aggressive debugging."""
     texts = []
     annotations = []
     
     logger.info(f"Scanning directory: {data_dir}")
+    
+    files_processed = 0
+    files_skipped = 0
     
     for filename in os.listdir(data_dir):
         if not filename.endswith(".json"):
@@ -42,18 +44,28 @@ def load_data(data_dir):
             logger.warning(f"Skipping invalid JSON: {filename}")
             continue
 
+        # DEBUG: Print keys of the first file to identify structure
+        if files_processed == 0 and files_skipped == 0:
+            logger.warning(f"=== DEBUG: Keys in {filename} ===")
+            logger.warning(f"{list(data.keys())}")
+            # Check if it's a type system
+            if isinstance(data, dict):
+                logger.warning(f"Top-level keys: {list(data.keys())}")
+                if '%TYPES' in data:
+                    logger.warning("This looks like a TYPE SYSTEM file.")
+                else:
+                    logger.warning("This looks like a DATA file.")
+
         # 1. Skip Type System Definitions
-        # These typically start with %TYPES or define types rather than instances
         if isinstance(data, dict) and ('%TYPES' in data or '%NAME' in data):
             logger.debug(f"Skipping type system file: {filename}")
+            files_skipped += 1
             continue
 
         # 2. Extract Text (Sofa String)
         sofa_string = ""
-        # Try common keys for the text content
-        candidates = ['sofaString', 'text', 'sofaString', 'cas']
+        candidates = ['sofaString', 'text', 'sofaString']
         
-        # Check top level
         for key in candidates:
             if key in data:
                 val = data[key]
@@ -64,14 +76,13 @@ def load_data(data_dir):
                     sofa_string = val['sofaString']
                     break
         
-        # If still empty, maybe it's nested differently? 
-        # Some WebAnno exports put text in 'sofa' -> 'sofaString'
         if not sofa_string and 'sofa' in data:
             if isinstance(data['sofa'], dict):
                 sofa_string = data['sofa'].get('sofaString', '')
         
         if not sofa_string:
             logger.warning(f"Could not find text in {filename}. Skipping.")
+            files_skipped += 1
             continue
 
         texts.append(sofa_string)
@@ -79,10 +90,8 @@ def load_data(data_dir):
         # 3. Extract Annotations
         ents = []
         fs_list = []
-        
-        # Try to find the list of features/annotations
-        # Common keys: 'fsArray', 'annotations', '_referenced_fss' (your original guess)
-        annotation_keys = ['fsArray', 'annotations', '_referenced_fss', 'features']
+        # Try common keys. If none work, we will see the debug output above.
+        annotation_keys = ['fsArray', 'annotations', '_referenced_fss', 'features', 'array']
         
         found_key = None
         for key in annotation_keys:
@@ -92,7 +101,6 @@ def load_data(data_dir):
                     fs_list = val
                     found_key = key
                     break
-            # Check nested under 'cas'
             if 'cas' in data and key in data['cas']:
                 val = data['cas'][key]
                 if isinstance(val, list):
@@ -101,11 +109,10 @@ def load_data(data_dir):
                     break
         
         if not fs_list:
-            logger.warning(f"No annotation list found in {filename} (tried keys: {annotation_keys}). Skipping.")
-            annotations.append([])
+            logger.warning(f"No annotation list found in {filename}. Tried keys: {annotation_keys}. Skipping.")
+            files_skipped += 1
             continue
 
-        # Filter for 'custom.Span'
         for item in fs_list:
             if not isinstance(item, dict):
                 continue
@@ -117,8 +124,13 @@ def load_data(data_dir):
                 })
         
         annotations.append(ents)
+        files_processed += 1
         logger.debug(f"Processed {filename}: {len(ents)} entities found.")
 
+    logger.info(f"Data Loading Summary: {files_processed} files processed, {files_skipped} skipped.")
+    if not texts:
+        logger.error("CRITICAL: No data loaded! Check the debug output above.")
+        
     return texts, annotations
 
 def main():
