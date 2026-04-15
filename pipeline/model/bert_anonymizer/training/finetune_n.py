@@ -119,7 +119,7 @@ def load_data(data_dir):
         annotations.append(ents)
         logger.debug(f"Processed {filename}: {len(ents)} entities found.")
 
-    return texts, annotationss
+    return texts, annotations
 
 def main():
     # --- Configuration ---
