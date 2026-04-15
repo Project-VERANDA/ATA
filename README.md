@@ -30,16 +30,16 @@ Run the script. In your command-line, type: python process.py
 
 # Pending updates
 
-* Re-adding the anonymization process.
+* [ ] Re-adding the anonymization process.
     * This is pending the addition of anonymization models.
-* Adding the models to the Github Repo.
-* Add a web interface.
-* Add a recording button to the web interface for demos.
-* Add batch transcripting via selected folder.
-* Add automatic cleanup of the input video/audio folders. 
-* Add arguments for a debug running of the pipeline.
-* Add text to speech for the output transcripts.
-* Switch the diarization to speaker-diarization-community-1 from the older diarization model.
+* [ ] Adding the models to the Github Repo.
+* [ ] Add a web interface.
+* [ ] Add a recording button to the web interface for demos.
+* [ ] Add batch transcripting via selected folder.
+* [ ] Add automatic cleanup of the input video/audio folders. 
+* [ ] Add arguments for a debug running of the pipeline.
+* [ ] Add text to speech for the output transcripts.
+* [x] Switch the diarization to speaker-diarization-community-1 from the older diarization model.
 
 # Future additions
 
