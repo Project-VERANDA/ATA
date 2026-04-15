@@ -33,6 +33,20 @@ huggingface-cli download pyannote/speaker-diarization-community-1 \
 >   --local-dir-use-symlinks false
 ```
 
+Download all the WhisperX models with the following command, which can be copy/pasted into the command line when in the pipeline/model/ folder.
+```for size in tiny base small medium large-v2 large-v3; do
+  echo "Downloading faster-whisper-$size..."
+  huggingface-cli download Systran/faster-whisper-$size \
+    --local-dir "models--Systran--faster-whisper-$size" \
+    --local-dir-use-symlinks false
+done```
+
+Alternatively, use only the large-v3 model.
+
+```huggingface-cli download Systran/faster-whisper-large-v3 \
+  --local-dir models--Systran--faster-whisper-large-v3 \
+  --local-dir-use-symlinks false```
+
 It may not be necessary to install the whisper-large-v3 file to the models folder. This should be tested.
 
 
