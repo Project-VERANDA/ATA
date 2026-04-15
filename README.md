@@ -17,9 +17,23 @@ To run the transcription pipeline you'll need Python 3.10. and Anaconda.
 
 ATA_Setup.sh is a bash script that will install all the relevant files EXCEPT for the required models. Run the setup by typing into your command line: ./ATA_Setup.sh
 
-This script requires models--Systran--faster-whisper-large-v3 and pyannote-SpeakerDiarization (https://huggingface.co/pyannote/speaker-diarization) to be downloaded to the pipeline/model/ folder. These must be downloaded separately from Huggingface after accepting the pre-requisite agreements and providing the requested information.
+This script requires models--Systran--faster-whisper-large-v3 and the pyannote/speaker-diarization-community-1 model (https://huggingface.co/pyannote/speaker-diarization-community-1) to be downloaded to the pipeline/model/ folder. These must be downloaded separately from Huggingface after accepting the pre-requisite agreements and providing the requested information.
 
-It may not be necessary to install the whisper-large-v3 file to the models folder, as the bash install script. This should be tested.
+Download the community-1 model with the following guide:
+
+First, authenticate to Huggingface. You will need a Huggingface acccount first, and then create an access token (which you can get from https://huggingface.co/settings/tokens after logging in).
+
+```huggingface-cli login```
+Then paste your access token.
+
+If your authentication functions correctly, navigate to the MAIN/pipeline/model/ folder and downlooad the diarization model with the following command:
+```
+huggingface-cli download pyannote/speaker-diarization-community-1 \
+>   --local-dir models--pyannote--speaker-diarization-community-1 \
+>   --local-dir-use-symlinks false
+```
+
+It may not be necessary to install the whisper-large-v3 file to the models folder. This should be tested.
 
 
 # Running the script
