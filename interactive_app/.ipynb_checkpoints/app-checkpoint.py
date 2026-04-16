@@ -960,5 +960,5 @@ if __name__ == '__main__':
             app.run(debug=True, host='0.0.0.0', port=5001)
     else:
         logger.info("Starting server with HTTP")
-        logger.info("🌐 Access the app at: http://localhost:5001")
-        app.run(debug=True, host='0.0.0.0', port=5001) 
+        logger.info("Access the app at: http://localhost:80
+        app.run(debug=True, host='0.0.0.0', port=80) 
