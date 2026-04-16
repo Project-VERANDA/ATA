@@ -145,7 +145,7 @@ def main():
         num_train_epochs=EPOCHS,
         eval_strategy="epoch",        # <--- NEW NAME (evaluation_strategy -> eval_strategy)
         save_strategy="epoch",
-        learning_rate=2e-5,
+        learning_rate=5e-5,
         warmup_ratio=0.1,
         lr_scheduler_type="linear",
         weight_decay=0.01,

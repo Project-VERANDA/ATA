@@ -24,7 +24,7 @@ BASE_MODEL = "domischwimmbeck/bert-base-german-cased-fine-tuned-ner"       # or 
 #BASE_MODEL = 'deepset/gelectra-base'
 OUT_DIR  = '/mnt/Data_Mount/VERANDA_DataMount/Experimental/MAIN/ModelTraining/bert_model/finetuned_model'
 BATCH = 4
-EPOCHS = 4
+EPOCHS = 8
 # ---------------------------------------------------------------------------
 
 import json, os, random, itertools, re
