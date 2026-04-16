@@ -48,9 +48,14 @@ def load_data(data_dir):
 def main():
     # --- Configuration ---
     MODEL_NAME = 'bert-base-german-cased'
-    TRAIN_DIR = 'bert_anonymizer/training/data/train'
-    TEST_DIR = 'bert_anonymizer/training/data/test'
-    OUTPUT_DIR = 'bert_anonymizer/training/bert_model_finetuned'
+    
+    # Get the directory where this script is located
+    SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+    
+    # Define paths relative to the script
+    TRAIN_DIR = os.path.join(SCRIPT_DIR, 'data', 'train')
+    TEST_DIR = os.path.join(SCRIPT_DIR, 'data', 'test')
+    OUTPUT_DIR = os.path.join(SCRIPT_DIR, 'bert_model_finetuned'
 
     # --- Load and Prepare Data ---
     logger.info("Loading and preparing data...")
