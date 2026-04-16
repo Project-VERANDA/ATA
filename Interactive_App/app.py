@@ -945,18 +945,18 @@ if __name__ == '__main__':
             cert_file, key_file = create_self_signed_cert()
             if cert_file and key_file:
                 logger.info("Starting server with HTTPS (self-signed certificate)")
-                logger.info("You may need to accept the security warning in your browser")
-                logger.info("Access the app at: https://localhost:5001")
+                logger.info(" You may need to accept the security warning in your browser")
+                logger.info(" Access the app at: https://localhost:5001")
                 app.run(debug=True, host='0.0.0.0', port=5001, ssl_context=(cert_file, key_file))
             else:
                 logger.info("Starting server with HTTPS (ad-hoc certificate)")
-                logger.info("You may need to accept the security warning in your browser")
+                logger.info(" You may need to accept the security warning in your browser")
                 logger.info("Access the app at: https://localhost:5001")
                 app.run(debug=True, host='0.0.0.0', port=5001, ssl_context='adhoc')
         except Exception as e:
             logger.error(f"Failed to start HTTPS server: {e}")
             logger.info("Falling back to HTTP (microphone may not work)")
-            logger.info("Access the app at: http://localhost:5001")
+            logger.info(" Access the app at: http://localhost:5001")
             app.run(debug=True, host='0.0.0.0', port=5001)
     else:
         logger.info("Starting server with HTTP")
