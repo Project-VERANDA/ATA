@@ -17,12 +17,12 @@ OUT_DIR/
 """
 
 # --- CONFIG -----------------------------------------------------------------
-DATA_DIR = '/Users/deryaerman/Desktop/School/Uni/Text-Anonymiser Project/Audio-Transcript-Anonymizer-TUB-AP/finetune/data/data(new split)'        # ..../train  ..../dev  ..../test
+DATA_DIR = '/mnt/Data_Mount/VERANDA_DataMount/Experimental/MAIN/ModelTraining/bert_anonymizer/training/data'        # ..../train  ..../dev  ..../test
 BASE_MODEL = "domischwimmbeck/bert-base-german-cased-fine-tuned-ner"       # or domischwimmbeck/...
 #BASE_MODEL = "Davlan/distilbert-base-multilingual-cased-ner-hrl"
 #BASE_MODEL = '/Users/deryaerman/Desktop/School/Uni/Text-Anonymiser Project/Audio-Transcript-Anonymizer-TUB-AP/finetune/finetuned_model/finetuned-bert-german-pii'  # or any other model from HuggingFace
 #BASE_MODEL = 'deepset/gelectra-base'
-OUT_DIR  = '/Users/deryaerman/Desktop/School/Uni/Text-Anonymiser Project/Audio-Transcript-Anonymizer-TUB-AP/finetune/finetuned_model'
+OUT_DIR  = '/mnt/Data_Mount/VERANDA_DataMount/Experimental/MAIN/ModelTraining/bert_model/finetuned_model'
 BATCH = 4
 EPOCHS = 4
 # ---------------------------------------------------------------------------
@@ -127,6 +127,10 @@ for split in ("train", "test"):
 datasets = DatasetDict(ds_dict)
 print(datasets)
 
+# ---------- VALIDATE DATASET IS NOT EMPTY
+if len(datasets) == 0 or (len(datasets.get('train', [])) == 0 and len(datasets.get('test', [])) == 0):
+    raise ValueError("CRITICAL: Dataset is empty. Check DATA_DIR path and file permissions.")
+
 # ---------- 2  Build label-id maps -----------------------------------------
 all_tags = set()
 for split in datasets:                       # train  +  validation (+ test)
@@ -180,7 +184,7 @@ args = TrainingArguments(
     per_device_eval_batch_size=BATCH,
     gradient_accumulation_steps=4,
     num_train_epochs=EPOCHS,
-    evaluation_strategy="epoch",
+    eval_strategy="epoch",
     save_strategy="epoch",
     learning_rate=2e-5,
     warmup_ratio=0.1,      # 10% of total steps used for linear warmup
@@ -212,7 +216,7 @@ trainer = Trainer(
     train_dataset=tokenised_ds["train"],
     eval_dataset=tokenised_ds["test"],
     data_collator=collator,
-    tokenizer=tokenizer,
+    #tokenizer=tokenizer,
     compute_metrics=compute_metrics,
 )
 
