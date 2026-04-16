@@ -2,6 +2,5 @@ pipeline/model/models--Systran--faster-whisper-large-v2/*
 pipeline/model/models--Systran--faster-whisper-large-v3/*
 pipeline/model/models--pyannote--speaker-diarization-community-1/*
 pipeline/model/pyannote-SpeakerDiarization/
-.GitCreateDir
-!pipeline/model/.GithubCreateDir
+!pipeline/model/*/.GithubCreateDir
 pipeline_Test.py
