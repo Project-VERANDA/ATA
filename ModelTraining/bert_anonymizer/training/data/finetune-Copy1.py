@@ -216,7 +216,7 @@ trainer = Trainer(
     train_dataset=tokenised_ds["train"],
     eval_dataset=tokenised_ds["test"],
     data_collator=collator,
-    tokenizer=tokenizer,
+    #tokenizer=tokenizer,
     compute_metrics=compute_metrics,
 )
 
