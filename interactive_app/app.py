@@ -7,10 +7,9 @@ import subprocess
 from collections import OrderedDict
 import logging
 from pathlib import Path
-import ipaddress  # Moved to top
-from datetime import datetime, timezone # Fixed import
+import ipaddress
+from datetime import datetime, timezone, timedelta
 
-# Simplified imports: only use whisperx
 try:
     import whisperx
     from whisperx import diarize
@@ -494,6 +493,8 @@ def create_self_signed_cert():
         from cryptography.hazmat.primitives import hashes
         from cryptography.hazmat.primitives.asymmetric import rsa
         from cryptography.hazmat.primitives import serialization
+        # Ensure timedelta is imported here if not at top level, but top level is better
+        from datetime import datetime, timezone, timedelta 
         
         private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
         
@@ -505,7 +506,9 @@ def create_self_signed_cert():
             x509.NameAttribute(NameOID.COMMON_NAME, "localhost"),
         ])
         
-        cert = x509.CertificateBuilder().subject_name(subject).issuer_name(issuer).public_key(private_key.public_key()).serial_number(x509.random_serial_number()).not_valid_before(datetime.now(timezone.utc)).not_valid_after(datetime.now(timezone.utc) + datetime.timedelta(days=365)).add_extension(
+        # Fixed: Use imported classes directly
+        now = datetime.now(timezone.utc)
+        cert = x509.CertificateBuilder().subject_name(subject).issuer_name(issuer).public_key(private_key.public_key()).serial_number(x509.random_serial_number()).not_valid_before(now).not_valid_after(now + timedelta(days=365)).add_extension(
             x509.SubjectAlternativeName([
                 x509.DNSName("localhost"),
                 x509.IPAddress(ipaddress.IPv4Address("127.0.0.1")),

@@ -6,6 +6,7 @@ import re
 import subprocess
 from collections import OrderedDict
 import logging
+import ipaddress
 
 # Simplified imports: only use whisperx
 try:
@@ -103,48 +104,25 @@ WHISPER_MODELS = OrderedDict([
     ('large', '5: Large (Best accuracy, slowest)')
 ])
 
-def load_transcription_model(model_name="base"):
-    """Dynamically loads a WhisperX transcription model by size."""
-    global whisperx_model, current_model_size
+# Import the engine
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "pipeline"))
 
-    if model_name not in WHISPER_MODELS:
-        logger.warning(f"Invalid model name '{model_name}'. Falling back to 'base'.")
-        model_name = "base"
+# Import the function from process.py
+from process import transcribe_audio_locally, load_models
 
-    if model_name == current_model_size:
-        logger.info(f"WhisperX model '{model_name}' is already loaded.")
-        return
-
-    logger.info(f"Loading WhisperX transcription model: '{model_name}'...")
-
-    # Clear existing models from memory to free up resources
-    whisperx_model = None
-    gc.collect()
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-
-    try:
-        device = "cpu"
-        compute_type = "float32"
-        whisperx_model = whisperx.load_model(model_name, device, compute_type=compute_type)
-        current_model_size = model_name
-        logger.info(f"WhisperX '{model_name}' model loaded successfully.")
-    except Exception as e:
-        logger.error(f"Could not load WhisperX model '{model_name}': {e}")
-        logger.error("The application may not function correctly without a transcription model.")
-        current_model_size = None
-
-# Load the default model and the diarization model at startup
-load_transcription_model("base")
-
+# Initialize models at startup (optional, or lazy load on first request)
 try:
-    logger.info("Loading diarization model...")
-    diarize_model = diarize.DiarizationPipeline(use_auth_token=os.getenv("HUGGING_FACE_TOKEN"), device="cpu")
-    logger.info("Diarization model loaded successfully.")
+    load_models()
+    logger.info("Interactive App: Models pre-loaded from process.py")
 except Exception as e:
-    logger.warning(f"Failed to load diarization model: {e}")
-    logger.warning("Speaker diarization will be skipped.")
-    diarize_model = None
+    logger.error(f"Interactive App: Failed to load models: {e}")
+
+# ... inside your /upload or /transcribe_recording route ...
+
+def transcribe_audio(audio_path, language='de'):
+    """Simple wrapper that calls the shared engine."""
+    return transcribe_audio_locally(audio_path, language)
 
 # Configure Chat AI API (SAIA platform)
 CHAT_AI_API_KEY = os.getenv('CHAT_AI_API_KEY')
@@ -259,60 +237,42 @@ def merge_consecutive_speaker_segments(segments):
 
     return merged_segments
 
-def transcribe_with_speakers(audio_path, language='de'):
-    """Transcribe audio with speaker identification using WhisperX"""
-    try:
-        logger.info(f"Processing audio file: {audio_path} with WhisperX in language '{language}'")
-        
-        if whisperx_model is None:
-            raise RuntimeError("WhisperX model is not loaded.")
-        
-        if diarize_model is None:
-            logger.warning("Diarization model not loaded. Transcribing without speaker identification.")
-            return transcribe_basic(audio_path, language)
+logger.info("Starting speaker diarization...")
 
-        audio = whisperx.load_audio(audio_path)
-        logger.info(f"Audio loaded, duration: {len(audio)/16000:.2f} seconds")
-        
-        result = whisperx_model.transcribe(audio, batch_size=32, language=language)
-        logger.info(f"Transcription completed, detected language: {result.get('language', 'unknown')}")
+# Load audio path for pyannote (it needs a file path, not array)
+# whisperx.load_audio returns an array, but pyannote needs a path
+audio_path_str = audio_path 
 
-        try:
-            language_code = language if language else result.get("language", "de")
-            if not language_code:
-                raise Exception("Language not detected, cannot align.")
-
-            logger.info(f"Loading alignment model for language: {language_code}...")
-            align_model, metadata = whisperx.load_align_model(language_code=language_code, device="cpu")
-            logger.info("Alignment model loaded successfully")
-
-            result = whisperx.align(result["segments"], align_model, metadata, audio, "cpu", return_char_alignments=False)
-            logger.info("Alignment completed")
-        
-        except Exception as e:
-            logger.warning(f"Failed to align transcription: {e}. Diarization may be less accurate.")
-        
-        logger.info("Starting speaker diarization...")
-        diarize_segments = diarize_model(audio, min_speakers=2, max_speakers=4)
-        logger.info("Diarization completed")
-        
-        logger.info("Assigning speakers to segments...")
-        result = whisperx.assign_word_speakers(diarize_segments, result)
-        logger.info("Speaker assignment completed.")
-        
-        result["segments"] = merge_consecutive_speaker_segments(result["segments"])
-        
-        speaker_text = [f"{segment.get('speaker', 'Unknown')}: {segment['text'].strip()}" for segment in result["segments"] if segment['text'].strip()]
-        
-        gc.collect()
-        
-        final_result = "\n".join(speaker_text) if speaker_text else "No speech detected."
-        logger.info(f"Final transcription length: {len(final_result)} characters")
-        return final_result
-            
-    except Exception as e:
-        logger.error(f"Transcription with speakers failed: {e}")
-        return f"Transcription failed: {e}"
+try:
+    # Use the local pipeline loaded globally
+    diarize_output = diarize_model(audio_path_str, min_speakers=2, max_speakers=4)
+    
+    # Extract the speaker_diarization Annotation object
+    speaker_diarization = diarize_output.speaker_diarization
+    
+    # Convert Annotation to list of segment dictionaries
+    import pandas as pd
+    segments_list = []
+    for turn, _, speaker in speaker_diarization.itertracks(yield_label=True):
+        segments_list.append({
+            'start': turn.start,
+            'end': turn.end,
+            'speaker': speaker
+        })
+    
+    logger.info(f"Diarization extracted {len(segments_list)} speaker segments")
+    
+    # Convert list to Pandas DataFrame (Required by whisperx)
+    diarize_df = pd.DataFrame(segments_list)
+    
+    # Assign speakers to transcribed segments
+    result = whisperx.assign_word_speakers(diarize_df, result)
+    
+except Exception as e:
+    logger.error(f"Diarization failed: {e}")
+    # Fallback: Just use generic speaker labels if diarization fails
+    for i, segment in enumerate(result["segments"]):
+        segment["speaker"] = f"SPEAKER_{i%2:02d}"
 
 def transcribe_basic(audio_path, language='de'):
     """Basic transcription using WhisperX without speaker identification"""
@@ -883,7 +843,7 @@ def create_self_signed_cert():
         from cryptography.hazmat.primitives import hashes
         from cryptography.hazmat.primitives.asymmetric import rsa
         from cryptography.hazmat.primitives import serialization
-        import datetime
+        from datetime import datetime, timezone
         
         # Generate private key
         private_key = rsa.generate_private_key(
@@ -909,13 +869,13 @@ def create_self_signed_cert():
         ).serial_number(
             x509.random_serial_number()
         ).not_valid_before(
-            datetime.datetime.utcnow()
+            datetime.datetime.now(datetime.timezone.utc)
         ).not_valid_after(
-            datetime.datetime.utcnow() + datetime.timedelta(days=365)
+            datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=365)
         ).add_extension(
             x509.SubjectAlternativeName([
                 x509.DNSName("localhost"),
-                x509.IPAddress("127.0.0.1"),
+                x509.IPAddress(ipaddress.IPv4Address("127.0.0.1")),
             ]),
             critical=False,
         ).sign(private_key, hashes.SHA256())
@@ -945,20 +905,20 @@ if __name__ == '__main__':
             cert_file, key_file = create_self_signed_cert()
             if cert_file and key_file:
                 logger.info("Starting server with HTTPS (self-signed certificate)")
-                logger.info("You may need to accept the security warning in your browser")
-                logger.info("Access the app at: https://localhost:5001")
+                logger.info("⚠️You may need to accept the security warning in your browser")
+                logger.info("🌐Access the app at: https://localhost:5001")
                 app.run(debug=True, host='0.0.0.0', port=5001, ssl_context=(cert_file, key_file))
             else:
                 logger.info("Starting server with HTTPS (ad-hoc certificate)")
-                logger.info("You may need to accept the security warning in your browser")
-                logger.info("Access the app at: https://localhost:5001")
+                logger.info("⚠️You may need to accept the security warning in your browser")
+                logger.info("🌐Access the app at: https://localhost:5001")
                 app.run(debug=True, host='0.0.0.0', port=5001, ssl_context='adhoc')
         except Exception as e:
             logger.error(f"Failed to start HTTPS server: {e}")
             logger.info("Falling back to HTTP (microphone may not work)")
-            logger.info("Access the app at: http://localhost:5001")
+            logger.info("🌐Access the app at: http://localhost:5001")
             app.run(debug=True, host='0.0.0.0', port=5001)
     else:
         logger.info("Starting server with HTTP")
-        logger.info("Access the app at: http://localhost:80
+        logger.info("🌐Access the app at: http://localhost:80")
         app.run(debug=True, host='0.0.0.0', port=80) 
