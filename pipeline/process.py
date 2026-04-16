@@ -348,6 +348,43 @@ def process_audios():
     cleanup_gpu_resources()
     logger.info("Transcription phase complete. Run 'process_anonymization()' next to anonymize the transcript(s).")
 
+
+# Global variables to hold loaded models (so we don't reload every time)
+_loaded_whisper_model = None
+_loaded_diarize_model = None
+
+def load_models():
+    """Loads models locally. Called once on import or first use."""
+    global _loaded_whisper_model, _loaded_diarize_model
+    
+    if _loaded_whisper_model and _loaded_diarize_model:
+        return _loaded_whisper_model, _loaded_diarize_model
+
+    # ... (Copy the exact loading logic from your previous fix here) ...
+    # 1. Define paths
+    # 2. Verify paths
+    # 3. Load WhisperX (local_files_only=True)
+    # 4. Load Pyannote Pipeline (local_files_only=True)
+    
+    logger.info("Models loaded successfully.")
+    return _loaded_whisper_model, _loaded_diarize_model
+
+def transcribe_audio_locally(audio_path, language='de'):
+    """
+    Wrapper function to transcribe a single file using the loaded models.
+    This replaces the logic currently in app.py.
+    """
+    whisper_model, diarize_model = load_models()
+    
+    # ... (Copy the transcription logic from process.py's process_audios here) ...
+    # 1. Load audio
+    # 2. Transcribe
+    # 3. Align
+    # 4. Diarize
+    # 5. Return formatted string
+    
+    return result_text
+
 ## --- Anonymization Engine Class ---
 
 # class AnonymizationEngine:
