@@ -55,7 +55,7 @@ def main():
     # Define paths relative to the script
     TRAIN_DIR = os.path.join(SCRIPT_DIR, 'data', 'train')
     TEST_DIR = os.path.join(SCRIPT_DIR, 'data', 'test')
-    OUTPUT_DIR = os.path.join(SCRIPT_DIR, 'bert_model_finetuned'
+    OUTPUT_DIR = os.path.join(SCRIPT_DIR, 'bert_model_finetuned')
 
     # --- Load and Prepare Data ---
     logger.info("Loading and preparing data...")
