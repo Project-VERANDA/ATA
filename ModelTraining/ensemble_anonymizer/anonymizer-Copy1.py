@@ -1,47 +1,6 @@
-import os
 import re
-from pathlib import Path
-from transformers import AutoTokenizer, AutoModelForTokenClassification, pipeline
-
-# --- Dynamic Path Configuration ---
-# Get the directory where this script (anonymizer.py) is located
-current_script_dir = Path(__file__).resolve().parent
-
-# Navigate up to the 'ModelTraining' folder (parent of current dir)
-model_training_dir = current_script_dir.parent
-
-# Navigate down to the specific model folder
-# Structure: ModelTraining/bert_model/finetuned_model/best-model
-CUSTOM_MODEL_PATH = model_training_dir / "bert_model" / "finetuned_model" / "best-model"
-
-# Optional: Log the resolved path for debugging
-print(f"[DEBUG] Resolved Model Path: {CUSTOM_MODEL_PATH}")
-print(f"[DEBUG] Path Exists? {CUSTOM_MODEL_PATH.exists()}")
-
-# Global variable to cache the loaded model
-_cached_nlp = None
-
-def get_nlp_pipeline():
-    """Lazy load the BERT model to avoid reloading on every request."""
-    global _cached_nlp
-    if _cached_nlp is not None:
-        return _cached_nlp
-
-    if not CUSTOM_MODEL_PATH.exists():
-        raise FileNotFoundError(f"Custom model not found at {CUSTOM_MODEL_PATH}. Please check the path structure.")
-
-    try:
-        print(f"Loading custom BERT model from: {CUSTOM_MODEL_PATH}")
-        tokenizer = AutoTokenizer.from_pretrained(str(CUSTOM_MODEL_PATH))
-        model = AutoModelForTokenClassification.from_pretrained(str(CUSTOM_MODEL_PATH))
-        
-        # 'aggregation_strategy="simple"' groups sub-word tokens into full words
-        _cached_nlp = pipeline("token-classification", model=model, tokenizer=tokenizer, aggregation_strategy="simple")
-        print("Custom BERT model loaded successfully.")
-        return _cached_nlp
-    except Exception as e:
-        print(f"Error loading custom BERT model: {e}")
-        raise e
+from bert_anonymizer.anonymizer import anonymize_text_with_bert
+from spacy_anonymizer.anonymizer import anonymize_text_with_spacy
 
 def filter_overlapping_entities(entities):
     """

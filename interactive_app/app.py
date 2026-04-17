@@ -33,26 +33,19 @@ try:
 except ImportError:
     PYDUB_AVAILABLE = False
 
-try:
-    from bert_anonymizer.anonymizer import anonymize_text_with_bert
-    BERT_ANONYMIZER_AVAILABLE = True
-except (ImportError, OSError) as e:
-    BERT_ANONYMIZER_AVAILABLE = False
-    logging.warning(f"BERT Anonymizer not available. Error: {e}")
+current_script_dir = Path(__file__).resolve().parent
 
-try:
-    from spacy_anonymizer.anonymizer import anonymize_text_with_spacy, is_spacy_model_available
-    SPACY_ANONYMIZER_AVAILABLE = is_spacy_model_available()
-except (ImportError, OSError) as e:
-    SPACY_ANONYMIZER_AVAILABLE = False
-    logging.warning(f"spaCy Anonymizer not available. Error: {e}")
+# Navigate UP one level to get to the 'MAIN' folder
+main_folder = current_script_dir.parent
 
-try:
-    from ensemble_anonymizer.anonymizer import anonymize_text_with_ensemble
-    ENSEMBLE_ANONYMIZER_AVAILABLE = BERT_ANONYMIZER_AVAILABLE and SPACY_ANONYMIZER_AVAILABLE
-except (ImportError, OSError) as e:
-    ENSEMBLE_ANONYMIZER_AVAILABLE = False
-    logging.warning(f"Ensemble Anonymizer not available. Error: {e}")
+# Navigate DOWN into 'ModelTraining'
+model_training_path = main_folder / "ModelTraining"
+
+# Add to sys.path
+if str(model_training_path) not in sys.path:
+    sys.path.insert(0, str(model_training_path))
+
+logger.info(f"Added ModelTraining path: {model_training_path}")
 
 TTS_AVAILABLE = GTTS_AVAILABLE
 

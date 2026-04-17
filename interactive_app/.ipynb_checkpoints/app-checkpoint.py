@@ -6,9 +6,10 @@ import re
 import subprocess
 from collections import OrderedDict
 import logging
+from pathlib import Path
 import ipaddress
+from datetime import datetime, timezone, timedelta
 
-# Simplified imports: only use whisperx
 try:
     import whisperx
     from whisperx import diarize
@@ -16,7 +17,6 @@ try:
 except ImportError:
     WHISPERX_AVAILABLE = False
     logging.error("WhisperX is not available. Please install it to use this application.")
-    # Exit if whisperx is not available, as it's a core dependency
     sys.exit("Exiting: WhisperX is a required dependency.")
 
 try:
@@ -33,38 +33,28 @@ try:
 except ImportError:
     PYDUB_AVAILABLE = False
 
-try:
-    from bert_anonymizer.anonymizer import anonymize_text_with_bert
-    BERT_ANONYMIZER_AVAILABLE = True
-except (ImportError, OSError) as e:
-    BERT_ANONYMIZER_AVAILABLE = False
-    logging.warning(f"BERT Anonymizer not available. Error: {e}")
+current_script_dir = Path(__file__).resolve().parent
 
-try:
-    from spacy_anonymizer.anonymizer import anonymize_text_with_spacy, is_spacy_model_available
-    SPACY_ANONYMIZER_AVAILABLE = is_spacy_model_available()
-except (ImportError, OSError) as e:
-    SPACY_ANONYMIZER_AVAILABLE = False
-    logging.warning(f"spaCy Anonymizer not available. Error: {e}")
+# Navigate UP one level to get to the 'MAIN' folder
+main_folder = current_script_dir.parent
 
-try:
-    from ensemble_anonymizer.anonymizer import anonymize_text_with_ensemble
-    # The ensemble is only available if both its components are available
-    ENSEMBLE_ANONYMIZER_AVAILABLE = BERT_ANONYMIZER_AVAILABLE and SPACY_ANONYMIZER_AVAILABLE
-except (ImportError, OSError) as e:
-    ENSEMBLE_ANONYMIZER_AVAILABLE = False
-    logging.warning(f"Ensemble Anonymizer not available. Error: {e}")
+# Navigate DOWN into 'ModelTraining'
+model_training_path = main_folder / "ModelTraining"
 
-# Only use gTTS for German TTS
+# Add to sys.path
+if str(model_training_path) not in sys.path:
+    sys.path.insert(0, str(model_training_path))
+
+logger.info(f"Added ModelTraining path: {model_training_path}")
+
 TTS_AVAILABLE = GTTS_AVAILABLE
 
 import torch
 import gc
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, send_file
 from werkzeug.utils import secure_filename
 import requests
 from dotenv import load_dotenv
-import ssl
 
 # Load environment variables
 load_dotenv()
@@ -76,7 +66,6 @@ logger = logging.getLogger(__name__)
 if WHISPERX_AVAILABLE:
     logger.info("WhisperX is available - using for transcription with speaker diarization.")
 else:
-    # This part is now redundant due to the sys.exit above, but kept for clarity
     logger.error("WhisperX is not installed. The application cannot run without it.")
 
 if GTTS_AVAILABLE:
@@ -90,46 +79,37 @@ app.config['UPLOAD_FOLDER'] = 'uploads'
 
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
-# Simplified model initialization
-whisperx_model = None
-diarize_model = None
-current_model_size = None
-
-# Available whisper models by size, ordered from worst to best quality
-WHISPER_MODELS = OrderedDict([
-    ('tiny', '1: Tiny (Fastest, lowest accuracy)'),
-    ('base', '2: Base (Default, good balance)'),
-    ('small', '3: Small (More accurate, slower)'),
-    ('medium', '4: Medium (High accuracy, very slow)'),
-    ('large', '5: Large (Best accuracy, slowest)')
-])
-
-# Import the engine
-from pathlib import Path
+# --- SHARED ENGINE IMPORT (CRITICAL CHANGE) ---
+# Add pipeline to path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "pipeline"))
 
-# Import the function from process.py
-from process import transcribe_audio_locally, load_models
-
-# Initialize models at startup (optional, or lazy load on first request)
+# Import the shared functions from process.py
 try:
-    load_models()
-    logger.info("Interactive App: Models pre-loaded from process.py")
-except Exception as e:
-    logger.error(f"Interactive App: Failed to load models: {e}")
+    from process import transcribe_audio_locally, load_models
+    logger.info("Successfully imported shared transcription engine from process.py")
+    
+    # Pre-load models at startup (optional but recommended for speed)
+    try:
+        load_models()
+        logger.info("Interactive App: Models pre-loaded from process.py")
+    except Exception as e:
+        logger.error(f"Interactive App: Failed to pre-load models: {e}")
+        # We continue anyway; lazy loading will happen on first request
+except ImportError as e:
+    logger.critical(f"CRITICAL: Could not import from process.py: {e}")
+    logger.critical("Ensure process.py is in the 'pipeline' folder and defines 'transcribe_audio_locally' and 'load_models'.")
+    sys.exit(1)
 
-# ... inside your /upload or /transcribe_recording route ...
-
+# Wrapper for backward compatibility in routes
 def transcribe_audio(audio_path, language='de'):
-    """Simple wrapper that calls the shared engine."""
+    """Calls the shared engine from process.py"""
     return transcribe_audio_locally(audio_path, language)
 
-# Configure Chat AI API (SAIA platform)
+# --- CONFIGURATION ---
 CHAT_AI_API_KEY = os.getenv('CHAT_AI_API_KEY')
 CHAT_AI_ENDPOINT = os.getenv('CHAT_AI_ENDPOINT', 'https://chat-ai.academiccloud.de/v1')
 DEFAULT_MODEL = os.getenv('CHAT_AI_MODEL', 'llama-3.1-8b-instruct')
 
-# Available models for anonymization (exact names from GWDG Chat AI - Open Source Only)
 AVAILABLE_MODELS = {
     'llama-3.1-8b-instruct': 'Meta Llama 3.1 8B Instruct',
     'gemma-3-27b-it': 'Google Gemma 3 27B Instruct',
@@ -148,46 +128,39 @@ AVAILABLE_MODELS = {
     'qwen-2.5-coder-32b-instruct': 'Alibaba Qwen 2.5 Coder 32B Instruct'
 }
 
+WHISPER_MODELS = OrderedDict([
+    ('tiny', '1: Tiny (Fastest, lowest accuracy)'),
+    ('base', '2: Base (Default, good balance)'),
+    ('small', '3: Small (More accurate, slower)'),
+    ('medium', '4: Medium (High accuracy, very slow)'),
+    ('large', '5: Large (Best accuracy, slowest)')
+])
+
 ALLOWED_EXTENSIONS = {'wav', 'mp3', 'mp4', 'm4a', 'flac', 'ogg', 'webm'}
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 def generate_beep(duration_ms=400, freq=1000):
-    """Generates a beep sound using pydub."""
-    return Sine(freq).to_audio_segment(duration=duration_ms).apply_gain(-12) # Lower volume
+    return Sine(freq).to_audio_segment(duration=duration_ms).apply_gain(-12)
 
 def generate_speech(text, voice_settings=None, language='de'):
-    """Generate speech from text using Google TTS, replacing bracketed tags with beeps."""
     if not GTTS_AVAILABLE or not PYDUB_AVAILABLE:
         logger.error("gTTS or pydub not available, cannot generate speech with beeps.")
         return None, None
 
     try:
-        logger.info(f"Generating speech with beeps for text length: {len(text)} characters in language: {language}")
-
-        # Regex to find all bracketed tags like [NAME_PATIENT]
         tag_regex = re.compile(r'(\[[A-Z_]+\])')
-
-        # Split the text by the tags, keeping the tags as delimiters
         text_parts = tag_regex.split(text)
-
-        # Generate a standard beep sound
         beep_sound = generate_beep()
-
-        # Initialize an empty audio segment for the final audio
         final_audio = AudioSegment.empty()
 
         for part in text_parts:
             if not part:
                 continue
-
             if tag_regex.match(part):
-                # This part is a tag, so append a beep
-                logger.info(f"Replacing tag '{part}' with a beep.")
                 final_audio += beep_sound
             elif part.strip():
-                # This is a text part, generate speech for it
                 try:
                     tts = gTTS(text=part.strip(), lang=language, slow=False)
                     with io.BytesIO() as fp:
@@ -199,103 +172,19 @@ def generate_speech(text, voice_settings=None, language='de'):
                     logger.error(f"gTTS failed for segment: '{part[:30]}...'. Error: {e}")
         
         if len(final_audio) == 0:
-            logger.warning("No audio was generated. The text might be empty or contain only tags.")
+            logger.warning("No audio was generated.")
             return None, None
 
-        # Generate a unique filename and path for the combined audio
         audio_filename = f"speech_output_{int(time.time())}.mp3"
         audio_path = os.path.join(app.config['UPLOAD_FOLDER'], audio_filename)
-        
-        # Export the final combined audio to an MP3 file
         final_audio.export(audio_path, format="mp3")
-        
         logger.info(f"Speech with beeps generated successfully: {audio_path}")
         return audio_path, 'gtts_with_beeps'
-
     except Exception as e:
         logger.error(f"Speech generation with beeps failed: {e}")
         return None, None
 
-def merge_consecutive_speaker_segments(segments):
-    """Merge consecutive segments from the same speaker"""
-    merged_segments = []
-    prev_segment = None
-
-    for segment in segments:
-        speaker = segment.get("speaker", "Unknown")
-        text = segment["text"]
-
-        if prev_segment and prev_segment["speaker"] == speaker:
-            prev_segment["text"] += " " + text
-        else:
-            if prev_segment:
-                merged_segments.append(prev_segment)
-            prev_segment = {"speaker": speaker, "text": text}
-
-    if prev_segment:
-        merged_segments.append(prev_segment)
-
-    return merged_segments
-
-logger.info("Starting speaker diarization...")
-
-# Load audio path for pyannote (it needs a file path, not array)
-# whisperx.load_audio returns an array, but pyannote needs a path
-audio_path_str = audio_path 
-
-try:
-    # Use the local pipeline loaded globally
-    diarize_output = diarize_model(audio_path_str, min_speakers=2, max_speakers=4)
-    
-    # Extract the speaker_diarization Annotation object
-    speaker_diarization = diarize_output.speaker_diarization
-    
-    # Convert Annotation to list of segment dictionaries
-    import pandas as pd
-    segments_list = []
-    for turn, _, speaker in speaker_diarization.itertracks(yield_label=True):
-        segments_list.append({
-            'start': turn.start,
-            'end': turn.end,
-            'speaker': speaker
-        })
-    
-    logger.info(f"Diarization extracted {len(segments_list)} speaker segments")
-    
-    # Convert list to Pandas DataFrame (Required by whisperx)
-    diarize_df = pd.DataFrame(segments_list)
-    
-    # Assign speakers to transcribed segments
-    result = whisperx.assign_word_speakers(diarize_df, result)
-    
-except Exception as e:
-    logger.error(f"Diarization failed: {e}")
-    # Fallback: Just use generic speaker labels if diarization fails
-    for i, segment in enumerate(result["segments"]):
-        segment["speaker"] = f"SPEAKER_{i%2:02d}"
-
-def transcribe_basic(audio_path, language='de'):
-    """Basic transcription using WhisperX without speaker identification"""
-    try:
-        logger.info(f"Processing audio file: {audio_path} with WhisperX (basic) in language '{language}'")
-
-        if whisperx_model is None:
-            raise RuntimeError("WhisperX model is not loaded.")
-            
-        audio = whisperx.load_audio(audio_path)
-        result = whisperx_model.transcribe(audio, batch_size=16, language=language)
-        return result.get("text", "No speech detected.")
-                
-    except Exception as e:
-        logger.error(f"Basic transcription failed: {e}")
-        return f"Transcription failed: {e}"
-
-def transcribe_audio(audio_path, language='de'):
-    """Main transcription function - uses speaker diarization when available"""
-    if WHISPERX_AVAILABLE and diarize_model is not None:
-        return transcribe_with_speakers(audio_path, language=language)
-    else:
-        return transcribe_basic(audio_path, language=language)
+# --- ROUTES ---
 
 @app.route('/')
 def index():
@@ -303,25 +192,16 @@ def index():
 
 @app.route('/models')
 def get_models():
-    # Start with the base list of models from the environment
     models_to_send = AVAILABLE_MODELS.copy()
-    
     local_models = {}
-    # If the local BERT model is available, add it
     if BERT_ANONYMIZER_AVAILABLE:
         local_models['bert-base-ner'] = 'Local BERT Model'
-    
-    # If the local spaCy model is available, add it
     if SPACY_ANONYMIZER_AVAILABLE:
         local_models['spacy-de-ner'] = 'Local spaCy Model'
-
-    # If the local Ensemble model is available, add it
     if ENSEMBLE_ANONYMIZER_AVAILABLE:
         local_models['ensemble-spacy-bert'] = 'Local Ensemble (spaCy + BERT)'
 
-    # Combine the model lists
     if local_models:
-        # Use a more descriptive key to avoid clashes and for clarity
         combined_models = {'local_models': local_models, **models_to_send}
     else:
         combined_models = models_to_send
@@ -348,22 +228,18 @@ def upload_file():
         if file.filename == '':
             return jsonify({'error': 'No file selected'}), 400
         
-        # Get selected language and model size
         language = request.form.get('language', 'de')
-        model_size = request.form.get('model_size', 'base')
-        load_transcription_model(model_size)
+        # Note: model_size is ignored now as we use the fixed local model from process.py
+        # But we keep the param for UI compatibility
         
         if file and allowed_file(file.filename):
-            # Save uploaded file
             filename = secure_filename(file.filename)
             filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             file.save(filepath)
             
-            # Transcribe audio
             logger.info(f"Transcribing file: {filename} in language: {language}")
             transcription = transcribe_audio(filepath, language=language)
             
-            # Clean up uploaded file
             os.remove(filepath)
             
             return jsonify({
@@ -387,91 +263,52 @@ def transcribe_recording():
             return jsonify({'error': 'No audio recording provided'}), 400
         
         audio_blob = request.files['audio']
-        
-        # Get selected language and model size
         language = request.form.get('language', 'de')
-        model_size = request.form.get('model_size', 'base')
-        load_transcription_model(model_size)
-
-        logger.info(f"Received audio file: filename='{audio_blob.filename}', content_type='{audio_blob.content_type}', language='{language}'")
         
-        # Save the recorded audio to a temporary file first
+        logger.info(f"Received audio file: filename='{audio_blob.filename}', language='{language}'")
+        
         with tempfile.NamedTemporaryFile(delete=False, suffix='.webm') as temp_file:
             audio_blob.save(temp_file.name)
             temp_file_path = temp_file.name
         
-        # Check file size after saving
         file_size = os.path.getsize(temp_file_path)
-        logger.info(f"Saved audio file: {temp_file_path}, size: {file_size} bytes")
-        
         if file_size == 0:
-            return jsonify({'error': 'Empty audio file saved - no audio data received from browser'}), 400
+            return jsonify({'error': 'Empty audio file saved'}), 400
         
-        if file_size < 100:  # Very small file, probably not real audio
-            return jsonify({'error': f'Audio file too small ({file_size} bytes) - recording may have failed'}), 400
-        
-        # Try to convert webm to wav for better compatibility
         try:
             converted_file_path = temp_file_path.replace('.webm', '.wav')
-            
-            # Use ffmpeg to convert webm to wav
-            result = subprocess.run([
+            subprocess.run([
                 'ffmpeg', '-i', temp_file_path, 
-                '-ar', '16000',  # 16kHz sample rate
-                '-ac', '1',      # mono
-                '-f', 'wav',     # WAV format
-                '-y',            # overwrite output
+                '-ar', '16000', '-ac', '1', '-f', 'wav', '-y',
                 converted_file_path
             ], check=True, capture_output=True, text=True)
             
-            logger.info(f"Converted to WAV: {converted_file_path}")
-            
-            # Check converted file size
-            converted_size = os.path.getsize(converted_file_path)
-            logger.info(f"Converted file size: {converted_size} bytes")
-            
-            if converted_size > 0:
+            if os.path.getsize(converted_file_path) > 0:
                 audio_file_to_transcribe = converted_file_path
             else:
-                logger.warning("Converted file is empty, using original")
                 audio_file_to_transcribe = temp_file_path
-            
-        except subprocess.CalledProcessError as e:
-            logger.warning(f"FFmpeg conversion failed: {e}")
-            logger.warning(f"FFmpeg stderr: {e.stderr}")
-            logger.info("Trying direct transcription of webm file")
-            audio_file_to_transcribe = temp_file_path
-        except FileNotFoundError:
-            logger.warning("FFmpeg not found, using original webm file")
-            audio_file_to_transcribe = temp_file_path
-        except Exception as e:
-            logger.warning(f"Audio conversion error: {e}")
+        except Exception:
             audio_file_to_transcribe = temp_file_path
         
-        # Transcribe the recording
         logger.info(f"Starting transcription of: {audio_file_to_transcribe}")
         transcription = transcribe_audio(audio_file_to_transcribe, language=language)
             
-        # Clean up temporary files
         if temp_file_path and os.path.exists(temp_file_path):
             os.unlink(temp_file_path)
         if converted_file_path and os.path.exists(converted_file_path):
             os.unlink(converted_file_path)
             
-            return jsonify({
-                'success': True,
-                'transcription': transcription
-            })
+        return jsonify({
+            'success': True,
+            'transcription': transcription
+        })
     
     except Exception as e:
         logger.error(f"Error processing recording: {str(e)}")
-        
-        # Clean up temporary files
         if temp_file_path and os.path.exists(temp_file_path):
             os.unlink(temp_file_path)
         if converted_file_path and os.path.exists(converted_file_path):
             os.unlink(converted_file_path)
-            
         return jsonify({'error': f'Error processing recording: {str(e)}'}), 500
 
 @app.route('/anonymize', methods=['POST'])
@@ -482,218 +319,71 @@ def anonymize_text():
             return jsonify({'error': 'No text provided'}), 400
         
         text = data['text']
-        anonymization_level = data.get('level', 'standard')  # basic, standard, strict
-        selected_model = data.get('model', DEFAULT_MODEL)  # Get selected model or use default
+        anonymization_level = data.get('level', 'standard')
+        selected_model = data.get('model', DEFAULT_MODEL)
 
-        # Handle local BERT model anonymization
+        # Local Models
         if selected_model == 'bert-base-ner':
             if not BERT_ANONYMIZER_AVAILABLE:
-                return jsonify({'error': 'BERT anonymizer is not available on the server.'}), 500
-            
-            logger.info("Anonymizing text with local BERT model")
-            try:
-                anonymized_text, _ = anonymize_text_with_bert(text)
-                return jsonify({
-                    'success': True,
-                    'anonymized_text': anonymized_text,
-                    'level': 'n/a', # Anonymization level is not applicable for BERT
-                    'model_used': 'Local BERT Model (German NER)',
-                    'tts_available': GTTS_AVAILABLE
-                })
-            except Exception as e:
-                logger.error(f"Error during BERT anonymization: {str(e)}")
-                return jsonify({'error': f'BERT anonymization failed: {str(e)}'}), 500
+                return jsonify({'error': 'BERT anonymizer not available'}), 500
+            anonymized_text, _ = anonymize_text_with_bert(text)
+            return jsonify({'success': True, 'anonymized_text': anonymized_text, 'model_used': 'Local BERT', 'tts_available': GTTS_AVAILABLE})
         
-        # Handle local spaCy model anonymization
         elif selected_model == 'spacy-de-ner':
             if not SPACY_ANONYMIZER_AVAILABLE:
-                return jsonify({'error': 'spaCy anonymizer is not available on the server.'}), 500
-
-            logger.info("Anonymizing text with local spaCy model")
-            try:
-                anonymized_text, _ = anonymize_text_with_spacy(text)
-                return jsonify({
-                    'success': True,
-                    'anonymized_text': anonymized_text,
-                    'level': 'n/a', # Anonymization level is not applicable
-                    'model_used': 'Local spaCy Model',
-                    'tts_available': GTTS_AVAILABLE
-                })
-            except Exception as e:
-                logger.error(f"Error during spaCy anonymization: {str(e)}")
-                return jsonify({'error': f'spaCy anonymization failed: {str(e)}'}), 500
-
-        # Handle local Ensemble model anonymization
+                return jsonify({'error': 'spaCy anonymizer not available'}), 500
+            anonymized_text, _ = anonymize_text_with_spacy(text)
+            return jsonify({'success': True, 'anonymized_text': anonymized_text, 'model_used': 'Local spaCy', 'tts_available': GTTS_AVAILABLE})
+        
         elif selected_model == 'ensemble-spacy-bert':
             if not ENSEMBLE_ANONYMIZER_AVAILABLE:
-                return jsonify({'error': 'Ensemble anonymizer is not available on the server.'}), 500
-            
-            logger.info("Anonymizing text with local Ensemble model")
-            try:
-                # The new ensemble function directly returns the final anonymized text
-                anonymized_text = anonymize_text_with_ensemble(text)
-                return jsonify({
-                    'success': True,
-                    'anonymized_text': anonymized_text,
-                    'level': 'n/a', # Anonymization level is not applicable
-                    'model_used': 'Local Ensemble (spaCy + BERT)',
-                    'tts_available': GTTS_AVAILABLE
-                })
-            except Exception as e:
-                logger.error(f"Error during Ensemble anonymization: {str(e)}")
-                return jsonify({'error': f'Ensemble anonymization failed: {str(e)}'}), 500
+                return jsonify({'error': 'Ensemble anonymizer not available'}), 500
+            anonymized_text = anonymize_text_with_ensemble(text)
+            return jsonify({'success': True, 'anonymized_text': anonymized_text, 'model_used': 'Local Ensemble', 'tts_available': GTTS_AVAILABLE})
 
-        # Validate the selected LLM model
+        # Remote LLM
         if selected_model not in AVAILABLE_MODELS:
-            return jsonify({'error': f'Invalid model selected: {selected_model}'}), 400
+            return jsonify({'error': f'Invalid model: {selected_model}'}), 400
         
         if not CHAT_AI_API_KEY:
             return jsonify({'error': 'Chat AI API key not configured'}), 500
         
-        # Define anonymization prompts based on level
         prompts = {
-            'basic': """
-            Anonymize the following text by replacing only the most obvious personally identifiable information (PII) using these specific labels:
-            - Patient names with [NAME_PATIENT]
-            - Doctor names with [NAME_DOCTOR]
-            - Phone numbers with [CONTACT_PHONE]
-            - Email addresses with [CONTACT_EMAIL]
-            - Street addresses with [LOCATION_STREET]
-            - Cities with [LOCATION_CITY]
-            
-            Keep the text as natural and readable as possible. Only replace obvious PII.
-            
-            CRITICAL INSTRUCTIONS: 
-            - Do NOT anonymize or modify speaker identification tags like SPEAKER_00, SPEAKER_01, etc. These must be preserved exactly as they appear.
-            - Do NOT translate any text. Keep ALL text in its original language exactly as it appears.
-            - Preserve the original grammar, sentence structure, and language completely.
-            - Only replace the specific PII elements mentioned above, leave everything else unchanged.
-            
-            IMPORTANT: Return ONLY the anonymized text. Do not include any explanations, reasoning, or additional commentary.
-            """,
-            'standard': """
-            Anonymize the following text by replacing personally identifiable information (PII) using these specific labels:
-            - Patient names with [NAME_PATIENT]
-            - Doctor names with [NAME_DOCTOR]
-            - Relative names with [NAME_RELATIVE]
-            - Other names with [NAME_OTHER]
-            - Professions with [PROFESSION]
-            - Phone numbers with [CONTACT_PHONE]
-            - Email addresses with [CONTACT_EMAIL]
-            - Fax numbers with [CONTACT_FAX]
-            - Street addresses with [LOCATION_STREET]
-            - Cities with [LOCATION_CITY]
-            - ZIP codes with [LOCATION_ZIP]
-            - Hospitals with [LOCATION_HOSPITAL]
-            - Organizations with [LOCATION_ORGANISATION]
-            - Dates with [DATE]
-            - Ages with [AGE]
-            - ID numbers with [ID]
-            
-            Keep the text readable while ensuring privacy protection.
-            
-            CRITICAL INSTRUCTIONS: 
-            - Do NOT anonymize or modify speaker identification tags like SPEAKER_00, SPEAKER_01, etc. These must be preserved exactly as they appear.
-            - Do NOT translate any text. Keep ALL text in its original language exactly as it appears.
-            - Preserve the original grammar, sentence structure, and language completely.
-            - Only replace the specific PII elements mentioned above, leave everything else unchanged.
-            
-            IMPORTANT: Return ONLY the anonymized text. Do not include any explanations, reasoning, or additional commentary.
-            """,
-            'strict': """
-            Thoroughly anonymize the following text by replacing all personally identifiable information (PII) using these specific labels:
-            - Patient names with [NAME_PATIENT]
-            - Doctor names with [NAME_DOCTOR]
-            - Relative names with [NAME_RELATIVE]
-            - External names with [NAME_EXT]
-            - Usernames with [NAME_USERNAME]
-            - Other names with [NAME_OTHER]
-            - Titles with [NAME_TITLE]
-            - Professions with [PROFESSION]
-            - Dates with [DATE]
-            - Ages with [AGE]
-            - Street addresses with [LOCATION_STREET]
-            - Cities with [LOCATION_CITY]
-            - ZIP codes with [LOCATION_ZIP]
-            - Countries with [LOCATION_COUNTRY]
-            - States with [LOCATION_STATE]
-            - Hospitals with [LOCATION_HOSPITAL]
-            - Organizations with [LOCATION_ORGANISATION]
-            - Other locations with [LOCATION_OTHER]
-            - ID numbers with [ID]
-            - Phone numbers with [CONTACT_PHONE]
-            - Email addresses with [CONTACT_EMAIL]
-            - Fax numbers with [CONTACT_FAX]
-            - URLs with [CONTACT_URL]
-            - Other contact information with [CONTACT_OTHER]
-            
-            Be thorough in removing all potentially identifying information using the appropriate specific labels.
-            
-            CRITICAL INSTRUCTIONS: 
-            - Do NOT anonymize or modify speaker identification tags like SPEAKER_00, SPEAKER_01, etc. These must be preserved exactly as they appear.
-            - Do NOT translate any text. Keep ALL text in its original language exactly as it appears.
-            - Preserve the original grammar, sentence structure, and language completely.
-            - Only replace the specific PII elements mentioned above, leave everything else unchanged.
-            
-            IMPORTANT: Return ONLY the anonymized text. Do not include any explanations, reasoning, or additional commentary.
-            """
+            'basic': "Anonymize PII (names, phones, emails, addresses) with specific tags. Keep speaker tags. Return ONLY text.",
+            'standard': "Anonymize PII (names, professions, dates, ages, locations) with specific tags. Keep speaker tags. Return ONLY text.",
+            'strict': "Thoroughly anonymize ALL PII with specific tags. Keep speaker tags. Return ONLY text."
         }
         
         prompt = prompts.get(anonymization_level, prompts['standard'])
-        
         model_name = AVAILABLE_MODELS.get(selected_model, selected_model)
-        logger.info(f"Anonymizing text with {anonymization_level} level using {model_name}")
         
-        # Prepare request to Chat AI API
-        headers = {
-            'Authorization': f'Bearer {CHAT_AI_API_KEY}',
-            'Content-Type': 'application/json'
-        }
-        
+        headers = {'Authorization': f'Bearer {CHAT_AI_API_KEY}', 'Content-Type': 'application/json'}
         payload = {
             "model": selected_model,
             "messages": [
                 {"role": "system", "content": prompt},
                 {"role": "user", "content": f"Text to anonymize:\n\n{text}"}
             ],
-            "max_tokens": 8000,  # Increased from 2000 to 8000 for much larger outputs
+            "max_tokens": 8000,
             "temperature": 0.1
         }
         
-        # Try the request with retries and much longer timeout for large texts
-        max_retries = 3
-        timeout = 360  # Increased timeout to 6 minutes for very large text processing
-        
-        for attempt in range(max_retries):
+        for attempt in range(3):
             try:
-                response = requests.post(
-                    f"{CHAT_AI_ENDPOINT}/chat/completions",
-                    headers=headers,
-                    json=payload,
-                    timeout=timeout
-                )
-                break  # Success, exit retry loop
+                response = requests.post(f"{CHAT_AI_ENDPOINT}/chat/completions", headers=headers, json=payload, timeout=360)
+                break
             except requests.exceptions.Timeout:
-                if attempt < max_retries - 1:
-                    logger.warning(f"Request timeout on attempt {attempt + 1}, retrying...")
-                    time.sleep(2)  # Wait 2 seconds before retry
-                    continue
-                else:
-                    logger.error("All retry attempts failed due to timeout")
-                    return jsonify({'error': 'The anonymization service is currently slow to respond. Please try again in a moment.'}), 504
+                if attempt < 2: continue
+                return jsonify({'error': 'Timeout'}), 504
             except requests.exceptions.RequestException as e:
-                logger.error(f"Request failed: {str(e)}")
                 return jsonify({'error': f'Connection error: {str(e)}'}), 503
         
         if response.status_code != 200:
-            logger.error(f"Chat AI API error: {response.status_code} - {response.text}")
-            return jsonify({'error': f'Chat AI API error: {response.status_code}'}), 500
+            return jsonify({'error': f'API error: {response.status_code}'}), 500
         
         response_data = response.json()
         anonymized_text = response_data['choices'][0]['message']['content'].strip()
-        
-        # Remove any <think> tags and their content
-        anonymized_text = re.sub(r'<think>.*?</think>', '', anonymized_text, flags=re.DOTALL).strip()
+        anonymized_text = re.sub(r'<thought>.*?</thought>', '', anonymized_text, flags=re.DOTALL).strip()
         
         return jsonify({
             'success': True,
@@ -716,31 +406,18 @@ def generate_speech_route():
         
         text = data['text'].strip()
         if not text:
-            return jsonify({'error': 'Empty text provided'}), 400
+            return jsonify({'error': 'Empty text'}), 400
         
-        # Check if TTS is available
         if not GTTS_AVAILABLE:
-            return jsonify({'error': 'Text-to-speech not available. Please install gtts.'}), 500
+            return jsonify({'error': 'TTS not available'}), 500
         
-        # Get voice settings from request
-        voice_settings = data.get('voice_settings', {
-            'rate': 150,
-            'volume': 0.8,
-            'voice': 'de'
-        })
-        
-        # Extract language from voice settings
+        voice_settings = data.get('voice_settings', {'voice': 'de'})
         language = voice_settings.get('voice', 'de')
         
-        logger.info(f"Generating speech for anonymized text with settings: {voice_settings}, language: {language}")
-        
-        # Generate speech
         audio_path, tts_engine = generate_speech(text, voice_settings, language)
         
         if audio_path and os.path.exists(audio_path):
-            # Get the filename for the response
             audio_filename = os.path.basename(audio_path)
-            
             return jsonify({
                 'success': True,
                 'audio_file': audio_filename,
@@ -750,7 +427,6 @@ def generate_speech_route():
             })
         else:
             return jsonify({'error': 'Failed to generate speech'}), 500
-    
     except Exception as e:
         logger.error(f"Error generating speech: {str(e)}")
         return jsonify({'error': f'Error generating speech: {str(e)}'}), 500
@@ -758,100 +434,63 @@ def generate_speech_route():
 @app.route('/download_speech/<filename>')
 def download_speech(filename):
     try:
-        # Security: only allow files in uploads directory with specific pattern
         if not filename.startswith('speech_output_') or '..' in filename:
             return jsonify({'error': 'Invalid filename'}), 400
-        
         file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         if not os.path.exists(file_path):
             return jsonify({'error': 'File not found'}), 404
-        
-        # Serve the audio file
-        from flask import send_file
         return send_file(file_path, as_attachment=True)
-        
     except Exception as e:
         logger.error(f"Error downloading speech file: {str(e)}")
         return jsonify({'error': f'Error downloading speech file: {str(e)}'}), 500
 
 @app.route('/available_voices')
 def get_available_voices():
-    """Get German TTS voice"""
     try:
-        # Only provide German gTTS voice
+        voices = []
         if GTTS_AVAILABLE:
-            voices = [
-                {
-                    'id': 'de', 
-                    'name': 'Deutsch (Google TTS)', 
-                    'language': ['de'], 
-                    'engine': 'gtts'
-                }
-            ]
-            logger.info("German TTS voice available")
-        else:
-            voices = []
-            logger.warning("Google TTS not available")
-        
-        return jsonify({
-            'voices': voices,
-            'tts_available': GTTS_AVAILABLE,
-            'gtts_available': GTTS_AVAILABLE
-        })
-    
+            voices = [{'id': 'de', 'name': 'Deutsch (Google TTS)', 'language': ['de'], 'engine': 'gtts'}]
+        return jsonify({'voices': voices, 'tts_available': GTTS_AVAILABLE})
     except Exception as e:
-        logger.error(f"Error getting available voices: {str(e)}")
-        return jsonify({'error': f'Error getting available voices: {str(e)}'}), 500
+        return jsonify({'error': f'Error getting voices: {str(e)}'}), 500
 
 @app.route('/health')
 def health_check():
-    # Determine transcription capabilities
-    if WHISPERX_AVAILABLE and whisperx_model is not None:
-        if diarize_model is not None:
-            transcription_type = 'whisperx-with-speakers'
-            transcription_desc = 'WhisperX with speaker diarization'
-        else:
-            transcription_type = 'whisperx-basic'
-            transcription_desc = 'WhisperX without speaker diarization'
-    elif whisperx_model is not None: # No diarization model, so it's just basic WhisperX
-        transcription_type = 'whisperx-basic'
-        transcription_desc = 'WhisperX without speaker diarization'
-    else:
-        transcription_type = 'none'
-        transcription_desc = 'No whisper model available'
-    
-    return jsonify({
-        'status': 'healthy',
-        'transcription_available': whisperx_model is not None,
-        'transcription_type': transcription_type,
-        'transcription_description': transcription_desc,
-        'speaker_diarization': WHISPERX_AVAILABLE and diarize_model is not None,
-        'whisperx_available': WHISPERX_AVAILABLE,
-        'faster_whisper_available': False, # Removed as faster-whisper is no longer used
-        'chat_ai_configured': CHAT_AI_API_KEY is not None,
-        'default_model': DEFAULT_MODEL,
-        'available_models': list(AVAILABLE_MODELS.keys()),
-        'tts_available': GTTS_AVAILABLE,
-        'tts_engine': 'gtts' if GTTS_AVAILABLE else None
-    })
+    # Since we rely on process.py, we check if the import worked
+    try:
+        from process import load_models
+        # We can't easily check model state without calling it, so we assume healthy if import succeeded
+        return jsonify({
+            'status': 'healthy',
+            'transcription_available': True,
+            'transcription_type': 'shared-engine',
+            'transcription_description': 'Using shared process.py engine',
+            'speaker_diarization': True, # Assumed if process.py loaded
+            'whisperx_available': WHISPERX_AVAILABLE,
+            'chat_ai_configured': CHAT_AI_API_KEY is not None,
+            'default_model': DEFAULT_MODEL,
+            'available_models': list(AVAILABLE_MODELS.keys()),
+            'tts_available': GTTS_AVAILABLE,
+            'tts_engine': 'gtts' if GTTS_AVAILABLE else None
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'unhealthy',
+            'error': str(e)
+        }), 500
 
 def create_self_signed_cert():
-    """Create a self-signed certificate for HTTPS"""
     try:
         from cryptography import x509
         from cryptography.x509.oid import NameOID
         from cryptography.hazmat.primitives import hashes
         from cryptography.hazmat.primitives.asymmetric import rsa
         from cryptography.hazmat.primitives import serialization
-        from datetime import datetime, timezone
+        # Ensure timedelta is imported here if not at top level, but top level is better
+        from datetime import datetime, timezone, timedelta 
         
-        # Generate private key
-        private_key = rsa.generate_private_key(
-            public_exponent=65537,
-            key_size=2048,
-        )
+        private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
         
-        # Create certificate
         subject = issuer = x509.Name([
             x509.NameAttribute(NameOID.COUNTRY_NAME, "US"),
             x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, "Local"),
@@ -860,19 +499,9 @@ def create_self_signed_cert():
             x509.NameAttribute(NameOID.COMMON_NAME, "localhost"),
         ])
         
-        cert = x509.CertificateBuilder().subject_name(
-            subject
-        ).issuer_name(
-            issuer
-        ).public_key(
-            private_key.public_key()
-        ).serial_number(
-            x509.random_serial_number()
-        ).not_valid_before(
-            datetime.datetime.now(datetime.timezone.utc)
-        ).not_valid_after(
-            datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=365)
-        ).add_extension(
+        # Fixed: Use imported classes directly
+        now = datetime.now(timezone.utc)
+        cert = x509.CertificateBuilder().subject_name(subject).issuer_name(issuer).public_key(private_key.public_key()).serial_number(x509.random_serial_number()).not_valid_before(now).not_valid_after(now + timedelta(days=365)).add_extension(
             x509.SubjectAlternativeName([
                 x509.DNSName("localhost"),
                 x509.IPAddress(ipaddress.IPv4Address("127.0.0.1")),
@@ -880,16 +509,10 @@ def create_self_signed_cert():
             critical=False,
         ).sign(private_key, hashes.SHA256())
         
-        # Write certificate and key to files
         with open("cert.pem", "wb") as f:
             f.write(cert.public_bytes(serialization.Encoding.PEM))
-        
         with open("key.pem", "wb") as f:
-            f.write(private_key.private_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PrivateFormat.PKCS8,
-                encryption_algorithm=serialization.NoEncryption()
-            ))
+            f.write(private_key.private_bytes(encoding=serialization.Encoding.PEM, format=serialization.PrivateFormat.PKCS8, encryption_algorithm=serialization.NoEncryption()))
         
         return "cert.pem", "key.pem"
     except ImportError:
@@ -897,28 +520,22 @@ def create_self_signed_cert():
         return None, None
 
 if __name__ == '__main__':
-    # Try to use HTTPS for microphone access
     use_https = os.getenv('USE_HTTPS', 'true').lower() == 'true'
-    
+    #use_https = False
+
     if use_https:
         try:
             cert_file, key_file = create_self_signed_cert()
             if cert_file and key_file:
                 logger.info("Starting server with HTTPS (self-signed certificate)")
-                logger.info("⚠️You may need to accept the security warning in your browser")
-                logger.info("🌐Access the app at: https://localhost:5001")
                 app.run(debug=True, host='0.0.0.0', port=5001, ssl_context=(cert_file, key_file))
             else:
                 logger.info("Starting server with HTTPS (ad-hoc certificate)")
-                logger.info("⚠️You may need to accept the security warning in your browser")
-                logger.info("🌐Access the app at: https://localhost:5001")
                 app.run(debug=True, host='0.0.0.0', port=5001, ssl_context='adhoc')
         except Exception as e:
             logger.error(f"Failed to start HTTPS server: {e}")
-            logger.info("Falling back to HTTP (microphone may not work)")
-            logger.info("🌐Access the app at: http://localhost:5001")
+            logger.info("Falling back to HTTP")
             app.run(debug=True, host='0.0.0.0', port=5001)
     else:
         logger.info("Starting server with HTTP")
-        logger.info("🌐Access the app at: http://localhost:80")
-        app.run(debug=True, host='0.0.0.0', port=80) 
+        app.run(debug=True, host='0.0.0.0', port=5001)
