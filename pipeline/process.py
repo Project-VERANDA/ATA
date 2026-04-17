@@ -39,11 +39,11 @@ logger.info(f"Base path detected: {BASE_PATH}")
 
 
 # Derived paths
-VIDEOS_FOLDER = BASE_PATH / "pipeline/videos"
-AUDIOS_FOLDER = BASE_PATH / "pipeline/audios"
-TRANSCRIPTS_FOLDER = BASE_PATH / "pipeline/transcripts"
-MODEL_FOLDER = BASE_PATH / "pipeline/model"
-ANNONYM_FOLDER = BASE_PATH / "pipeline/annonym"
+VIDEOS_FOLDER = BASE_PATH / "videos"
+AUDIOS_FOLDER = BASE_PATH / "audios"
+TRANSCRIPTS_FOLDER = BASE_PATH / "transcripts"
+MODEL_FOLDER = BASE_PATH / "model"
+ANNONYM_FOLDER = BASE_PATH / "annonym"
 
 # Create directories if they don't exist
 for folder in [TRANSCRIPTS_FOLDER, ANNONYM_FOLDER, MODEL_FOLDER]:
@@ -72,6 +72,26 @@ DEFAULT_CHAT_AI_MODEL = os.getenv('CHAT_AI_MODEL', 'llama-3.1-8b-instruct')
 # Local Model Paths
 WHISPERX_MODEL_PATH = MODEL_FOLDER / "models--Systran--faster-whisper-large-v3"
 DIARIZATION_MODEL_PATH = MODEL_FOLDER / "models--pyannote--speaker-diarization-community-1"
+
+if not MODEL_FOLDER.exists():
+    logger.critical(f"CRITICAL: Model folder not found at {MODEL_FOLDER}.")
+    logger.critical(f"Current script location: {SCRIPT_DIR}")
+    sys.exit(1)
+
+if not WHISPERX_MODEL_PATH.exists():
+    logger.critical(f"CRITICAL: WhisperX model not found at {WHISPERX_MODEL_PATH}.")
+    logger.critical(f"Available folders in model directory: {list(MODEL_FOLDER.iterdir())}")
+    sys.exit(1)
+
+if not DIARIZATION_MODEL_PATH.exists():
+    logger.warning(f"WARNING: Diarization model not found at {DIARIZATION_MODEL_PATH}.")
+    logger.warning("Speaker diarization will be disabled. Using generic speaker labels.")
+    # We can still proceed without diarization, but warn the user
+
+logger.info(f"✅ Paths verified successfully.")
+logger.info(f"   Model Folder: {MODEL_FOLDER}")
+logger.info(f"   WhisperX Model: {WHISPERX_MODEL_PATH.name}")
+logger.info(f"   Diarization Model: {DIARIZATION_MODEL_PATH.name if DIARIZATION_MODEL_PATH.exists() else 'MISSING'}")
 
 # --- Helper Functions ---
 
