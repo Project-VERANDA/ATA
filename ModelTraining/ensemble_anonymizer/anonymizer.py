@@ -4,38 +4,28 @@ from pathlib import Path
 from transformers import AutoTokenizer, AutoModelForTokenClassification, pipeline
 
 # --- Dynamic Path Configuration ---
-# Get the directory where this script (anonymizer.py) is located
 current_script_dir = Path(__file__).resolve().parent
-
-# Navigate up to the 'ModelTraining' folder (parent of current dir)
 model_training_dir = current_script_dir.parent
-
-# Navigate down to the specific model folder
-# Structure: ModelTraining/bert_model/finetuned_model/best-model
 CUSTOM_MODEL_PATH = model_training_dir / "bert_model" / "finetuned_model" / "best-model"
 
-# Optional: Log the resolved path for debugging
 print(f"[DEBUG] Resolved Model Path: {CUSTOM_MODEL_PATH}")
 print(f"[DEBUG] Path Exists? {CUSTOM_MODEL_PATH.exists()}")
 
-# Global variable to cache the loaded model
 _cached_nlp = None
 
 def get_nlp_pipeline():
-    """Lazy load the BERT model to avoid reloading on every request."""
+    """Lazy load the BERT model."""
     global _cached_nlp
     if _cached_nlp is not None:
         return _cached_nlp
 
     if not CUSTOM_MODEL_PATH.exists():
-        raise FileNotFoundError(f"Custom model not found at {CUSTOM_MODEL_PATH}. Please check the path structure.")
+        raise FileNotFoundError(f"Custom model not found at {CUSTOM_MODEL_PATH}")
 
     try:
         print(f"Loading custom BERT model from: {CUSTOM_MODEL_PATH}")
         tokenizer = AutoTokenizer.from_pretrained(str(CUSTOM_MODEL_PATH))
         model = AutoModelForTokenClassification.from_pretrained(str(CUSTOM_MODEL_PATH))
-        
-        # 'aggregation_strategy="simple"' groups sub-word tokens into full words
         _cached_nlp = pipeline("token-classification", model=model, tokenizer=tokenizer, aggregation_strategy="simple")
         print("Custom BERT model loaded successfully.")
         return _cached_nlp
@@ -44,62 +34,47 @@ def get_nlp_pipeline():
         raise e
 
 def filter_overlapping_entities(entities):
-    """
-    Filters a list of entities to remove overlaps.
-    If two entities overlap, the one that is longer is kept.
-    """
-    # Sort by start position, and then by end position in descending order
-    # to prioritize longer spans if start positions are the same.
-    sorted_entities = sorted(entities, key=lambda x: (x['start'], -x['end']))
-    
-    if not sorted_entities:
+    """Filters overlapping entities, keeping the longest."""
+    if not entities:
         return []
-
+    sorted_entities = sorted(entities, key=lambda x: (x['start'], -(x['end'] - x['start'])))
     non_overlapping = []
-    # Start with the first entity (which is the earliest and longest at its position)
-    last_entity = sorted_entities[0]
-
-    for current_entity in sorted_entities[1:]:
-        # If the current entity starts after the last one ends, there's no overlap.
-        if current_entity['start'] >= last_entity['end']:
-            non_overlapping.append(last_entity)
-            last_entity = current_entity
-        # If they overlap, we've already chosen the longer one due to the sorting,
-        # so we just ignore the shorter, contained entity.
-        else:
-            # This 'else' implicitly handles the case where the current_entity is either
-            # fully contained within the last_entity or starts at the same position
-            # but is shorter. In these cases, we do nothing and keep last_entity.
-            pass
-
-    non_overlapping.append(last_entity)
+    last_end = -1
+    for entity in sorted_entities:
+        if entity['start'] >= last_end:
+            non_overlapping.append(entity)
+            last_end = entity['end']
     return non_overlapping
 
-def anonymize_text_with_ensemble(original_text: str) -> str:
-    """
-    Anonymizes text using a parallel ensemble of spaCy and BERT models.
-    It runs both models on the original text and merges their findings.
-    """
-    # Pass 1: Run both models in parallel on the original text
-    _, spacy_entities = anonymize_text_with_spacy(original_text)
-    _, bert_entities = anonymize_text_with_bert(original_text)
+def anonymize_text_with_bert(text: str):
+    """Anonymizes text using the custom fine-tuned BERT model."""
+    try:
+        nlp = get_nlp_pipeline()
+        results = nlp(text)
+        entities = []
+        for res in results:
+            entities.append({
+                'start': res['start'],
+                'end': res['end'],
+                'label': res['entity_group']
+            })
+        final_entities = filter_overlapping_entities(entities)
+        final_entities.sort(key=lambda x: x['start'], reverse=True)
+        anonymized_text = text
+        for entity in final_entities:
+            tag = f"[{entity['label']}]"
+            start = max(0, entity['start'])
+            end = min(len(anonymized_text), entity['end'])
+            anonymized_text = anonymized_text[:start] + tag + anonymized_text[end:]
+        return anonymized_text, final_entities
+    except Exception as e:
+        print(f"Error during BERT anonymization: {e}")
+        return text, []
 
-    # Combine the lists of entities from both models
-    combined_entities = spacy_entities + bert_entities
-    
-    # Remove duplicates and resolve overlaps
-    # This function will keep the longest entity in case of an overlap
-    final_entities = filter_overlapping_entities(combined_entities)
-    
-    # Sort the final list by start position in reverse order for safe replacement
-    final_entities.sort(key=lambda x: x['start'], reverse=True)
+def anonymize_text_with_spacy(text: str):
+    """Placeholder: Not implemented yet."""
+    raise NotImplementedError("spaCy model not yet generated.")
 
-    # Reconstruct the text from the original using the final merged entity list
-    anonymized_text = original_text
-    for entity in final_entities:
-        start = entity['start']
-        end = entity['end']
-        tag = f"[{entity['label']}]"
-        anonymized_text = anonymized_text[:start] + tag + anonymized_text[end:]
-        
-    return anonymized_text 
+def anonymize_text_with_ensemble(text: str):
+    """Placeholder: Requires spaCy."""
+    raise NotImplementedError("Ensemble requires both BERT and spaCy.")
