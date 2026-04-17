@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 # Path Definitions
 SCRIPT_DIR = Path(__file__).resolve().parent
 BASE_PATH = SCRIPT_DIR
+pipeline_dir = BASE_PATH / "pipeline"
 
 # Traverse up until we find a folder named 'MAIN' or hit the root
 while BASE_PATH.name != "MAIN" and BASE_PATH != BASE_PATH.parent:
@@ -39,11 +40,11 @@ logger.info(f"Base path detected: {BASE_PATH}")
 
 
 # Derived paths
-VIDEOS_FOLDER = BASE_PATH / "videos"
-AUDIOS_FOLDER = BASE_PATH / "audios"
-TRANSCRIPTS_FOLDER = BASE_PATH / "transcripts"
-MODEL_FOLDER = BASE_PATH / "model"
-ANNONYM_FOLDER = BASE_PATH / "annonym"
+VIDEOS_FOLDER = pipeline_dir / "videos"
+AUDIOS_FOLDER = pipeline_dir / "audios"
+TRANSCRIPTS_FOLDER = pipeline_dir / "transcripts"
+MODEL_FOLDER = pipeline_dir / "model"
+ANNONYM_FOLDER = pipeline_dir / "annonym"
 
 # Create directories if they don't exist
 for folder in [TRANSCRIPTS_FOLDER, ANNONYM_FOLDER, MODEL_FOLDER]:
