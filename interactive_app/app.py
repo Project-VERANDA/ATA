@@ -9,7 +9,9 @@ import logging
 from pathlib import Path
 import ipaddress
 from datetime import datetime, timezone, timedelta
-
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 try:
     import whisperx
     from whisperx import diarize
@@ -58,10 +60,6 @@ from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 if WHISPERX_AVAILABLE:
     logger.info("WhisperX is available - using for transcription with speaker diarization.")
