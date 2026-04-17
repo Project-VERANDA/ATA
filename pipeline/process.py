@@ -252,7 +252,15 @@ def process_audios():
             local_files_only=True
         )
         logger.info("WhisperX model loaded successfully.")
-        
+        print(f"DEBUG: SCRIPT_DIR = {SCRIPT_DIR}")
+        print(f"DEBUG: BASE_PATH = {BASE_PATH}")
+        print(f"DEBUG: MODEL_FOLDER = {MODEL_FOLDER}")
+        print(f"DEBUG: WHISPERX_MODEL_PATH = {WHISPERX_MODEL_PATH}")
+        print(f"DEBUG: EXISTS? {WHISPERX_MODEL_PATH.exists()}")
+        if WHISPERX_MODEL_PATH.exists():
+            print(f"DEBUG: Contents: {list(WHISPERX_MODEL_PATH.iterdir())[:5]}")
+        else:
+            print(f"DEBUG: Parent exists? {WHISPERX_MODEL_PATH.parent.exists()}")
     except Exception as e:
         logger.critical(f"Failed to load WhisperX model: {e}")
         return
@@ -368,6 +376,15 @@ def load_models():
     
     logger.info("Models loaded successfully.")
     return _loaded_whisper_model, _loaded_diarize_model
+    print(f"DEBUG: SCRIPT_DIR = {SCRIPT_DIR}")
+    print(f"DEBUG: BASE_PATH = {BASE_PATH}")
+    print(f"DEBUG: MODEL_FOLDER = {MODEL_FOLDER}")
+    print(f"DEBUG: WHISPERX_MODEL_PATH = {WHISPERX_MODEL_PATH}")
+    print(f"DEBUG: EXISTS? {WHISPERX_MODEL_PATH.exists()}")
+    if WHISPERX_MODEL_PATH.exists():
+        print(f"DEBUG: Contents: {list(WHISPERX_MODEL_PATH.iterdir())[:5]}")
+    else:
+        print(f"DEBUG: Parent exists? {WHISPERX_MODEL_PATH.parent.exists()}")
 
 def transcribe_audio_locally(audio_path, language='de'):
     """

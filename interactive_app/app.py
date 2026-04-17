@@ -527,8 +527,9 @@ def create_self_signed_cert():
         return None, None
 
 if __name__ == '__main__':
-    use_https = os.getenv('USE_HTTPS', 'true').lower() == 'true'
-    
+    #use_https = os.getenv('USE_HTTPS', 'true').lower() == 'true'
+    use_https = False
+
     if use_https:
         try:
             cert_file, key_file = create_self_signed_cert()
