@@ -391,23 +391,51 @@ def load_models():
     if _loaded_whisper_model and _loaded_diarize_model:
         return _loaded_whisper_model, _loaded_diarize_model
 
-    # ... (Copy the exact loading logic from your previous fix here) ...
     # 1. Define paths
+    logger.info(f"Loading WhisperX model from: {WHISPERX_MODEL_PATH}")
+    
     # 2. Verify paths
+    if not verify_whisperx_model(WHISPERX_MODEL_PATH):
+        logger.critical("WhisperX model verification failed.")
+        return None, None
+    
+    if not DIARIZATION_MODEL_PATH.exists():
+        logger.warning(f"Diarization model not found at {DIARIZATION_MODEL_PATH}.")
+        logger.warning("Will proceed without speaker diarization.")
+        _loaded_diarize_model = None
+    else:
+        if not verify_diarization_model(DIARIZATION_MODEL_PATH):
+            logger.warning("Diarization model verification failed. Will proceed without it.")
+            _loaded_diarize_model = None
+    
     # 3. Load WhisperX (local_files_only=True)
-    # 4. Load Pyannote Pipeline (local_files_only=True)
+    try:
+        _loaded_whisper_model = whisperx.load_model(
+            "large-v3", 
+            DEVICE, 
+            compute_type=COMPUTE_TYPE, 
+            download_root=str(MODEL_FOLDER),
+            local_files_only=True
+        )
+        logger.info("WhisperX model loaded successfully.")
+    except Exception as e:
+        logger.critical(f"Failed to load WhisperX model: {e}")
+        return None, None
+    
+    # 4. Load Pyannote Pipeline (local_files_only=True) if available
+    if _loaded_diarize_model is None and DIARIZATION_MODEL_PATH.exists():
+        try:
+            from pyannote.audio import Pipeline
+            _loaded_diarize_model = Pipeline.from_pretrained(
+                str(DIARIZATION_MODEL_PATH)
+            )
+            logger.info("Diarization Pipeline loaded successfully (offline mode).")
+        except Exception as e:
+            logger.warning(f"Failed to load local Diarization Pipeline: {e}")
+            _loaded_diarize_model = None
     
     logger.info("Models loaded successfully.")
     return _loaded_whisper_model, _loaded_diarize_model
-    print(f"DEBUG: SCRIPT_DIR = {SCRIPT_DIR}")
-    print(f"DEBUG: BASE_PATH = {BASE_PATH}")
-    print(f"DEBUG: MODEL_FOLDER = {MODEL_FOLDER}")
-    print(f"DEBUG: WHISPERX_MODEL_PATH = {WHISPERX_MODEL_PATH}")
-    print(f"DEBUG: EXISTS? {WHISPERX_MODEL_PATH.exists()}")
-    if WHISPERX_MODEL_PATH.exists():
-        print(f"DEBUG: Contents: {list(WHISPERX_MODEL_PATH.iterdir())[:5]}")
-    else:
-        print(f"DEBUG: Parent exists? {WHISPERX_MODEL_PATH.parent.exists()}")
 
 def transcribe_audio_locally(audio_path, language='de'):
     """
