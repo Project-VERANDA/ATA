@@ -26,7 +26,6 @@ logger = logging.getLogger(__name__)
 # Path Definitions
 SCRIPT_DIR = Path(__file__).resolve().parent
 BASE_PATH = SCRIPT_DIR
-pipeline_dir = BASE_PATH / "pipeline"
 
 # Traverse up until we find a folder named 'MAIN' or hit the root
 while BASE_PATH.name != "MAIN" and BASE_PATH != BASE_PATH.parent:
@@ -34,10 +33,13 @@ while BASE_PATH.name != "MAIN" and BASE_PATH != BASE_PATH.parent:
 
 if BASE_PATH.name != "MAIN":
     logger.critical(f"Could not locate 'MAIN' folder. Script expects to be run from within .../MAIN/")
+    logger.critical(f"Current script location: {SCRIPT_DIR}")
+    logger.critical(f"Detected base path: {BASE_PATH}")
     sys.exit(1)
 
 logger.info(f"Base path detected: {BASE_PATH}")
 
+pipeline_dir = BASE_PATH / "pipeline"
 
 # Derived paths
 VIDEOS_FOLDER = pipeline_dir / "videos"
