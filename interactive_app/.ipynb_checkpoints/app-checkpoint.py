@@ -9,6 +9,8 @@ import logging
 from pathlib import Path
 import ipaddress
 from datetime import datetime, timezone, timedelta
+
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -35,12 +37,10 @@ try:
 except ImportError:
     PYDUB_AVAILABLE = False
 
+# --- Path Configuration ---
+# Calculate the path to the parent directory of the current script (interactive_app/)
 current_script_dir = Path(__file__).resolve().parent
-
-# Navigate UP one level to get to the 'MAIN' folder
 main_folder = current_script_dir.parent
-
-# Navigate DOWN into 'ModelTraining'
 model_training_path = main_folder / "ModelTraining"
 
 # Add to sys.path
@@ -48,6 +48,35 @@ if str(model_training_path) not in sys.path:
     sys.path.insert(0, str(model_training_path))
 
 logger.info(f"Added ModelTraining path: {model_training_path}")
+
+# --- Anonymizer Availability Flags ---
+# Initialize to False first, then try to update
+BERT_ANONYMIZER_AVAILABLE = False
+SPACY_ANONYMIZER_AVAILABLE = False
+ENSEMBLE_ANONYMIZER_AVAILABLE = False
+
+# Try to import the custom anonymizer functions
+try:
+    from ensemble_anonymizer.anonymizer import (
+        anonymize_text_with_bert,
+        anonymize_text_with_spacy,
+        anonymize_text_with_ensemble
+    )
+    BERT_ANONYMIZER_AVAILABLE = True
+    logger.info("Custom BERT Anonymizer loaded successfully.")
+except Exception as e:
+    logger.warning(f"Custom BERT Anonymizer not available. Error: {e}")
+    # Define dummy functions to prevent crashes if called later
+    def anonymize_text_with_bert(text):
+        return text, []
+    def anonymize_text_with_spacy(text):
+        return text, []
+    def anonymize_text_with_ensemble(text):
+        return text, []
+
+# Note: spaCy and Ensemble are not available yet
+SPACY_ANONYMIZER_AVAILABLE = False
+ENSEMBLE_ANONYMIZER_AVAILABLE = False
 
 TTS_AVAILABLE = GTTS_AVAILABLE
 
