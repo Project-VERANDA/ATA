@@ -189,6 +189,10 @@ def generate_speech(text, voice_settings=None, language='de'):
                 final_audio += beep_sound
             elif part.strip():
                 try:
+                    # Check if part is just whitespace or empty before sending to gTTS
+                    if not part.strip():
+                        continue
+                    
                     tts = gTTS(text=part.strip(), lang=language, slow=False)
                     with io.BytesIO() as fp:
                         tts.write_to_fp(fp)
@@ -199,11 +203,15 @@ def generate_speech(text, voice_settings=None, language='de'):
                     logger.error(f"gTTS failed for segment: '{part[:30]}...'. Error: {e}")
         
         if len(final_audio) == 0:
-            logger.warning("No audio was generated.")
+            logger.warning("No audio was generated (all segments were tags or empty).")
+            # Create a small silent file or return None to indicate failure
+            # For now, let's return None to prevent the 500 error later
             return None, None
 
         audio_filename = f"speech_output_{int(time.time())}.mp3"
-        audio_path = os.path.join(app.config['UPLOAD_FOLDER'], audio_filename)
+        # Ensure we use the absolute path defined in app config
+        audio_path = os.path.join(os.path.abspath(app.config['UPLOAD_FOLDER']), audio_filename)
+        
         final_audio.export(audio_path, format="mp3")
         logger.info(f"Speech with beeps generated successfully: {audio_path}")
         return audio_path, 'gtts_with_beeps'
@@ -461,11 +469,17 @@ def generate_speech_route():
 @app.route('/download_speech/<filename>')
 def download_speech(filename):
     try:
+        # Security check
         if not filename.startswith('speech_output_') or '..' in filename:
             return jsonify({'error': 'Invalid filename'}), 400
-        file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        
+        # Construct the absolute path using the app's config folder
+        file_path = os.path.join(os.path.abspath(app.config['UPLOAD_FOLDER']), filename)
+        
         if not os.path.exists(file_path):
+            logger.error(f"File not found: {file_path}")
             return jsonify({'error': 'File not found'}), 404
+            
         return send_file(file_path, as_attachment=True)
     except Exception as e:
         logger.error(f"Error downloading speech file: {str(e)}")
