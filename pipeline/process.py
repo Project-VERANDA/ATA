@@ -583,13 +583,41 @@ class AnonymizationEngine:
             self.method = None
 
     def _get_labels(self):
-        """Returns the label mapping based on the model's config."""
-        # Mapping standard NER tags to our anonymization tags
+        """
+        Maps the model's output labels to our anonymization tags based on 
+        deryaerman/mmbert_multilingual_pii_ner entity types.
+        """
         return {
-            'PER': '[NAME_OTHER]',
+            # People
+            'PERSON': '[NAME_OTHER]',
+            'PERSON_EMAIL': '[CONTACT_EMAIL]',
+            'PERSON_SOCIAL_RELATION': '[NAME_RELATIVE]',
+            
+            # Organizations
             'ORG': '[LOCATION_ORGANISATION]',
-            'LOC': '[LOCATION_CITY]',
-            'MISC': '[ID]' 
+            
+            # Locations
+            'LOC_CITY': '[LOCATION_CITY]',
+            'LOC_COUNTRY': '[LOCATION_COUNTRY]',
+            'LOC_STREET': '[LOCATION_STREET]',
+            'LOC_ZIP': '[LOCATION_ZIP]',
+            'LOC_HOUSENUMBER': '[LOCATION_STREET]',
+            'LOC_OTHER': '[LOCATION_OTHER]',
+            
+            # Time & Dates
+            'DATETIME': '[DATE]',
+            'DATETIME_AGE': '[AGE]',
+            
+            # Identifiers & Codes
+            'CODE': '[ID]',
+            'CODE_PHONE': '[CONTACT_PHONE]',
+            'CODE_URL': '[CONTACT_URL]',
+            
+            # Other PII
+            'PROFESSION': '[PROFESSION]',
+            'PRODUCT': '[ID]',
+            'QUANTITY': '[ID]',
+            'MISC': '[ID]'
         }
 
     def anonymize(self, text):
