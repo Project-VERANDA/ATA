@@ -6,4 +6,4 @@ pipeline/model/pyannote-SpeakerDiarization/
 pipeline_Test.py
 ModelTraining/*
 key.pem
-cert.pm
+cert.pem
