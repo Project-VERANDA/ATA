@@ -930,7 +930,7 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None):
 
 if __name__ == "__main__":
     
-     import argparse
+    import argparse
     
     parser = argparse.ArgumentParser(description="Run the Anonymization Pipeline")
     parser.add_argument('--enable-llm', action='store_true', help='Enable LLM indirect identifier removal')
