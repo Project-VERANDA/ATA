@@ -10,6 +10,7 @@ import re
 from collections import defaultdict
 from pathlib import Path
 from pydub import AudioSegment
+from openai import OpenAI
 
 # --- Configuration & Security ---
 
@@ -47,6 +48,7 @@ AUDIOS_FOLDER = pipeline_dir / "audios"
 TRANSCRIPTS_FOLDER = pipeline_dir / "transcripts"
 MODEL_FOLDER = pipeline_dir / "model"
 ANNONYM_FOLDER = pipeline_dir / "annonym"
+LLM_ANONNYM_FOLDER = pipeline_dir / "anonnym_LLM"
 
 # Create directories if they don't exist
 for folder in [TRANSCRIPTS_FOLDER, ANNONYM_FOLDER, MODEL_FOLDER]:
@@ -61,16 +63,6 @@ BATCH_SIZE = 32
 COMPUTE_TYPE = "float16"
 MIN_SPEAKERS = 2
 MAX_SPEAKERS = 4
-
-# Anonymization Configuration
-ANONYMIZATION_ENABLED = True
-ANONYMIZATION_LEVEL = "standard"  # Options: 'basic', 'standard', 'strict'
-ANONYMIZATION_METHOD = "local_mmbert"  # Options: 'local_bert', 'local_spacy', 'local_ensemble', 'remote_chat_ai'
-
-# Remote Chat AI API Configuration
-CHAT_AI_API_KEY = os.getenv('CHAT_AI_API_KEY', '')
-CHAT_AI_ENDPOINT = os.getenv('CHAT_AI_ENDPOINT', 'https://chat-ai.academiccloud.de/v1')
-DEFAULT_CHAT_AI_MODEL = os.getenv('CHAT_AI_MODEL', 'llama-3.1-8b-instruct')
 
 # Local Model Paths
 WHISPERX_MODEL_PATH = MODEL_FOLDER / "models--Systran--faster-whisper-large-v3"
@@ -95,6 +87,39 @@ logger.info(f"✅ Paths verified successfully.")
 logger.info(f"   Model Folder: {MODEL_FOLDER}")
 logger.info(f"   WhisperX Model: {WHISPERX_MODEL_PATH.name}")
 logger.info(f"   Diarization Model: {DIARIZATION_MODEL_PATH.name if DIARIZATION_MODEL_PATH.exists() else 'MISSING'}")
+
+# Anonymization Configuration
+ANONYMIZATION_ENABLED = True
+ANONYMIZATION_LEVEL = "standard"  # Options: 'basic', 'standard', 'strict'
+ANONYMIZATION_METHOD = "local_mmbert"  # Options: 'local_bert', 'local_spacy', 'local_ensemble', 'remote_chat_ai'
+
+# Remote Chat AI API Configuration
+CHAT_AI_API_KEY = os.getenv('CHAT_AI_API_KEY', '')
+CHAT_AI_ENDPOINT = os.getenv('CHAT_AI_ENDPOINT', 'https://chat-ai.academiccloud.de/v1')
+DEFAULT_CHAT_AI_MODEL = os.getenv('CHAT_AI_MODEL', 'llama-3.1-8b-instruct')
+
+LLM_REWRITE_SYSTEM_PROMPT = (
+    "You are an expert privacy auditor specializing in de-identification. "
+    "Your task is to rewrite the provided text to remove any **indirect identifiers**. "
+    "Indirect identifiers include: specific job titles, unique combinations of demographics, rare locations, specific dates, "
+    "unique medical conditions, or any detail that could allow someone to identify the speaker when combined with other data. "
+    "Replace these specific details with generic placeholders like [INDIRECT_ID] or generalize the description. "
+    "IMPORTANT: Preserve the original speaker tags (e.g., SPEAKER_00, SPEAKER_01) exactly as they appear. "
+    "Do not change the general meaning or flow of the conversation. "
+    "Return ONLY the rewritten text. Do not include any introductory or concluding remarks."
+)
+
+AVAILABLE_LLM_MODELS = {
+    'medgemma': 'google/medgemma-1.5-4b-it',
+    'medgemma27b': 'google/medgemma-27b-it',
+    'gpt-oss-120b': 'openai/gpt-oss-120b',
+    'Qwen3.5-27B': 'Qwen/Qwen3.5-27B',
+    'Qwen3.5-397B-A17B': 'Qwen/Qwen3.5-397B-A17B',
+    'qwen3-asr-1.7b': 'Qwen/Qwen3-ASR-1.7B',
+    'cle-Kimi-K2.5': 'moonshotai/Kimi-K2.5',
+    'cle-Qwen3.5-397B-A17B-FP8': 'Qwen/Qwen3.5-397B-A17B-FP8'
+}
+
 
 # --- Helper Functions ---
 
@@ -762,12 +787,56 @@ class AnonymizationEngine:
             logger.error(f"Anonymization failed: {e}", exc_info=True)
             return None, False, str(e)
 
+def call_llm_rewriter(text, model_id, system_prompt=None):
+    """
+    Calls the external LLM API to rewrite text.
+    If system_prompt is None, it defaults to the global LLM_REWRITE_SYSTEM_PROMPT.
+    """
+    if not LLM_API_KEY:
+        logger.error("LLM API Key not configured. Skipping LLM rewrite.")
+        return None, "API Key missing"
+
+    # Use the provided prompt or fall back to the global constant
+    final_system_prompt = system_prompt if system_prompt is not None else LLM_REWRITE_SYSTEM_PROMPT
+
+    try:
+        client = OpenAI(api_key=LLM_API_KEY, base_url=LLM_API_BASE)
+        
+        # Resolve model ID
+        final_model = model_id
+        if model_id not in AVAILABLE_LLM_MODELS.values():
+             if model_id in AVAILABLE_LLM_MODELS:
+                 final_model = AVAILABLE_LLM_MODELS[model_id]
+             else:
+                 logger.warning(f"Model ID '{model_id}' not recognized, attempting to use as-is.")
+
+        messages = [
+            {"role": "system", "content": final_system_prompt},
+            {"role": "user", "content": text}
+        ]
+
+        logger.info(f"Calling LLM model: {final_model}")
+        
+        chat_completion = client.chat.completions.create(
+            messages=messages,
+            model=final_model,
+            stream=False,
+            temperature=0.3,
+            max_tokens=4096
+        )
+
+        rewritten_text = chat_completion.choices[0].message.content.strip()
+        return rewritten_text, "Success"
+
+    except Exception as e:
+        logger.error(f"LLM Rewriter failed: {e}")
+        return None, str(e)
+
 # --- Step 3: Anonymize Existing Transcripts (Active) ---
 
-def process_anonymization():
+ddef process_anonymization(llm_rewrite_enabled=None, llm_model_id=None):
     """
-    Reads raw transcripts from the 'transcripts' folder, anonymizes them,
-    and saves the results to the 'annonym' folder.
+    Reads raw transcripts, anonymizes them with BERT, and optionally rewrites with LLM.
     """
     if not TRANSCRIPTS_FOLDER.exists():
         logger.warning(f"No 'transcripts' folder found at {TRANSCRIPTS_FOLDER}. Skipping anonymization.")
@@ -775,11 +844,15 @@ def process_anonymization():
 
     logger.info(f"Found 'transcripts' folder at {TRANSCRIPTS_FOLDER}. Starting anonymization process...")
 
-    if not ANONYMIZATION_ENABLED:
-        logger.info("Anonymization is disabled in configuration.")
-        return
+    # Determine LLM settings
+    use_llm = llm_rewrite_enabled if llm_rewrite_enabled is not None else LLM_REWRITE_ENABLED
+    target_llm_model = llm_model_id if llm_model_id else LLM_DEFAULT_MODEL
 
-    # Initialize Anonymization Engine
+    if use_llm and not LLM_API_KEY:
+        logger.warning("LLM rewrite requested but no API key found. Disabling LLM step.")
+        use_llm = False
+
+    # Initialize Anonymization Engine (BERT)
     anonymizer = AnonymizationEngine(
         method=ANONYMIZATION_METHOD,
         level=ANONYMIZATION_LEVEL,
@@ -787,11 +860,12 @@ def process_anonymization():
     )
 
     if not anonymizer.method:
-        logger.error("Anonymization engine failed to initialize a valid method. Aborting.")
+        logger.error("Anonymization engine (BERT) failed to initialize. Aborting.")
         return
 
     processed_count = 0
     failed_count = 0
+    llm_processed_count = 0
 
     for file in TRANSCRIPTS_FOLDER.iterdir():
         if not file.is_file() or not file.suffix.lower() == ".txt":
@@ -812,33 +886,64 @@ def process_anonymization():
                 logger.warning(f"Transcript {file.name} is empty. Skipping.")
                 continue
 
+            # Step 1: BERT Anonymization
             anonymized_text, success, msg = anonymizer.anonymize(transcript_text)
             
-            if success and anonymized_text:
-                # Save manually since the helper method was also commented out
-                output_filename = f"{base_name}_anon.txt"
-                output_path = ANNONYM_FOLDER / output_filename
-                with open(output_path, "w", encoding="utf-8") as f:
-                    f.write(anonymized_text)
-                logger.info(f"Anonymized transcript saved to: {output_path}")
-                processed_count += 1
-            else:
-                logger.warning(f"Anonymization failed for {base_name}: {msg}")
+            if not success or not anonymized_text:
+                logger.warning(f"BERT Anonymization failed for {base_name}: {msg}")
                 failed_count += 1
+                continue
+
+            # Save BERT result
+            output_filename = f"{base_name}_anon.txt"
+            output_path = ANNONYM_FOLDER / output_filename
+            with open(output_path, "w", encoding="utf-8") as f:
+                f.write(anonymized_text)
+            logger.info(f"BERT Anonymized transcript saved to: {output_path}")
+            processed_count += 1
+
+            # Step 2: Optional LLM Rewrite
+            if use_llm:
+                logger.info(f"Running LLM rewrite on {base_name} with model {target_llm_model}...")
+                llm_result, status = call_llm_rewriter(anonymized_text, target_llm_model)
+                
+                if llm_result:
+                    llm_filename = f"{base_name}_llm.txt"
+                    llm_path = LLM_ANONNYM_FOLDER / llm_filename
+                    with open(llm_path, "w", encoding="utf-8") as f:
+                        f.write(llm_result)
+                    logger.info(f"LLM Rewritten transcript saved to: {llm_path}")
+                    llm_processed_count += 1
+                else:
+                    logger.warning(f"LLM rewrite failed for {base_name}: {status}")
 
         except Exception as e:
             logger.error(f"Error processing transcript {file.name}: {e}")
             failed_count += 1
 
-    logger.info(f"Anonymization phase complete. Processed: {processed_count}, Failed: {failed_count}")
+    logger.info(f"Anonymization phase complete.")
+    logger.info(f"  BERT Processed: {processed_count}, Failed: {failed_count}")
+    if use_llm:
+        logger.info(f"  LLM Rewritten: {llm_processed_count}")
 
 # --- Main Execution ---
 
 if __name__ == "__main__":
+    
+     import argparse
+    
+    parser = argparse.ArgumentParser(description="Run the Anonymization Pipeline")
+    parser.add_argument('--enable-llm', action='store_true', help='Enable LLM indirect identifier removal')
+    parser.add_argument('--llm-model', type=str, default=None, help='Specific LLM model key (e.g., medgemma) to use')
+    args = parser.parse_args()
+    
     logger.info("Starting Audio Anonymizer full pipeline...")
     
     process_videos()
     process_audios()
-    process_anonymization()
+    process_anonymization(
+        llm_rewrite_enabled=args.enable_llm,
+        llm_model_id=args.llm_model
+    )
     
     logger.info("Pipeline finished.")

@@ -116,7 +116,48 @@
         .section:nth-child(5) h3:before {
             content: "🔊";
         }
+        .section:nth-child(6) h3:before {
+            content: "✨";
+        }  
+        .llm-controls {
+        display: flex;
+        gap: 15px;
+        align-items: center;
+        margin: 20px 0;
+        flex-wrap: wrap;
+        background: #eef7ff;
+        padding: 15px;
+        border-radius: 10px;
+        border: 1px solid #b3d9ff;
+        }
 
+         .llm-toggle {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 600;
+        color: #003366;
+         }
+
+         .llm-toggle input[type="checkbox"] {
+        width: 18px;
+        height: 18px;
+        cursor: pointer;
+        }
+
+       .llm-model-select {
+        flex-grow: 1;
+          }
+
+    .llm-model-select select {
+        width: 100%;
+        padding: 10px;
+        border: 2px solid #b3d9ff;
+        border-radius: 8px;
+        background: white;
+        color: #003366;
+        font-size: 14px;
+    }
         .button {
             background: linear-gradient(135deg, #003366 0%, #0066cc 100%);
             color: white;
@@ -474,7 +515,36 @@
                 <audio id="audio-player" controls class="hidden"></audio>
             </div>
         </div>
+        <div class="section">
+            <h3>Remove Indirect Identifiers (LLM)</h3>
+            <p style="color: #0066cc; margin-bottom: 15px; font-size: 0.95em;">
+                Uses an advanced LLM to generalize specific details (job titles, rare locations, unique dates) that BERT might miss.
+            </p>
+            
+            <div class="llm-controls">
+                <div class="llm-toggle">
+                    <input type="checkbox" id="llm-enabled" checked>
+                    <label for="llm-enabled">Enable LLM Rewriting</label>
+                </div>
+                
+                <div class="llm-model-select">
+                    <label for="llm-model-select" style="font-weight: 600; color: #003366; margin-right: 10px;">Model:</label>
+                    <select id="llm-model-select">
+                        <!-- Populated via JS -->
+                    </select>
+                </div>
+            </div>
+
+            <div class="button-wrapper">
+                <button id="llm-rewrite-btn" class="button" disabled>
+                    <span class="icon">✨</span> Rewrite with LLM
+                </button>
+            </div>
+            
+            <div id="llm-status" class="status" style="margin-top: 15px;"></div>
+        </div>
     </div>
+        
 
     <script>
         document.addEventListener('DOMContentLoaded', () => {
@@ -500,6 +570,11 @@
             const audioPlayer = document.getElementById('audio-player');
             const statusDiv = document.getElementById('status');
             const loader = document.getElementById('loader');
+
+            const llmEnabledCheckbox = document.getElementById('llm-enabled');
+            const llmModelSelect = document.getElementById('llm-model-select');
+            const llmRewriteBtn = document.getElementById('llm-rewrite-btn');
+            const llmStatusDiv = document.getElementById('llm-status');
 
             // --- State Variables ---
             let mediaRecorder;
@@ -724,66 +799,148 @@
             }
             }
 
-            async function generateSpeech() {
+                        async function generateSpeech() {
                 const text = anonymizedText.value;
                 if (!text.trim()) {
                     updateStatus("No anonymized text to generate speech from.", true);
-                return;
-            }
-            
+                    return;
+                }
+                
                 showLoader(true);
                 generateSpeechBtn.disabled = true;
                 updateStatus("Generating speech...", false);
 
                 const language = transcriptionLanguageSelect.value;
             
-            try {
+                try {
                     const response = await fetch('/generate_speech', {
-                    method: 'POST',
+                        method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             text: text,
                             voice_settings: { voice: language }
                         })
-                });
-                
-                const result = await response.json();
-                
+                    });
+                    
+                    const result = await response.json();
+                    
                     if (response.ok && result.success) {
                         audioPlayer.src = result.audio_url;
                         audioPlayer.classList.remove('hidden');
                         updateStatus("Speech generated successfully!", false);
-                        generateSpeechBtn.disabled = false; // Re-enable the button
-                } else {
+                        generateSpeechBtn.disabled = false;
+                    } else {
                         throw new Error(result.error || "Failed to generate speech.");
-                }
-            } catch (error) {
+                    }
+                } catch (error) {
                     console.error('Speech generation error:', error);
                     updateStatus(`Speech generation failed: ${error.message}`, true);
-                    generateSpeechBtn.disabled = false; // Also re-enable on error
-            } finally {
+                    generateSpeechBtn.disabled = false;
+                } finally {
                     showLoader(false);
                 }
             }
 
-            // --- Event Listeners ---
-            recordBtn.addEventListener('click', toggleRecording);
-            fileInput.addEventListener('change', handleFileUpload);
-            transcribeBtn.addEventListener('click', transcribe);
-            anonymizeBtn.addEventListener('click', anonymizeText);
-            generateSpeechBtn.addEventListener('click', generateSpeech);
-            
-            modelSelect.addEventListener('change', () => {
-                const selectedOption = modelSelect.options[modelSelect.selectedIndex];
-                const isLlmSelected = selectedOption.parentElement.label.startsWith('LLM');
-                privacyLevelSelector.style.display = isLlmSelected ? 'flex' : 'none';
-            });
+            async function handleLLMRewrite() {
+                const text = anonymizedText.value;
+                if (!text.trim()) {
+                    updateStatus("No anonymized text to rewrite.", true);
+                    return;
+                }
+
+                if (!llmEnabledCheckbox.checked) {
+                    updateStatus("LLM rewriting is disabled. Enable it to proceed.", true);
+                    return;
+                }
+
+                showLoader(true);
+                llmRewriteBtn.disabled = true;
+                llmStatusDiv.style.display = 'none';
+                updateStatus("Rewriting with LLM...", false);
+
+                const modelKey = llmModelSelect.value;
+
+                try {
+                    const response = await fetch('/llm_rewrite', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            text: text,
+                            model: modelKey,
+                            enabled: true
+                        })
+                    });
+
+                    const result = await response.json();
+
+                    if (response.ok && result.success) {
+                        anonymizedText.value = result.rewritten_text;
+                        updateStatus(`Successfully rewritten using ${result.model_used}.`, false);
+                        llmStatusDiv.textContent = `Rewritten with ${result.model_used}.`;
+                        llmStatusDiv.className = 'status success';
+                        llmStatusDiv.style.display = 'block';
+                    } else {
+                        throw new Error(result.error || "Failed to rewrite text.");
+                    }
+                } catch (error) {
+                    console.error('LLM Rewrite error:', error);
+                    updateStatus(`LLM Rewrite failed: ${error.message}`, true);
+                    llmStatusDiv.textContent = `Error: ${error.message}`;
+                    llmStatusDiv.className = 'status error';
+                    llmStatusDiv.style.display = 'block';
+                } finally {
+                    showLoader(false);
+                    llmRewriteBtn.disabled = false;
+                }
+            }
 
             // --- Initialization ---
-            function initialize() {
-                loadAnonymizationModels();
-                loadTranscriptionModels();
-                checkServerHealth();
+            
+            async function loadLLMModels() {
+                try {
+                    // Fetch the models from the backend (we reuse the /models endpoint logic or create a new one)
+                    // Assuming /models returns the AVAILABLE_LLM_MODELS in the 'available_models' object
+                    const response = await fetch('/models');
+                    const data = await response.json();
+                    
+                    llmModelSelect.innerHTML = '';
+                    const availableModels = data.available_models;
+                    
+                    // Filter for LLM models (excluding local BERT/spacy if they are mixed in)
+                    // We assume the backend returns keys like 'medgemma', 'Qwen3.5-27B' etc.
+                    // and excludes 'bert-base-ner', 'spacy-de-ner', etc.
+                    
+                    const llmKeys = [
+                        'medgemma', 'medgemma27b', 'gpt-oss-120b', 
+                        'Qwen3.5-27B', 'Qwen3.5-397B-A17B', 
+                        'qwen3-asr-1.7b', 'cle-Kimi-K2.5', 'cle-Qwen3.5-397B-A17B-FP8'
+                    ];
+
+                    let hasModels = false;
+                    llmKeys.forEach(key => {
+                        if (availableModels[key]) {
+                            const option = document.createElement('option');
+                            option.value = key;
+                            option.textContent = availableModels[key];
+                            llmModelSelect.appendChild(option);
+                            hasModels = true;
+                        }
+                    });
+
+                    if (!hasModels) {
+                        const opt = document.createElement('option');
+                        opt.textContent = "No LLM models available";
+                        opt.disabled = true;
+                        llmModelSelect.appendChild(opt);
+                    }
+
+                    // Set default
+                    if (data.default_model && llmKeys.includes(data.default_model)) {
+                        llmModelSelect.value = data.default_model;
+                    }
+                } catch (error) {
+                    console.error('Error loading LLM models:', error);
+                }
             }
             
             async function loadAnonymizationModels() {
@@ -838,9 +995,7 @@
                     if (data.default_model) {
                         modelSelect.value = data.default_model;
                     }
-                    
-                    // Trigger update of privacy controls based on initial model
-                    updatePrivacyControls();
+
                 } catch (error) {
                     console.error('Error loading anonymization models:', error);
                 
@@ -879,6 +1034,29 @@
                     console.error('Health check failed:', error);
                     updateStatus("Could not connect to the server.", true);
             }
+            }
+            
+            recordBtn.addEventListener('click', toggleRecording);
+            fileInput.addEventListener('change', handleFileUpload);
+            transcribeBtn.addEventListener('click', transcribe);
+            anonymizeBtn.addEventListener('click', anonymizeText);
+            generateSpeechBtn.addEventListener('click', generateSpeech);
+            llmRewriteBtn.addEventListener('click', handleLLMRewrite);
+            
+            anonymizedText.addEventListener('input', () => {
+                if (anonymizedText.value.trim().length > 0) {
+                    llmRewriteBtn.disabled = false;
+                } else {
+                    llmRewriteBtn.disabled = true;
+                }
+            });
+            // --- Event Listeners ---  <-- NEW BLOCK ENDS HERE
+
+            function initialize() {
+                loadAnonymizationModels();
+                loadTranscriptionModels();
+                loadLLMModels();
+                checkServerHealth();
             }
             
             initialize();

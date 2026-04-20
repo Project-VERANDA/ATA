@@ -9,6 +9,7 @@ import logging
 from pathlib import Path
 import ipaddress
 from datetime import datetime, timezone, timedelta
+from process import transcribe_audio_locally, load_models, call_llm_rewriter, AVAILABLE_LLM_MODELS, LLM_API_KEY, LLM_API_BASE
 
 
 # Configure logging
@@ -78,6 +79,10 @@ except Exception as e:
 SPACY_ANONYMIZER_AVAILABLE = False
 ENSEMBLE_ANONYMIZER_AVAILABLE = False
 
+LLM_API_KEY = os.getenv('LLM_API_KEY')
+LLM_API_BASE = os.getenv('LLM_API_BASE', 'https://llm.cloud.cci.charite.de/v1')
+LLM_DEFAULT_MODEL = os.getenv('LLM_DEFAULT_MODEL', 'medgemma')
+
 TTS_AVAILABLE = GTTS_AVAILABLE
 
 import torch
@@ -133,9 +138,9 @@ def transcribe_audio(audio_path, language='de'):
     return transcribe_audio_locally(audio_path, language)
 
 # --- CONFIGURATION ---
-CHAT_AI_API_KEY = os.getenv('CHAT_AI_API_KEY')
-CHAT_AI_ENDPOINT = os.getenv('CHAT_AI_ENDPOINT', 'https://chat-ai.academiccloud.de/v1')
-DEFAULT_MODEL = os.getenv('CHAT_AI_MODEL', 'llama-3.1-8b-instruct')
+LLM_API_KEY = os.getenv('LLM_API_KEY')
+LLM_API_BASE = os.getenv('LLM_API_BASE', 'https://llm.cloud.cci.charite.de/v1')
+LLM_DEFAULT_MODEL = os.getenv('LLM_DEFAULT_MODEL', 'medgemma')
 
 AVAILABLE_MODELS = {
     'llama-3.1-8b-instruct': 'Meta Llama 3.1 8B Instruct',
@@ -559,6 +564,44 @@ def create_self_signed_cert():
     except ImportError:
         logger.warning("cryptography package not available, using ad-hoc SSL context")
         return None, None
+
+        @app.route('/llm_rewrite', methods=['POST'])
+def llm_rewrite_route():
+    try:
+        data = request.get_json()
+        if not data or 'text' not in data:
+            return jsonify({'error': 'No text provided'}), 400
+        
+        text = data['text']
+        model_key = data.get('model', 'medgemma') # Default key
+        enabled = data.get('enabled', True)
+
+        if not enabled:
+            return jsonify({'error': 'LLM rewriting is disabled'}), 400
+
+        if not LLM_API_KEY:
+            return jsonify({'error': 'LLM API Key not configured on server'}), 500
+
+        # Resolve the model key to the full ID (e.g., 'medgemma' -> 'google/medgemma-1.5-4b-it')
+        model_id = AVAILABLE_LLM_MODELS.get(model_key, model_key)
+        
+        logger.info(f"Web Interface: Requesting LLM rewrite with model {model_id}")
+
+        # Call the function imported from process.py
+        rewritten_text, status = call_llm_rewriter(text, model_id)
+        
+        if not rewritten_text:
+            return jsonify({'error': f'LLM rewrite failed: {status}'}), 500
+        
+        return jsonify({
+            'success': True,
+            'rewritten_text': rewritten_text,
+            'model_used': model_id
+        })
+
+    except Exception as e:
+        logger.error(f"Error in LLM rewrite route: {str(e)}")
+        return jsonify({'error': f'Error rewriting text: {str(e)}'}), 500
 
 if __name__ == '__main__':
     use_https = os.getenv('USE_HTTPS', 'true').lower() == 'true'
