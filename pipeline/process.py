@@ -24,6 +24,23 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+logger.info("="*40)
+logger.info("GPU DETECTION CHECK")
+logger.info("="*40)
+cuda_available = torch.cuda.is_available()
+device_count = torch.cuda.device_count()
+
+if cuda_available:
+    logger.info(f"✅ CUDA is AVAILABLE!")
+    logger.info(f"   Number of GPUs detected: {device_count}")
+    for i in range(device_count):
+        logger.info(f"   GPU {i}: {torch.cuda.get_device_name(i)}")
+    logger.info(f"   Current Device: cuda:{torch.cuda.current_device()}")
+else:
+    logger.warning("❌ CUDA is NOT available. Falling back to CPU.")
+    logger.warning("   This will cause significantly slower processing speeds.")
+    logger.warning("   Check if NVIDIA drivers are installed or if a GPU instance is attached.")
+logger.info("="*40)
 
 # Path Definitions
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -463,6 +480,23 @@ def load_models():
     
     # 3. Load WhisperX (local_files_only=True)
     try:
+        logger.info("="*40)
+        logger.info("GPU DETECTION CHECK")
+        logger.info("="*40)
+        cuda_available = torch.cuda.is_available()
+        device_count = torch.cuda.device_count()
+
+        if cuda_available:
+            logger.info(f"✅ CUDA is AVAILABLE!")
+            logger.info(f"   Number of GPUs detected: {device_count}")
+            for i in range(device_count):
+                logger.info(f"   GPU {i}: {torch.cuda.get_device_name(i)}")
+            logger.info(f"   Current Device: cuda:{torch.cuda.current_device()}")
+        else:
+            logger.warning("❌ CUDA is NOT available. Falling back to CPU.")
+            logger.warning("   This will cause significantly slower processing speeds.")
+            logger.warning("   Check if NVIDIA drivers are installed or if a GPU instance is attached.")
+            logger.info("="*40)
         _loaded_whisper_model = whisperx.load_model(
             "large-v3", 
             DEVICE, 
