@@ -5,3 +5,5 @@ pipeline/model/pyannote-SpeakerDiarization/
 !pipeline/model/*/.GithubCreateDir
 pipeline_Test.py
 ModelTraining/*
+key.pem
+cert.pm
