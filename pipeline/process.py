@@ -12,7 +12,7 @@ from pathlib import Path
 from pydub import AudioSegment
 from openai import OpenAI
 from dotenv import load_dotenv
-
+load_dotenv()
 # --- Configuration & Security ---
 
 # Setup Logging
@@ -52,7 +52,7 @@ ANNONYM_FOLDER = pipeline_dir / "annonym"
 LLM_ANONNYM_FOLDER = pipeline_dir / "annonym_LLM"
 
 # Create directories if they don't exist
-for folder in [TRANSCRIPTS_FOLDER, ANNONYM_FOLDER, MODEL_FOLDER]:
+for folder in [TRANSCRIPTS_FOLDER, ANNONYM_FOLDER, MODEL_FOLDER,LLM_ANONNYM_FOLDER]:
     if not folder.exists():
         folder.mkdir(parents=True, exist_ok=True)
         logger.info(f"Created directory: {folder}")
