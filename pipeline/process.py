@@ -597,7 +597,7 @@ class AnonymizationEngine:
                     self.id2label = id2label
                     self.label2id = label2id
                     # Load the base transformer (e.g., bert-base-multilingual-cased)
-                    self.transformer = AutoModel.from_pretrained(base_model_name)
+                    self.transformer = AutoModel.from_pretrained(base_model_name, local_files_only=True)
                     hidden_size = self.transformer.config.hidden_size
                     self.classifier = nn.Linear(hidden_size, num_labels)
                     self.dropout = nn.Dropout(0.1)
@@ -622,14 +622,24 @@ class AnonymizationEngine:
                     return self.crf.decode(emissions, mask=mask)
 
             # 3. Instantiate the Model
+                        # 3. Instantiate the Model
             logger.info(f"Instantiating ModernBertCRF model...")
+            
+            # Use local base model path instead of hub repo name
+            local_base_model_path = MODEL_FOLDER / "mmBERT-base-local"
+            if not local_base_model_path.exists():
+                logger.error(f"Local base model not found at {local_base_model_path}. Please download it first.")
+                self.method = None
+                return
+            
+            logger.info(f"Using local base model: {local_base_model_path}")
+            
             self.model = ModernBertCRF(
-                base_model_name=self.config["base_model_name"],
+                base_model_name=str(local_base_model_path),  # Changed to local path
                 num_labels=self.config["num_labels"],
                 id2label=self.config["id2label"],
                 label2id=self.config["label2id"]
             )
-            
             # 4. Load Weights
             model_weights_path = self.model_path / "pytorch_model.bin"
             logger.info(f"Loading weights from {model_weights_path}...")
