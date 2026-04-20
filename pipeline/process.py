@@ -386,12 +386,6 @@ def process_audios():
             result = whisperx.assign_word_speakers(diarize_df, result)
             result["segments"] = merge_consecutive_speaker_segments(result["segments"])
 
-            base_name = sanitize_filename(file.stem)
-            transcript_file = TRANSCRIPTS_FOLDER / f"{base_name}.txt"
-            
-                    try:
-            # ... (Previous code: load audio, transcribe, align, diarize) ...
-
             # 1. Save Transcript
             base_name = sanitize_filename(file.stem)
             transcript_file = TRANSCRIPTS_FOLDER / f"{base_name}.txt"
