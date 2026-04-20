@@ -60,7 +60,7 @@ for folder in [TRANSCRIPTS_FOLDER, ANNONYM_FOLDER, MODEL_FOLDER]:
 # Configuration
 SUPPORTED_EXTENSIONS = ('.mp4', '.mp3', '.mkv')
 DEVICE = "cuda"
-BATCH_SIZE = 32
+BATCH_SIZE = 16
 COMPUTE_TYPE = "float16"
 MIN_SPEAKERS = 2
 MAX_SPEAKERS = 4
@@ -163,12 +163,30 @@ def merge_consecutive_speaker_segments(segments):
 
     return merged_segments
 
-def cleanup_gpu_resources():
-    """Explicitly clears GPU memory and runs garbage collection."""
+def cleanup_gpu_resources(*objects_to_delete):
+    """
+    Aggressively clears GPU memory, runs garbage collection, 
+    and explicitly deletes passed objects to free System RAM.
+    
+    Args:
+        *objects_to_delete: Variable number of tensor/dataframe objects to delete immediately.
+    """
+    # 1. Explicitly delete large objects passed to the function
+    # This breaks reference cycles immediately, helping gc later
+    for obj in objects_to_delete:
+        try:
+            del obj
+        except NameError:
+            pass # Object might already be deleted
+            
+    # 2. Force Python Garbage Collection to reclaim System RAM
     gc.collect()
+    
+    # 3. Clear GPU VRAM cache
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
-    logger.debug("GPU resources cleaned up.")
+        
+    logger.debug("GPU and System RAM resources cleaned up.")
 
 def verify_whisperx_model(model_path):
     """Verifies WhisperX model (faster-whisper format)."""
@@ -371,6 +389,13 @@ def process_audios():
             base_name = sanitize_filename(file.stem)
             transcript_file = TRANSCRIPTS_FOLDER / f"{base_name}.txt"
             
+                    try:
+            # ... (Previous code: load audio, transcribe, align, diarize) ...
+
+            # 1. Save Transcript
+            base_name = sanitize_filename(file.stem)
+            transcript_file = TRANSCRIPTS_FOLDER / f"{base_name}.txt"
+            
             try:
                 with open(transcript_file, "w", encoding="utf-8") as f:
                     for segment in result["segments"]:
@@ -383,18 +408,35 @@ def process_audios():
             except IOError as e:
                 logger.error(f"I/O error writing transcript: {e}")
 
-            del model_a, diarize_output, speaker_diarization, segments_list, diarize_df, result
-            cleanup_gpu_resources()
+            # This runs AFTER the file write attempt, regardless of success or failure.
+            # It is inside the main try block, so variables are guaranteed to exist.
+            cleanup_gpu_resources(
+                audio, 
+                result, 
+                model_a, 
+                metadata, 
+                diarize_output, 
+                speaker_diarization, 
+                segments_list, 
+                diarize_df
+            )
+            
+            # Explicitly delete references to help Python's GC
+            del audio, result, model_a, metadata, diarize_output, speaker_diarization, segments_list, diarize_df
 
         except Exception as e:
+            # This runs ONLY if an error occurred in the main logic (transcription, alignment, etc.)
             logger.error(f"Error processing {file.name}: {e}")
             import traceback
             logger.error(traceback.format_exc())
-            cleanup_gpu_resources()
+            
+            # Safe cleanup for error cases (variables might be partially defined)
+            cleanup_gpu_resources() 
 
+    # End of file loop
     del model, diarize_model
     cleanup_gpu_resources()
-    logger.info("Transcription phase complete. Run 'process_anonymization()' next to anonymize the transcript(s).")
+    logger.info("Transcription phase complete.")
 
 
 # Global variables to hold loaded models (so we don't reload every time)
