@@ -11,6 +11,7 @@ from collections import defaultdict
 from pathlib import Path
 from pydub import AudioSegment
 from openai import OpenAI
+from dotenv import load_dotenv
 
 # --- Configuration & Security ---
 
