@@ -79,7 +79,7 @@ for folder in [TRANSCRIPTS_FOLDER, ANNONYM_FOLDER, MODEL_FOLDER,LLM_ANONNYM_FOLD
 # Configuration
 SUPPORTED_EXTENSIONS = ('.mp4', '.mp3', '.mkv')
 DEVICE = "cuda"
-BATCH_SIZE = 16
+BATCH_SIZE = 32
 COMPUTE_TYPE = "float16"
 MIN_SPEAKERS = 2
 MAX_SPEAKERS = 4
@@ -116,7 +116,7 @@ ANONYMIZATION_METHOD = "local_mmbert"  # Options: 'local_bert', 'local_spacy', '
 # Remote Chat AI API Configuration
 CHAT_AI_API_KEY = os.getenv('CHAT_AI_API_KEY', '')
 CHAT_AI_ENDPOINT = os.getenv('CHAT_AI_ENDPOINT', 'https://chat-ai.academiccloud.de/v1')
-DEFAULT_CHAT_AI_MODEL = os.getenv('CHAT_AI_MODEL', 'llama-3.1-8b-instruct')
+DEFAULT_CHAT_AI_MODEL = os.getenv('CHAT_AI_MODEL', 'medgemma')
 LLM_REWRITE_ENABLED = True
 
 LLM_REWRITE_SYSTEM_PROMPT = (
