@@ -9,3 +9,4 @@ pipeline_Test.py
 ModelTraining/*
 key.pem
 cert.pem
+.env
