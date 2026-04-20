@@ -97,6 +97,7 @@ ANONYMIZATION_METHOD = "local_mmbert"  # Options: 'local_bert', 'local_spacy', '
 CHAT_AI_API_KEY = os.getenv('CHAT_AI_API_KEY', '')
 CHAT_AI_ENDPOINT = os.getenv('CHAT_AI_ENDPOINT', 'https://chat-ai.academiccloud.de/v1')
 DEFAULT_CHAT_AI_MODEL = os.getenv('CHAT_AI_MODEL', 'llama-3.1-8b-instruct')
+LLM_REWRITE_ENABLED = False
 
 LLM_REWRITE_SYSTEM_PROMPT = (
     "You are an expert privacy auditor specializing in de-identification. "
@@ -930,7 +931,7 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None):
 
 if __name__ == "__main__":
     
-     import argparse
+    import argparse
     
     parser = argparse.ArgumentParser(description="Run the Anonymization Pipeline")
     parser.add_argument('--enable-llm', action='store_true', help='Enable LLM indirect identifier removal')

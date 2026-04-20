@@ -648,7 +648,6 @@ class AnonymizationEngine:
                     return self.crf.decode(emissions, mask=mask)
 
             # 3. Instantiate the Model
-                        # 3. Instantiate the Model
             logger.info(f"Instantiating ModernBertCRF model...")
             
             # Use local base model path instead of hub repo name
@@ -793,7 +792,7 @@ def call_llm_rewriter(text, model_id, system_prompt=None):
     Calls the external LLM API to rewrite text.
     If system_prompt is None, it defaults to the global LLM_REWRITE_SYSTEM_PROMPT.
     """
-    if not LLM_API_KEY:
+    if not CHAT_AI_API_KEY:
         logger.error("LLM API Key not configured. Skipping LLM rewrite.")
         return None, "API Key missing"
 
@@ -801,7 +800,7 @@ def call_llm_rewriter(text, model_id, system_prompt=None):
     final_system_prompt = system_prompt if system_prompt is not None else LLM_REWRITE_SYSTEM_PROMPT
 
     try:
-        client = OpenAI(api_key=LLM_API_KEY, base_url=LLM_API_BASE)
+        client = OpenAI(api_key=CHAT_AI_API_KEY, base_url=CHAT_AI_ENDPOINT)
         
         # Resolve model ID
         final_model = model_id
@@ -847,9 +846,9 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None):
 
     # Determine LLM settings
     use_llm = llm_rewrite_enabled if llm_rewrite_enabled is not None else LLM_REWRITE_ENABLED
-    target_llm_model = llm_model_id if llm_model_id else LLM_DEFAULT_MODEL
+    target_llm_model = llm_model_id if llm_model_id else DEFAULT_CHAT_AI_MODEL
 
-    if use_llm and not LLM_API_KEY:
+    if use_llm and not CHAT_AI_API_KEY:
         logger.warning("LLM rewrite requested but no API key found. Disabling LLM step.")
         use_llm = False
 
@@ -869,9 +868,20 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None):
     llm_processed_count = 0
 
     for file in TRANSCRIPTS_FOLDER.iterdir():
-        if not file.is_file() or not file.suffix.lower() == ".txt":
+        # Skip directories
+        if not file.is_file():
             continue
         
+        # Skip non-text files
+        if not file.suffix.lower() == ".txt":
+            continue
+        
+        # SECURITY FIX: Validate that the file path is strictly within TRANSCRIPTS_FOLDER
+        if not validate_path(file, TRANSCRIPTS_FOLDER):
+            logger.error(f"Security Alert: Attempted path traversal detected for {file.name}. Skipping.")
+            continue
+        
+        # Skip already anonymized files
         if "_anon" in file.name:
             logger.debug(f"Skipping already anonymized file: {file.name}")
             continue
@@ -898,6 +908,13 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None):
             # Save BERT result
             output_filename = f"{base_name}_anon.txt"
             output_path = ANNONYM_FOLDER / output_filename
+            
+            # Additional safety: Ensure output path is also within ANNONYM_FOLDER
+            if not validate_path(output_path, ANNONYM_FOLDER):
+                logger.error(f"Security Alert: Output path traversal detected for {output_filename}. Skipping save.")
+                failed_count += 1
+                continue
+
             with open(output_path, "w", encoding="utf-8") as f:
                 f.write(anonymized_text)
             logger.info(f"BERT Anonymized transcript saved to: {output_path}")
@@ -911,6 +928,13 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None):
                 if llm_result:
                     llm_filename = f"{base_name}_llm.txt"
                     llm_path = LLM_ANONNYM_FOLDER / llm_filename
+                    
+                    # Additional safety: Ensure LLM output path is within LLM_ANONNYM_FOLDER
+                    if not validate_path(llm_path, LLM_ANONNYM_FOLDER):
+                        logger.error(f"Security Alert: LLM output path traversal detected for {llm_filename}. Skipping save.")
+                        failed_count += 1
+                        continue
+                        
                     with open(llm_path, "w", encoding="utf-8") as f:
                         f.write(llm_result)
                     logger.info(f"LLM Rewritten transcript saved to: {llm_path}")
