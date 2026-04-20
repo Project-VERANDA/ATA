@@ -115,7 +115,7 @@ ANONYMIZATION_METHOD = "local_mmbert"  # Options: 'local_bert', 'local_spacy', '
 
 # Remote Chat AI API Configuration
 CHAT_AI_API_KEY = os.getenv('CHAT_AI_API_KEY', '')
-CHAT_AI_ENDPOINT = os.getenv('CHAT_AI_ENDPOINT', 'https://chat-ai.academiccloud.de/v1')
+CHAT_AI_ENDPOINT = os.getenv('CHAT_AI_ENDPOINT', 'https://llm.cloud.cci.charite.de/v1')
 DEFAULT_CHAT_AI_MODEL = os.getenv('CHAT_AI_MODEL', 'medgemma')
 LLM_REWRITE_ENABLED = True
 
