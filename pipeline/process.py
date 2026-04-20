@@ -13,7 +13,7 @@ from pydub import AudioSegment
 from openai import OpenAI
 from dotenv import load_dotenv
 load_dotenv()
-logger.info(f"DEBUG: API Key loaded? {'YES' if os.getenv('CHAT_AI_API_KEY') else 'NO'}")
+
 # --- Configuration & Security ---
 
 # Setup Logging
@@ -30,6 +30,7 @@ logger.info("GPU DETECTION CHECK")
 logger.info("="*40)
 cuda_available = torch.cuda.is_available()
 device_count = torch.cuda.device_count()
+logger.info(f"DEBUG: API Key loaded? {'YES' if os.getenv('CHAT_AI_API_KEY') else 'NO'}")
 
 if cuda_available:
     logger.info(f"✅ CUDA is AVAILABLE!")
