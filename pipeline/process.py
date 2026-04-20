@@ -65,7 +65,7 @@ MAX_SPEAKERS = 4
 # Anonymization Configuration
 ANONYMIZATION_ENABLED = True
 ANONYMIZATION_LEVEL = "standard"  # Options: 'basic', 'standard', 'strict'
-ANONYMIZATION_METHOD = "local_ensemble"  # Options: 'local_bert', 'local_spacy', 'local_ensemble', 'remote_chat_ai'
+ANONYMIZATION_METHOD = "local_mmbert"  # Options: 'local_bert', 'local_spacy', 'local_ensemble', 'remote_chat_ai'
 
 # Remote Chat AI API Configuration
 CHAT_AI_API_KEY = os.getenv('CHAT_AI_API_KEY', '')
@@ -542,338 +542,198 @@ def transcribe_audio_locally(audio_path, language='de'):
         logger.error(error_msg, exc_info=True)  # Log full traceback to console
         return error_msg
 
-## --- Anonymization Engine Class ---
+# --- Anonymization Engine Class (Active Implementation) ---
 
-# class AnonymizationEngine:
-#     """
-#     Encapsulates all logic related to text anonymization.
-#     Handles local models (BERT, spaCy, Ensemble) and remote API calls.
-#     """
+class AnonymizationEngine:
+    """
+    Encapsulates all logic related to text anonymization using the local mmbert model.
+    """
     
-#     def __init__(self, method="local_ensemble", level="standard", api_key="", endpoint="", default_model=""):
-#         self.method = method
-#         self.level = level
-#         self.api_key = api_key or CHAT_AI_API_KEY
-#         self.endpoint = endpoint or CHAT_AI_ENDPOINT
-#         self.default_model = default_model or DEFAULT_CHAT_AI_MODEL
-#         self.local_availability = self._check_local_availability()
+    def __init__(self, method="local_mmbert", level="standard", model_path=None):
+        self.method = method
+        self.level = level
+        # Default path to your downloaded model
+        self.model_path = model_path or (MODEL_FOLDER / "mmbert_multilingual_pii_ner")
+        self.model = None
+        self.tokenizer = None
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
         
-#         if ANONYMIZATION_ENABLED:
-#             logger.info(f"AnonymizationEngine initialized: Method={self.method}, Level={self.level}")
-#             self._validate_configuration()
+        if ANONYMIZATION_ENABLED:
+            logger.info(f"AnonymizationEngine initialized: Method={self.method}, Level={self.level}, Path={self.model_path}")
+            self._load_model()
 
-#     def _check_local_availability(self):
-#         """Checks which local anonymizers are available."""
-#         availability = {'bert': False, 'spacy': False, 'ensemble': False}
-        
-#         try:
-#             from bert_anonymizer.anonymizer import anonymize_text_with_bert
-#             availability['bert'] = True
-#             logger.debug("Local BERT anonymizer available")
-#         except (ImportError, OSError) as e:
-#             logger.debug(f"BERT Anonymizer not available: {e}")
-        
-#         try:
-#             from spacy_anonymizer.anonymizer import anonymize_text_with_spacy, is_spacy_model_available
-#             availability['spacy'] = is_spacy_model_available()
-#             if availability['spacy']:
-#                 logger.debug("Local spaCy anonymizer available")
-#         except (ImportError, OSError) as e:
-#             logger.debug(f"spaCy Anonymizer not available: {e}")
-        
-#         availability['ensemble'] = availability['bert'] and availability['spacy']
-#         if availability['ensemble']:
-#             logger.debug("Local Ensemble anonymizer available")
+    def _load_model(self):
+        """Loads the mmbert model locally."""
+        if not self.model_path.exists():
+            logger.error(f"Model path not found: {self.model_path}")
+            self.method = None
+            return
+
+        try:
+            from transformers import AutoTokenizer, AutoModelForTokenClassification
             
-#         return availability
+            logger.info(f"Loading mmbert model from: {self.model_path}")
+            self.tokenizer = AutoTokenizer.from_pretrained(str(self.model_path))
+            self.model = AutoModelForTokenClassification.from_pretrained(str(self.model_path))
+            self.model.to(self.device)
+            self.model.eval()
+            logger.info("mmbert model loaded successfully.")
+        except Exception as e:
+            logger.error(f"Failed to load mmbert model: {e}")
+            self.method = None
 
-#     def _validate_configuration(self):
-#         """Validates that the chosen method is actually available."""
-#         if self.method == 'local_ensemble' and not self.local_availability['ensemble']:
-#             logger.warning("Method 'local_ensemble' requested but unavailable. Falling back to 'remote_chat_ai' if key exists.")
-#             if self.api_key:
-#                 self.method = 'remote_chat_ai'
-#             else:
-#                 logger.error("No fallback available. Anonymization will be skipped.")
-#                 self.method = None
-#         elif self.method == 'local_bert' and not self.local_availability['bert']:
-#             logger.warning("Method 'local_bert' requested but unavailable.")
-#             self.method = None
-#         elif self.method == 'local_spacy' and not self.local_availability['spacy']:
-#             logger.warning("Method 'local_spacy' requested but unavailable.")
-#             self.method = None
-#         elif self.method == 'remote_chat_ai' and not self.api_key:
-#             logger.warning("Method 'remote_chat_ai' requested but no API key configured.")
-#             self.method = None
+    def _get_labels(self):
+        """Returns the label mapping based on the model's config."""
+        # Mapping standard NER tags to our anonymization tags
+        return {
+            'PER': '[NAME_OTHER]',
+            'ORG': '[LOCATION_ORGANISATION]',
+            'LOC': '[LOCATION_CITY]',
+            'MISC': '[ID]' 
+        }
 
-#     def anonymize(self, text):
-#         """
-#         Main entry point for anonymization.
-#         Routes to the appropriate handler based on configuration.
-        
-#         Returns:
-#             tuple: (anonymized_text, success_status, message)
-#         """
-#         if not self.method:
-#             return None, False, "Anonymization method not configured or unavailable."
+    def anonymize(self, text):
+        """
+        Main entry point for anonymization using mmbert.
+        """
+        if not self.method or not self.model:
+            return None, False, "Anonymization model not loaded."
 
-#         logger.info(f"Running anonymization via {self.method}...")
+        logger.info(f"Running anonymization via mmbert...")
 
-#         try:
-#             if self.method == 'local_ensemble':
-#                 return self._run_local_ensemble(text)
-#             elif self.method == 'local_bert':
-#                 return self._run_local_bert(text)
-#             elif self.method == 'local_spacy':
-#                 return self._run_local_spacy(text)
-#             elif self.method == 'remote_chat_ai':
-#                 return self._run_remote_llm(text)
-#             else:
-#                 return None, False, f"Unknown method: {self.method}"
-#         except Exception as e:
-#             logger.error(f"Anonymization failed unexpectedly: {e}")
-#             return None, False, str(e)
-
-#     def _run_local_ensemble(self, text):
-#         try:
-#             from ensemble_anonymizer.anonymizer import anonymize_text_with_ensemble
-#             result = anonymize_text_with_ensemble(text)
-#             return result, True, "Success"
-#         except Exception as e:
-#             logger.error(f"Ensemble error: {e}")
-#             return None, False, f"Ensemble error: {e}"
-
-#     def _run_local_bert(self, text):
-#         try:
-#             from bert_anonymizer.anonymizer import anonymize_text_with_bert
-#             result, _ = anonymize_text_with_bert(text)
-#             return result, True, "Success"
-#         except Exception as e:
-#             logger.error(f"BERT error: {e}")
-#             return None, False, f"BERT error: {e}"
-
-#     def _run_local_spacy(self, text):
-#         try:
-#             from spacy_anonymizer.anonymizer import anonymize_text_with_spacy
-#             result, _ = anonymize_text_with_spacy(text)
-#             return result, True, "Success"
-#         except Exception as e:
-#             logger.error(f"spaCy error: {e}")
-#             return None, False, f"spaCy error: {e}"
-
-#     def _run_remote_llm(self, text):
-#         import requests
-        
-#         prompts = {
-#             'basic': """
-#             Anonymize the following text by replacing only the most obvious personally identifiable information (PII) using these specific labels:
-#             - Patient names with [NAME_PATIENT]
-#             - Doctor names with [NAME_DOCTOR]
-#             - Phone numbers with [CONTACT_PHONE]
-#             - Email addresses with [CONTACT_EMAIL]
-#             - Street addresses with [LOCATION_STREET]
-#             - Cities with [LOCATION_CITY]
+        try:
+            # Tokenize
+            inputs = self.tokenizer(text, return_tensors="pt", truncation=True, padding=True)
+            inputs = {k: v.to(self.device) for k, v in inputs.items()}
             
-#             CRITICAL INSTRUCTIONS: 
-#             - Do NOT anonymize or modify speaker identification tags like SPEAKER_00, SPEAKER_01, etc.
-#             - Do NOT translate any text. Keep ALL text in its original language.
-#             - Return ONLY the anonymized text.
-#             """,
-#             'standard': """
-#             Anonymize the following text by replacing personally identifiable information (PII) using these specific labels:
-#             - Patient names with [NAME_PATIENT]
-#             - Doctor names with [NAME_DOCTOR]
-#             - Relative names with [NAME_RELATIVE]
-#             - Other names with [NAME_OTHER]
-#             - Professions with [PROFESSION]
-#             - Phone numbers with [CONTACT_PHONE]
-#             - Email addresses with [CONTACT_EMAIL]
-#             - Fax numbers with [CONTACT_FAX]
-#             - Street addresses with [LOCATION_STREET]
-#             - Cities with [LOCATION_CITY]
-#             - ZIP codes with [LOCATION_ZIP]
-#             - Hospitals with [LOCATION_HOSPITAL]
-#             - Organizations with [LOCATION_ORGANISATION]
-#             - Dates with [DATE]
-#             - Ages with [AGE]
-#             - ID numbers with [ID]
+            # Predict
+            with torch.no_grad():
+                outputs = self.model(**inputs)
+                predictions = torch.argmax(outputs.logits, dim=-1)
             
-#             CRITICAL INSTRUCTIONS: 
-#             - Do NOT anonymize or modify speaker identification tags like SPEAKER_00, SPEAKER_01, etc.
-#             - Do NOT translate any text. Keep ALL text in its original language.
-#             - Return ONLY the anonymized text.
-#             """,
-#             'strict': """
-#             Thoroughly anonymize the following text by replacing all personally identifiable information (PII) using these specific labels:
-#             - Patient names with [NAME_PATIENT]
-#             - Doctor names with [NAME_DOCTOR]
-#             - Relative names with [NAME_RELATIVE]
-#             - External names with [NAME_EXT]
-#             - Usernames with [NAME_USERNAME]
-#             - Other names with [NAME_OTHER]
-#             - Titles with [NAME_TITLE]
-#             - Professions with [PROFESSION]
-#             - Dates with [DATE]
-#             - Ages with [AGE]
-#             - Street addresses with [LOCATION_STREET]
-#             - Cities with [LOCATION_CITY]
-#             - ZIP codes with [LOCATION_ZIP]
-#             - Countries with [LOCATION_COUNTRY]
-#             - States with [LOCATION_STATE]
-#             - Hospitals with [LOCATION_HOSPITAL]
-#             - Organizations with [LOCATION_ORGANISATION]
-#             - Other locations with [LOCATION_OTHER]
-#             - ID numbers with [ID]
-#             - Phone numbers with [CONTACT_PHONE]
-#             - Email addresses with [CONTACT_EMAIL]
-#             - Fax numbers with [CONTACT_FAX]
-#             - URLs with [CONTACT_URL]
-#             - Other contact information with [CONTACT_OTHER]
+            # Decode tokens and predictions
+            tokens = self.tokenizer.convert_ids_to_tokens(inputs['input_ids'][0])
+            pred_ids = predictions[0].cpu().numpy()
             
-#             CRITICAL INSTRUCTIONS: 
-#             - Do NOT anonymize or modify speaker identification tags like SPEAKER_00, SPEAKER_01, etc.
-#             - Do NOT translate any text. Keep ALL text in its original language.
-#             - Return ONLY the anonymized text.
-#             """
-#         }
-        
-#         prompt = prompts.get(self.level, prompts['standard'])
-        
-#         headers = {
-#             'Authorization': f'Bearer {self.api_key}',
-#             'Content-Type': 'application/json'
-#         }
-        
-#         payload = {
-#             "model": self.default_model,
-#             "messages": [
-#                 {"role": "system", "content": prompt},
-#                 {"role": "user", "content": f"Text to anonymize:\n\n{text}"}
-#             ],
-#             "max_tokens": 8000,
-#             "temperature": 0.1
-#         }
-        
-#         max_retries = 3
-#         timeout = 360
-        
-#         for attempt in range(max_retries):
-#             try:
-#                 response = requests.post(
-#                     f"{self.endpoint}/chat/completions",
-#                     headers=headers,
-#                     json=payload,
-#                     timeout=timeout
-#                 )
-#                 break
-#             except requests.exceptions.Timeout:
-#                 if attempt < max_retries - 1:
-#                     logger.warning(f"Request timeout on attempt {attempt + 1}, retrying...")
-#                     time.sleep(2)
-#                     continue
-#                 else:
-#                     return None, False, "Timeout after retries"
-#             except requests.exceptions.RequestException as e:
-#                 return None, False, f"Connection error: {str(e)}"
-        
-#         if response.status_code != 200:
-#             return None, False, f"API error: {response.status_code}"
-        
-#         response_data = response.json()
-#         anonymized_text = response_data['choices'][0]['message']['content'].strip()
-        
-#         Remove any <thought> tags
-#         anonymized_text = re.sub(r'<thought>.*?</thought>', '', anonymized_text, flags=re.DOTALL).strip()
-        
-#         return anonymized_text, True, "Success"
-
-    # def save_anonymized_file(self, base_name, anonymized_text):
-    #     """Saves the anonymized text to the 'annonym' folder."""
-    #     if not anonymized_text:
-    #         logger.warning("No text to save.")
-    #         return False
+            # Map IDs to labels
+            id2label = self.model.config.id2label
+            labels = [id2label[id] for id in pred_ids]
             
-    #     output_filename = f"{base_name}_anon.txt"
-    #     output_path = ANONYM_OUTPUT_DIR / output_filename
-        
-    #     try:
-    #         with open(output_path, "w", encoding="utf-8") as f:
-    #             f.write(anonymized_text)
-    #         logger.info(f"Anonymized transcript saved to: {output_path}")
-    #         return True
-    #     except Exception as e:
-    #         logger.error(f"Failed to save anonymized file: {e}")
-    #         return False
-
-
-# --- Step 3: Anonymize Existing Transcripts ---
-
-# def process_anonymization():
-#     """
-#     Reads raw transcripts from the 'transcripts' folder, anonymizes them,
-#     and saves the results to the 'annonym' folder.
-#     This step is independent of audio processing.
-#     """
-#     if not TRANSCRIPTS_FOLDER.exists():
-#         logger.warning(f"No 'transcripts' folder found at {TRANSCRIPTS_FOLDER}. Skipping anonymization.")
-#         return
-
-#     logger.info(f"Found 'transcripts' folder at {TRANSCRIPTS_FOLDER}. Starting anonymization process...")
-
-#     Initialize Anonymization Engine
-#     if not ANONYMIZATION_ENABLED:
-#         logger.info("Anonymization is disabled in configuration.")
-#         return
-
-#     anonymizer = AnonymizationEngine(
-#         method=ANONYMIZATION_METHOD,
-#         level=ANONYMIZATION_LEVEL,
-#         api_key=CHAT_AI_API_KEY,
-#         endpoint=CHAT_AI_ENDPOINT,
-#         default_model=DEFAULT_CHAT_AI_MODEL
-#     )
-
-#     if not anonymizer.method:
-#         logger.error("Anonymization engine failed to initialize a valid method. Aborting.")
-#         return
-
-#     processed_count = 0
-#     failed_count = 0
-
-#     for file in TRANSCRIPTS_FOLDER.iterdir():
-#         if not file.is_file() or not file.suffix.lower() == ".txt":
-#             continue
-        
-#         Skip files that are already anonymized (optional safety check)
-#         if "_anon" in file.name:
-#             logger.debug(f"Skipping already anonymized file: {file.name}")
-#             continue
-
-#         base_name = file.stem
-#         logger.info(f"Processing transcript: {file.name}")
-
-#         try:
-#             with open(file, "r", encoding="utf-8") as f:
-#                 transcript_text = f.read()
-
-#             if not transcript_text.strip():
-#                 logger.warning(f"Transcript {file.name} is empty. Skipping.")
-#                 continue
-
-#             anonymized_text, success, msg = anonymizer.anonymize(transcript_text)
+            # Reconstruct text with replacements
+            label_map = self._get_labels()
             
-#             if success and anonymized_text:
-#                 anonymizer.save_anonymized_file(base_name, anonymized_text)
-#                 processed_count += 1
-#             else:
-#                 logger.warning(f"Anonymization failed for {base_name}: {msg}")
-#                 failed_count += 1
+            result_tokens = []
+            i = 0
+            while i < len(tokens):
+                token = tokens[i]
+                label = labels[i]
+                
+                # Skip special tokens (CLS, SEP, PAD)
+                if token in ['[CLS]', '[SEP]', '[PAD]', '<pad>', '<cls>', '<sep>']:
+                    i += 1
+                    continue
+                
+                # Check if this token is part of a PII entity
+                if label.startswith('B-') or label.startswith('I-'):
+                    entity_type = label.split('-')[1]
+                    replacement_tag = label_map.get(entity_type, '[UNKNOWN_PII]')
+                    
+                    # Handle multi-token entities
+                    result_tokens.append(replacement_tag)
+                    
+                    # Skip subsequent I- tokens for this entity
+                    j = i + 1
+                    while j < len(labels) and labels[j].startswith('I-') and labels[j].split('-')[1] == entity_type:
+                        j += 1
+                    i = j
+                else:
+                    # Clean token (remove subword markers like ##)
+                    clean_token = token.replace('##', '').replace('▁', ' ')
+                    result_tokens.append(clean_token)
+                    i += 1
+            
+            # Join and clean spacing
+            anonymized_text = "".join(result_tokens).replace("  ", " ").strip()
+            # Fix spacing around brackets
+            anonymized_text = re.sub(r'\s+\[', '[', anonymized_text)
+            anonymized_text = re.sub(r'\]\s+', ']', anonymized_text)
+            
+            logger.info(f"Anonymization complete. Length: {len(anonymized_text)}")
+            return anonymized_text, True, "Success"
 
-#         except Exception as e:
-#             logger.error(f"Error processing transcript {file.name}: {e}")
-#             failed_count += 1
+        except Exception as e:
+            logger.error(f"Anonymization failed: {e}", exc_info=True)
+            return None, False, str(e)
 
-#     logger.info(f"Anonymization phase complete. Processed: {processed_count}, Failed: {failed_count}")
+# --- Step 3: Anonymize Existing Transcripts (Active) ---
+
+def process_anonymization():
+    """
+    Reads raw transcripts from the 'transcripts' folder, anonymizes them,
+    and saves the results to the 'annonym' folder.
+    """
+    if not TRANSCRIPTS_FOLDER.exists():
+        logger.warning(f"No 'transcripts' folder found at {TRANSCRIPTS_FOLDER}. Skipping anonymization.")
+        return
+
+    logger.info(f"Found 'transcripts' folder at {TRANSCRIPTS_FOLDER}. Starting anonymization process...")
+
+    if not ANONYMIZATION_ENABLED:
+        logger.info("Anonymization is disabled in configuration.")
+        return
+
+    # Initialize Anonymization Engine
+    anonymizer = AnonymizationEngine(
+        method=ANONYMIZATION_METHOD,
+        level=ANONYMIZATION_LEVEL,
+        model_path=MODEL_FOLDER / "mmbert_multilingual_pii_ner" 
+    )
+
+    if not anonymizer.method:
+        logger.error("Anonymization engine failed to initialize a valid method. Aborting.")
+        return
+
+    processed_count = 0
+    failed_count = 0
+
+    for file in TRANSCRIPTS_FOLDER.iterdir():
+        if not file.is_file() or not file.suffix.lower() == ".txt":
+            continue
+        
+        if "_anon" in file.name:
+            logger.debug(f"Skipping already anonymized file: {file.name}")
+            continue
+
+        base_name = file.stem
+        logger.info(f"Processing transcript: {file.name}")
+
+        try:
+            with open(file, "r", encoding="utf-8") as f:
+                transcript_text = f.read()
+
+            if not transcript_text.strip():
+                logger.warning(f"Transcript {file.name} is empty. Skipping.")
+                continue
+
+            anonymized_text, success, msg = anonymizer.anonymize(transcript_text)
+            
+            if success and anonymized_text:
+                # Save manually since the helper method was also commented out
+                output_filename = f"{base_name}_anon.txt"
+                output_path = ANNONYM_FOLDER / output_filename
+                with open(output_path, "w", encoding="utf-8") as f:
+                    f.write(anonymized_text)
+                logger.info(f"Anonymized transcript saved to: {output_path}")
+                processed_count += 1
+            else:
+                logger.warning(f"Anonymization failed for {base_name}: {msg}")
+                failed_count += 1
+
+        except Exception as e:
+            logger.error(f"Error processing transcript {file.name}: {e}")
+            failed_count += 1
+
+    logger.info(f"Anonymization phase complete. Processed: {processed_count}, Failed: {failed_count}")
 
 # --- Main Execution ---
 
@@ -882,6 +742,6 @@ if __name__ == "__main__":
     
     process_videos()
     process_audios()
-    #process_anonymization()
+    process_anonymization()
     
     logger.info("Pipeline finished.")

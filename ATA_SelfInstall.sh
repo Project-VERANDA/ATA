@@ -116,6 +116,83 @@ else
     echo "Pyannote model cached successfully!"
 fi
 
+# 9. Download WhisperX Models (Interactive Selection)
+echo ""
+echo "-------------------------------------------------"
+echo "WhisperX Model Download Options"
+echo "These models correspond to the options in your app.py."
+echo "Select the models you want to download (separate with spaces, e.g., 'base large')."
+echo ""
+echo "Available Models:"
+echo "  - tiny      (Fastest, lowest accuracy)"
+echo "  - base      (Default, good balance)"
+echo "  - small     (More accurate, slower)"
+echo "  - medium    (High accuracy, very slow)"
+echo "  - large     (Best accuracy, slowest - ~3GB)"
+echo ""
+
+read -p "Enter model names to download (or press Enter to skip): " WHISPER_MODELS_INPUT
+
+if [ -n "$WHISPER_MODELS_INPUT" ]; then
+    # Define the target directory
+    # Assumes script is run from the project root where 'pipeline' exists
+    TARGET_BASE="$PWD/pipeline/model"
+    
+    # Create base directory if it doesn't exist
+    mkdir -p "$TARGET_BASE"
+
+    # Map user input to HuggingFace repo names
+    # Note: Systran/faster-whisper-{size}
+    declare -A MODEL_MAP
+    MODEL_MAP["tiny"]="Systran/faster-whisper-tiny"
+    MODEL_MAP["base"]="Systran/faster-whisper-base"
+    MODEL_MAP["small"]="Systran/faster-whisper-small"
+    MODEL_MAP["medium"]="Systran/faster-whisper-medium"
+    MODEL_MAP["large"]="Systran/faster-whisper-large-v3"
+
+    # Process each selected model
+    for model_name in $WHISPER_MODELS_INPUT; do
+        # Normalize input (lowercase)
+        model_name=$(echo "$model_name" | tr '[:upper:]' '[:lower:]')
+        
+        if [ -z "${MODEL_MAP[$model_name]}" ]; then
+            echo "⚠️  Warning: '$model_name' is not a valid option. Skipping."
+            continue
+        fi
+
+        hf_repo="${MODEL_MAP[$model_name]}"
+        # Create the specific folder name expected by process.py
+        # e.g., models--Systran--faster-whisper-large-v3
+        folder_name=$(echo "$hf_repo" | sed 's/\//\--/g')
+        target_dir="$TARGET_BASE/$folder_name"
+
+        echo ""
+        echo "----------------------------------------"
+        echo "Downloading: $model_name ($hf_repo)"
+        echo "Target: $target_dir"
+        echo "----------------------------------------"
+
+        if [ -d "$target_dir" ]; then
+            echo "⚠️  Model '$model_name' already exists at $target_dir. Skipping download."
+        else
+            echo "Starting download... (This may take a while for 'large')"
+            huggingface-cli download "$hf_repo" --local-dir "$target_dir" --local-dir-use-symlinks false
+            
+            if [ $? -eq 0 ]; then
+                echo "✅ Successfully downloaded: $model_name"
+            else
+                echo "❌ Failed to download: $model_name"
+            fi
+        fi
+    done
+    echo ""
+    echo "WhisperX model download phase complete."
+else
+    echo "No models selected. Skipping WhisperX downloads."
+    echo "You can download them later manually using: huggingface-cli download <repo> --local-dir <path>"
+fi
+
+
 # 8. Final Instructions
 echo ""
 echo "=== Setup Complete! ==="
