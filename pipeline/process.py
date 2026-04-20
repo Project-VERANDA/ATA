@@ -49,7 +49,7 @@ AUDIOS_FOLDER = pipeline_dir / "audios"
 TRANSCRIPTS_FOLDER = pipeline_dir / "transcripts"
 MODEL_FOLDER = pipeline_dir / "model"
 ANNONYM_FOLDER = pipeline_dir / "annonym"
-LLM_ANONNYM_FOLDER = pipeline_dir / "anonnym_LLM"
+LLM_ANONNYM_FOLDER = pipeline_dir / "annonym_LLM"
 
 # Create directories if they don't exist
 for folder in [TRANSCRIPTS_FOLDER, ANNONYM_FOLDER, MODEL_FOLDER]:
