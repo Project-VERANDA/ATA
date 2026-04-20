@@ -542,78 +542,136 @@ def transcribe_audio_locally(audio_path, language='de'):
         logger.error(error_msg, exc_info=True)  # Log full traceback to console
         return error_msg
 
-# --- Anonymization Engine Class (Active Implementation) ---
+# --- Anonymization Engine Class (Custom CRF Implementation) ---
 
 class AnonymizationEngine:
     """
-    Encapsulates all logic related to text anonymization using the local mmbert model.
+    Encapsulates all logic related to text anonymization using the local mmbert model
+    with its custom ModernBertCRF architecture.
     """
     
     def __init__(self, method="local_mmbert", level="standard", model_path=None):
         self.method = method
         self.level = level
-        # Default path to your downloaded model
+        # Point to the folder containing crf_config.json and pytorch_model.bin
         self.model_path = model_path or (MODEL_FOLDER / "mmbert_multilingual_pii_ner" / "jhu-clsp-mmBERT-base-multilingual-pii")
         self.model = None
         self.tokenizer = None
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.config = None
         
         if ANONYMIZATION_ENABLED:
             logger.info(f"AnonymizationEngine initialized: Method={self.method}, Level={self.level}, Path={self.model_path}")
             self._load_model()
 
     def _load_model(self):
-        """Loads the mmbert model locally."""
+        """Loads the mmbert model with custom CRF architecture."""
         if not self.model_path.exists():
             logger.error(f"Model path not found: {self.model_path}")
             self.method = None
             return
 
         try:
-            from transformers import AutoTokenizer, AutoModelForTokenClassification
+            from transformers import AutoModel, AutoTokenizer
+            from torchcrf import CRF
+            import torch.nn as nn
+            import json
             
-            logger.info(f"Loading mmbert model from: {self.model_path}")
-            self.tokenizer = AutoTokenizer.from_pretrained(str(self.model_path))
-            self.model = AutoModelForTokenClassification.from_pretrained(str(self.model_path))
+            # 1. Load CRF Config
+            crf_config_path = self.model_path / "crf_config.json"
+            if not crf_config_path.exists():
+                logger.error(f"crf_config.json not found at {crf_config_path}")
+                self.method = None
+                return
+            
+            with open(crf_config_path, "r") as f:
+                self.config = json.load(f)
+            
+            logger.info(f"Loaded CRF config: base_model={self.config.get('base_model_name')}, num_labels={self.config.get('num_labels')}")
+
+            # 2. Define the Custom Model Class
+            class ModernBertCRF(nn.Module):
+                def __init__(self, base_model_name, num_labels, id2label, label2id):
+                    super().__init__()
+                    self.num_labels = num_labels
+                    self.id2label = id2label
+                    self.label2id = label2id
+                    # Load the base transformer (e.g., bert-base-multilingual-cased)
+                    self.transformer = AutoModel.from_pretrained(base_model_name)
+                    hidden_size = self.transformer.config.hidden_size
+                    self.classifier = nn.Linear(hidden_size, num_labels)
+                    self.dropout = nn.Dropout(0.1)
+                    self.crf = CRF(num_labels, batch_first=True)
+
+                def forward(self, input_ids, attention_mask, labels=None, **kwargs):
+                    # Remove token_type_ids if present (common issue with some tokenizers)
+                    kwargs.pop("token_type_ids", None)
+                    outputs = self.transformer(input_ids=input_ids, attention_mask=attention_mask)
+                    sequence_output = self.dropout(outputs.last_hidden_state)
+                    emissions = self.classifier(sequence_output)
+                    if labels is not None:
+                        mask = attention_mask.bool()
+                        labels_for_crf = labels.clone()
+                        labels_for_crf[labels_for_crf == -100] = 0
+                        loss = -self.crf(emissions, labels_for_crf, mask=mask, reduction='mean')
+                        return {"loss": loss, "logits": emissions}
+                    else:
+                        return {"logits": emissions}
+
+                def decode(self, emissions, mask):
+                    return self.crf.decode(emissions, mask=mask)
+
+            # 3. Instantiate the Model
+            logger.info(f"Instantiating ModernBertCRF model...")
+            self.model = ModernBertCRF(
+                base_model_name=self.config["base_model_name"],
+                num_labels=self.config["num_labels"],
+                id2label=self.config["id2label"],
+                label2id=self.config["label2id"]
+            )
+            
+            # 4. Load Weights
+            model_weights_path = self.model_path / "pytorch_model.bin"
+            logger.info(f"Loading weights from {model_weights_path}...")
+            state_dict = torch.load(model_weights_path, map_location=self.device)
+            self.model.load_state_dict(state_dict)
+            
             self.model.to(self.device)
             self.model.eval()
-            logger.info("mmbert model loaded successfully.")
+            
+            # 5. Load Tokenizer
+            logger.info("Loading tokenizer...")
+            self.tokenizer = AutoTokenizer.from_pretrained(str(self.model_path))
+            
+            logger.info("mmbert model with CRF loaded successfully.")
+
+        except ImportError as e:
+            logger.error(f"Missing dependency (likely torchcrf). Install with: pip install torchcrf. Error: {e}")
+            self.method = None
         except Exception as e:
+            import traceback
             logger.error(f"Failed to load mmbert model: {e}")
+            logger.error(f"Full Traceback:\n{traceback.format_exc()}")
             self.method = None
 
     def _get_labels(self):
-        """
-        Maps the model's output labels to our anonymization tags based on 
-        deryaerman/mmbert_multilingual_pii_ner entity types.
-        """
+        """Maps the model's output labels to our anonymization tags."""
         return {
-            # People
             'PERSON': '[NAME_OTHER]',
             'PERSON_EMAIL': '[CONTACT_EMAIL]',
             'PERSON_SOCIAL_RELATION': '[NAME_RELATIVE]',
-            
-            # Organizations
             'ORG': '[LOCATION_ORGANISATION]',
-            
-            # Locations
             'LOC_CITY': '[LOCATION_CITY]',
             'LOC_COUNTRY': '[LOCATION_COUNTRY]',
             'LOC_STREET': '[LOCATION_STREET]',
             'LOC_ZIP': '[LOCATION_ZIP]',
             'LOC_HOUSENUMBER': '[LOCATION_STREET]',
             'LOC_OTHER': '[LOCATION_OTHER]',
-            
-            # Time & Dates
             'DATETIME': '[DATE]',
             'DATETIME_AGE': '[AGE]',
-            
-            # Identifiers & Codes
             'CODE': '[ID]',
             'CODE_PHONE': '[CONTACT_PHONE]',
             'CODE_URL': '[CONTACT_URL]',
-            
-            # Other PII
             'PROFESSION': '[PROFESSION]',
             'PRODUCT': '[ID]',
             'QUANTITY': '[ID]',
@@ -621,68 +679,69 @@ class AnonymizationEngine:
         }
 
     def anonymize(self, text):
-        """
-        Main entry point for anonymization using mmbert.
-        """
-        if not self.method or not self.model:
+        """Main entry point for anonymization using the custom CRF model."""
+        if not self.method or not self.model or not self.tokenizer:
             return None, False, "Anonymization model not loaded."
 
-        logger.info(f"Running anonymization via mmbert...")
+        logger.info(f"Running anonymization via mmbert (CRF)...")
 
         try:
             # Tokenize
-            inputs = self.tokenizer(text, return_tensors="pt", truncation=True, padding=True)
+            inputs = self.tokenizer(text, return_tensors="pt", truncation=True, max_length=512)
             inputs = {k: v.to(self.device) for k, v in inputs.items()}
-            
-            # Predict
+            # Remove token_type_ids if present to match model expectation
+            if "token_type_ids" in inputs:
+                del inputs["token_type_ids"]
+
+            # Inference
             with torch.no_grad():
                 outputs = self.model(**inputs)
-                predictions = torch.argmax(outputs.logits, dim=-1)
+                emissions = outputs["logits"]
+                mask = inputs["attention_mask"].bool()
+                
+                # CRF Decoding
+                predictions = self.model.decode(emissions, mask)
+
+            # Map predictions to labels
+            # predictions is a list of lists (batch_size x seq_len)
+            pred_ids = predictions[0] # Take first batch item
             
-            # Decode tokens and predictions
             tokens = self.tokenizer.convert_ids_to_tokens(inputs['input_ids'][0])
-            pred_ids = predictions[0].cpu().numpy()
+            id2label = self.config["id2label"]
+            labels = [id2label[str(pid)] for pid in pred_ids]
             
-            # Map IDs to labels
-            id2label = self.model.config.id2label
-            labels = [id2label[id] for id in pred_ids]
-            
-            # Reconstruct text with replacements
+            # Reconstruct text
             label_map = self._get_labels()
-            
             result_tokens = []
             i = 0
             while i < len(tokens):
                 token = tokens[i]
                 label = labels[i]
                 
-                # Skip special tokens (CLS, SEP, PAD)
+                # Skip special tokens
                 if token in ['[CLS]', '[SEP]', '[PAD]', '<pad>', '<cls>', '<sep>']:
                     i += 1
                     continue
                 
-                # Check if this token is part of a PII entity
+                # Handle B- and I- tags
                 if label.startswith('B-') or label.startswith('I-'):
                     entity_type = label.split('-')[1]
                     replacement_tag = label_map.get(entity_type, '[UNKNOWN_PII]')
-                    
-                    # Handle multi-token entities
                     result_tokens.append(replacement_tag)
                     
-                    # Skip subsequent I- tokens for this entity
+                    # Skip subsequent I- tags for this entity
                     j = i + 1
                     while j < len(labels) and labels[j].startswith('I-') and labels[j].split('-')[1] == entity_type:
                         j += 1
                     i = j
                 else:
-                    # Clean token (remove subword markers like ##)
+                    # Clean token
                     clean_token = token.replace('##', '').replace('▁', ' ')
                     result_tokens.append(clean_token)
                     i += 1
             
             # Join and clean spacing
             anonymized_text = "".join(result_tokens).replace("  ", " ").strip()
-            # Fix spacing around brackets
             anonymized_text = re.sub(r'\s+\[', '[', anonymized_text)
             anonymized_text = re.sub(r'\]\s+', ']', anonymized_text)
             
