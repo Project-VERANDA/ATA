@@ -553,7 +553,7 @@ class AnonymizationEngine:
         self.method = method
         self.level = level
         # Default path to your downloaded model
-        self.model_path = model_path or (MODEL_FOLDER / "mmbert_multilingual_pii_ner")
+        self.model_path = model_path or (MODEL_FOLDER / "mmbert_multilingual_pii_ner" / "jhu-clsp-mmBERT-base-multilingual-pii")
         self.model = None
         self.tokenizer = None
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -686,7 +686,7 @@ def process_anonymization():
     anonymizer = AnonymizationEngine(
         method=ANONYMIZATION_METHOD,
         level=ANONYMIZATION_LEVEL,
-        model_path=MODEL_FOLDER / "mmbert_multilingual_pii_ner" 
+        model_path=MODEL_FOLDER / "mmbert_multilingual_pii_ner" / "jhu-clsp-mmBERT-base-multilingual-pii"
     )
 
     if not anonymizer.method:
