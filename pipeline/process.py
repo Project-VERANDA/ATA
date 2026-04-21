@@ -69,7 +69,7 @@ AUDIOS_FOLDER = pipeline_dir / "audios"
 TRANSCRIPTS_FOLDER = pipeline_dir / "transcripts"
 MODEL_FOLDER = pipeline_dir / "model"
 ANNONYM_FOLDER = pipeline_dir / "annonym"
-LLM_ANONNYM_FOLDER = pipeline_dir / "annonym_LLM"
+LLM_ANONNYM_FOLDER = pipeline_dir / "LLM-Anon"
 
 # Create directories if they don't exist
 for folder in [TRANSCRIPTS_FOLDER, ANNONYM_FOLDER, MODEL_FOLDER,LLM_ANONNYM_FOLDER]:
@@ -120,7 +120,7 @@ CHAT_AI_ENDPOINT = os.getenv('CHAT_AI_ENDPOINT', 'https://llm.cloud.cci.charite.
 DEFAULT_CHAT_AI_MODEL = os.getenv('CHAT_AI_MODEL', 'gpt-oss-120b')
 LLM_REWRITE_ENABLED = True
 
-""" LLM_REWRITE_SYSTEM_PROMPT = (
+LLM_REWRITE_SYSTEM_PROMPT = (
     "You are an expert privacy auditor specializing in de-identification. "
     "Your task is to rewrite the provided text to remove any **indirect identifiers**. "
     "Indirect identifiers include: specific job titles, unique combinations of demographics, rare locations, specific dates, "
@@ -129,11 +129,8 @@ LLM_REWRITE_ENABLED = True
     "IMPORTANT: Preserve the original speaker tags (e.g., SPEAKER_00, SPEAKER_01) exactly as they appear. "
     "Do not change the general meaning or flow of the conversation. "
     "Return ONLY the rewritten text. Do not include any introductory or concluding remarks."
-) """
-
-LLM_REWRITE_SYSTEM_PROMPT = (
-    "Replace the full text with the following statement: This file has been erased."
 )
+
 
 AVAILABLE_LLM_MODELS = {
     'medgemma': 'medgemma-1.5-4b-it',
