@@ -12,6 +12,17 @@ from datetime import datetime, timezone, timedelta
 from process import transcribe_audio_locally, load_models, call_llm_rewriter, AVAILABLE_LLM_MODELS, LLM_API_KEY, LLM_API_BASE
 
 
+# Calculate the path to the parent directory of the current script (interactive_app/)
+current_script_dir = Path(__file__).resolve().parent
+main_folder = current_script_dir.parent
+
+# Add the 'pipeline' folder to sys.path so 'process' can be found
+pipeline_path = main_folder / "pipeline"
+if str(pipeline_path) not in sys.path:
+    sys.path.insert(0, str(pipeline_path))
+    print(f"DEBUG: Added {pipeline_path} to sys.path")
+
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
