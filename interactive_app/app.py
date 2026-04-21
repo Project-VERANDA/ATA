@@ -19,7 +19,7 @@ pipeline_path = main_folder / "pipeline"
 if str(pipeline_path) not in sys.path:
     sys.path.insert(0, str(pipeline_path))
     print(f"DEBUG: Added {pipeline_path} to sys.path")
-from process import transcribe_audio_locally, load_models, call_llm_rewriter, AVAILABLE_LLM_MODELS, LLM_API_KEY, LLM_API_BASE
+from process import transcribe_audio_locally, load_models, call_llm_rewriter, AVAILABLE_LLM_MODELS, CHAT_AI_API_KEY, CHAT_AI_API_BASE
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -142,8 +142,8 @@ def transcribe_audio(audio_path, language='de'):
     return transcribe_audio_locally(audio_path, language)
 
 # --- CONFIGURATION ---
-LLM_API_KEY = os.getenv('LLM_API_KEY')
-LLM_API_BASE = os.getenv('LLM_API_BASE', 'https://llm.cloud.cci.charite.de/v1')
+CHAT_AI_API_KEY = os.getenv('CHAT_AI_API_KEY')
+LLM_API_BASE = os.getenv('CHAT_AI_API_BASE', 'https://llm.cloud.cci.charite.de/v1')
 LLM_DEFAULT_MODEL = os.getenv('LLM_DEFAULT_MODEL', 'medgemma')
 
 AVAILABLE_MODELS = {
@@ -583,7 +583,7 @@ def llm_rewrite_route():
         if not enabled:
             return jsonify({'error': 'LLM rewriting is disabled'}), 400
 
-        if not LLM_API_KEY:
+        if not CHAT_AI_API_KEY:
             return jsonify({'error': 'LLM API Key not configured on server'}), 500
 
         # Resolve the model key to the full ID (e.g., 'medgemma' -> 'google/medgemma-1.5-4b-it')
