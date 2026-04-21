@@ -1025,6 +1025,34 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None):
     if use_llm:
         logger.info(f"  LLM Rewritten: {llm_processed_count}")
 
+def anonymize_text_locally(text):
+    """
+    Wrapper function to anonymize text using the local BERT model.
+    Returns (anonymized_text, success_status, error_message)
+    """
+    try:
+        # Initialize the engine (this handles loading the model if not already loaded)
+        # We use the global configuration from process.py
+        engine = AnonymizationEngine(
+            method="local_mmbert", 
+            level="standard", 
+            model_path=MODEL_FOLDER / "mmbert_multilingual_pii_ner" / "jhu-clsp-mmBERT-base-multilingual-pii"
+        )
+        
+        if not engine.method:
+            return None, False, "Anonymization engine failed to initialize."
+
+        result_text, success, msg = engine.anonymize(text)
+        
+        if success:
+            return result_text, True, "Success"
+        else:
+            return None, False, msg
+            
+    except Exception as e:
+        logger.error(f"Error in anonymize_text_locally: {e}")
+        return None, False, str(e)
+
 # --- Main Execution ---
 
 if __name__ == "__main__":

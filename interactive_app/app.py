@@ -10,16 +10,38 @@ from pathlib import Path
 import ipaddress
 from datetime import datetime, timezone, timedelta
 
-# Calculate the path to the parent directory of the current script (interactive_app/)
+# --- PATH SETUP ---
 current_script_dir = Path(__file__).resolve().parent
 main_folder = current_script_dir.parent
 
-# Add the 'pipeline' folder to sys.path so 'process' can be found
+# 1. Add 'pipeline' to sys.path
 pipeline_path = main_folder / "pipeline"
 if str(pipeline_path) not in sys.path:
     sys.path.insert(0, str(pipeline_path))
     print(f"DEBUG: Added {pipeline_path} to sys.path")
-from process import transcribe_audio_locally, load_models, call_llm_rewriter, AVAILABLE_LLM_MODELS, CHAT_AI_API_KEY, CHAT_AI_ENDPOINT
+
+# 2. Add 'pipeline/model' to sys.path (where anonymizer lives)
+model_folder_path = pipeline_path / "model"
+if str(model_folder_path) not in sys.path:
+    sys.path.insert(0, str(model_folder_path))
+    print(f"DEBUG: Added {model_folder_path} to sys.path")
+
+# Import shared functions from process.py
+try:
+    from process import (
+        transcribe_audio_locally, 
+        load_models, 
+        call_llm_rewriter, 
+        AVAILABLE_LLM_MODELS, 
+        CHAT_AI_API_KEY, 
+        CHAT_AI_ENDPOINT,
+        anonymize_text_locally
+    )
+    logger = logging.getLogger(__name__)
+    logger.info("Successfully imported shared functions from process.py")
+except ImportError as e:
+    logger.critical(f"CRITICAL: Could not import from process.py: {e}")
+    sys.exit(1)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -59,32 +81,7 @@ if str(model_training_path) not in sys.path:
 
 logger.info(f"Added ModelTraining path: {model_training_path}")
 
-# --- Anonymizer Availability Flags ---
-# Initialize to False first, then try to update
-BERT_ANONYMIZER_AVAILABLE = False
-SPACY_ANONYMIZER_AVAILABLE = False
-ENSEMBLE_ANONYMIZER_AVAILABLE = False
-
-# Try to import the custom anonymizer functions
-try:
-    from ensemble_anonymizer.anonymizer import (
-        anonymize_text_with_bert,
-        anonymize_text_with_spacy,
-        anonymize_text_with_ensemble
-    )
-    BERT_ANONYMIZER_AVAILABLE = True
-    logger.info("Custom BERT Anonymizer loaded successfully.")
-except Exception as e:
-    logger.warning(f"Custom BERT Anonymizer not available. Error: {e}")
-    # Define dummy functions to prevent crashes if called later
-    def anonymize_text_with_bert(text):
-        return text, []
-    def anonymize_text_with_spacy(text):
-        return text, []
-    def anonymize_text_with_ensemble(text):
-        return text, []
-
-# Note: spaCy and Ensemble are not available yet
+BERT_ANONYMIZER_AVAILABLE = True # We assume it's available if the import succeeded
 DEFAULT_MODEL = 'bert-base-ner'
 TTS_AVAILABLE = GTTS_AVAILABLE
 
