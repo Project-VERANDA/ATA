@@ -458,72 +458,67 @@ _loaded_whisper_model = None
 _loaded_diarize_model = None
 
 def load_models():
-    """Loads models locally. Called once on import or first use."""
+    """Loads models locally on GPU if available."""
     global _loaded_whisper_model, _loaded_diarize_model
     
     if _loaded_whisper_model and _loaded_diarize_model:
         return _loaded_whisper_model, _loaded_diarize_model
 
-    # 1. Define paths
-    logger.info(f"Loading WhisperX model from: {WHISPERX_MODEL_PATH}")
+    # 1. Determine Device
+    device_str = "cuda" if torch.cuda.is_available() else "cpu"
+    device = torch.device(device_str)
     
-    # 2. Verify paths
-    if not verify_whisperx_model(WHISPERX_MODEL_PATH):
-        logger.critical("WhisperX model verification failed.")
-        return None, None
-    
-    if not DIARIZATION_MODEL_PATH.exists():
-        logger.warning(f"Diarization model not found at {DIARIZATION_MODEL_PATH}.")
-        logger.warning("Will proceed without speaker diarization.")
-        _loaded_diarize_model = None
+    logger.info(f"=== DEVICE CHECK ===")
+    logger.info(f"CUDA Available: {torch.cuda.is_available()}")
+    if device_str == "cuda":
+        logger.info(f"GPU Detected: {torch.cuda.get_device_name(0)}")
+        logger.info(f"Device Object: {device}")
     else:
-        if not verify_diarization_model(DIARIZATION_MODEL_PATH):
-            logger.warning("Diarization model verification failed. Will proceed without it.")
-            _loaded_diarize_model = None
-    
-    # 3. Load WhisperX (local_files_only=True)
-    try:
-        logger.info("="*40)
-        logger.info("GPU DETECTION CHECK")
-        logger.info("="*40)
-        cuda_available = torch.cuda.is_available()
-        device_count = torch.cuda.device_count()
+        logger.warning("⚠️ NO GPU DETECTED. Falling back to CPU. Performance will be slow.")
+    logger.info("====================")
 
-        if cuda_available:
-            logger.info(f"✅ CUDA is AVAILABLE!")
-            logger.info(f"   Number of GPUs detected: {device_count}")
-            for i in range(device_count):
-                logger.info(f"   GPU {i}: {torch.cuda.get_device_name(i)}")
-            logger.info(f"   Current Device: cuda:{torch.cuda.current_device()}")
-        else:
-            logger.warning("❌ CUDA is NOT available. Falling back to CPU.")
-            logger.warning("   This will cause significantly slower processing speeds.")
-            logger.warning("   Check if NVIDIA drivers are installed or if a GPU instance is attached.")
-            logger.info("="*40)
+    # 2. Load WhisperX Model (GPU)
+    try:
+        logger.info(f"Loading WhisperX model on {device_str}...")
         _loaded_whisper_model = whisperx.load_model(
             "large-v3", 
-            DEVICE, 
-            compute_type=COMPUTE_TYPE, 
+            device_str, 
+            compute_type="float16" if device_str == "cuda" else "float32", 
             download_root=str(MODEL_FOLDER),
             local_files_only=True
         )
-        logger.info("WhisperX model loaded successfully.")
+        logger.info("✅ WhisperX model loaded successfully.")
     except Exception as e:
         logger.critical(f"Failed to load WhisperX model: {e}")
         return None, None
     
-    # 4. Load Pyannote Pipeline (local_files_only=True) if available
-    if _loaded_diarize_model is None and DIARIZATION_MODEL_PATH.exists():
+    # 3. Load Diarization Pipeline (GPU)
+    if DIARIZATION_MODEL_PATH.exists():
         try:
+            logger.info(f"Loading Diarization Pipeline on {device_str}...")
             from pyannote.audio import Pipeline
+            
+            # Load the pipeline
             _loaded_diarize_model = Pipeline.from_pretrained(
                 str(DIARIZATION_MODEL_PATH)
             )
-            logger.info("Diarization Pipeline loaded successfully (offline mode).")
+            
+            # Set pipeline to use GPU if nvidia GPU detected.
+            if device_str == "cuda":
+                _loaded_diarize_model.to(device)  # Uses the torch.device object
+                logger.info("✅ Diarization Pipeline moved to GPU using .to(torch.device('cuda')).")
+            else:
+                logger.warning("⚠️ Diarization Pipeline loaded on CPU.")
+                
         except Exception as e:
-            logger.warning(f"Failed to load local Diarization Pipeline: {e}")
+            logger.error(f"Failed to load Diarization Pipeline: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             _loaded_diarize_model = None
-    
+    else:
+        logger.warning("Diarization model path not found. Skipping.")
+        _loaded_diarize_model = None
+
     logger.info("Models loaded successfully.")
     return _loaded_whisper_model, _loaded_diarize_model
 
