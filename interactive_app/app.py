@@ -351,24 +351,25 @@ def anonymize_text():
         
         text = data['text']
         
-        # Force usage of BERT model regardless of what the frontend sends
-        selected_model = 'bert-base-ner'
-
         if not BERT_ANONYMIZER_AVAILABLE:
             return jsonify({'error': 'BERT anonymizer not available. Please check server logs.'}), 500
         
-        # Call the BERT function directly
-        anonymized_text, entities = anonymize_text_with_bert(text)
+        # Call the NEW function from process.py
+        anonymized_text, success, error_msg = anonymize_text_locally(text)
+        
+        if not success:
+            logger.error(f"Anonymization failed: {error_msg}")
+            return jsonify({'error': f'Anonymization failed: {error_msg}'}), 500
         
         return jsonify({
             'success': True, 
             'anonymized_text': anonymized_text, 
-            'model_used': 'Local BERT', 
+            'model_used': 'Local BERT (via process.py)', 
             'tts_available': GTTS_AVAILABLE
         })
     
     except Exception as e:
-        logger.error(f"Error anonymizing text: {str(e)}")
+        logger.error(f"Error in anonymize route: {str(e)}")
         return jsonify({'error': f'Error anonymizing text: {str(e)}'}), 500
 
 @app.route('/generate_speech', methods=['POST'])
