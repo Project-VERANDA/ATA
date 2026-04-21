@@ -133,14 +133,14 @@ LLM_REWRITE_SYSTEM_PROMPT = (
 
 
 AVAILABLE_LLM_MODELS = {
-    'medgemma': 'medgemma',
-    'medgemma27b': 'medgemma-27b',
+    'medgemma': 'medgemma-1.5-4b-it',
+    'medgemma27b': 'medgemma-27b-it',
     'gpt-oss-120b': 'gpt-oss-120b',
     'Qwen3.5-27B': 'Qwen3.5-27B',
     'Qwen3.5-397B-A17B': 'Qwen3.5-397B-A17B',
-    'qwen3-asr-1.7b': 'qwen3-asr-1.7b',
-    'cle-Kimi-K2.5': 'cle-Kimi-K2.5',
-    'cle-Qwen3.5-397B-A17B-FP8': 'cle-Qwen3.5-397B-A17B-FP8'
+    'qwen3-asr-1.7b': 'Qwen3-ASR-1.7B',
+    'cle-Kimi-K2.5': 'Kimi-K2.5',
+    'cle-Qwen3.5-397B-A17B-FP8': 'Qwen3.5-397B-A17B-FP8'
 }
 
 
@@ -933,11 +933,6 @@ def call_llm_rewriter(text, model_id, system_prompt=None):
             raise ValueError("API returned an empty string after stripping.")
 
         return rewritten_text, "Success"
-
-    except Exception as e:
-        logger.error(f"LLM Rewriter failed: {e}")
-        return None, str(e)
-
 # --- Step 3: Anonymize Existing Transcripts (Active) ---
 
 def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None):
