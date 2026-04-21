@@ -408,7 +408,14 @@
         .hidden {
             display: none;
         }
+        #llm-output-section {
+        animation: fadeIn 0.5s;
+        }
 
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
     </style>
 </head>
 <body>
@@ -527,6 +534,11 @@
                 <button id="llm-rewrite-btn" class="button" disabled>
                     <span class="icon">✨</span> Rewrite with LLM
                 </button>
+            </div>
+
+            <div id="llm-output-section" style="margin-top: 20px; display: none;">
+                <h4 style="color: #003366; margin-bottom: 10px;">LLM Rewritten Output:</h4>
+                <textarea id="llm-rewritten-text" class="text-area" placeholder="LLM rewritten text will appear here..." readonly></textarea>
             </div>
             
             <div id="llm-status" class="status" style="margin-top: 15px;"></div>
@@ -857,7 +869,14 @@
                     const result = await response.json();
 
                     if (response.ok && result.success) {
-                        anonymizedText.value = result.rewritten_text;
+                        // 1. Populate the NEW text box
+                        const llmOutputBox = document.getElementById('llm-rewritten-text');
+                        llmOutputBox.value = result.rewritten_text;
+                        
+                        // 2. Show the new section
+                        document.getElementById('llm-output-section').style.display = 'block';
+                        
+                        // 3. Update status
                         updateStatus(`Successfully rewritten using ${result.model_used}.`, false);
                         llmStatusDiv.textContent = `Rewritten with ${result.model_used}.`;
                         llmStatusDiv.className = 'status success';
@@ -871,6 +890,8 @@
                     llmStatusDiv.textContent = `Error: ${error.message}`;
                     llmStatusDiv.className = 'status error';
                     llmStatusDiv.style.display = 'block';
+                    // Hide the output section on error
+                    document.getElementById('llm-output-section').style.display = 'none';
                 } finally {
                     showLoader(false);
                     llmRewriteBtn.disabled = false;
@@ -878,37 +899,26 @@
             }
 
             // --- Initialization ---
-            
+
             async function loadLLMModels() {
                 try {
-                    // Fetch the models from the backend (we reuse the /models endpoint logic or create a new one)
-                    // Assuming /models returns the AVAILABLE_LLM_MODELS in the 'available_models' object
                     const response = await fetch('/models');
                     const data = await response.json();
-                    
+
                     llmModelSelect.innerHTML = '';
-                    const availableModels = data.available_models;
                     
-                    // Filter for LLM models (excluding local BERT/spacy if they are mixed in)
-                    // We assume the backend returns keys like 'medgemma', 'Qwen3.5-27B' etc.
-                    // and excludes 'bert-base-ner', 'spacy-de-ner', etc.
-                    
-                    const llmKeys = [
-                        'medgemma', 'medgemma27b', 'gpt-oss-120b', 
-                        'Qwen3.5-27B', 'Qwen3.5-397B-A17B', 
-                        'qwen3-asr-1.7b', 'cle-Kimi-K2.5', 'cle-Qwen3.5-397B-A17B-FP8'
-                    ];
+                    // Use the new 'llm_models' key from the backend
+                    const llmModels = data.llm_models || {}; 
 
                     let hasModels = false;
-                    llmKeys.forEach(key => {
-                        if (availableModels[key]) {
-                            const option = document.createElement('option');
-                            option.value = key;
-                            option.textContent = availableModels[key];
-                            llmModelSelect.appendChild(option);
-                            hasModels = true;
-                        }
-                    });
+                    // Iterate over the model entries (key = ID, value = Display Name)
+                    for (const [key, displayName] of Object.entries(llmModels)) {
+                        const option = document.createElement('option');
+                        option.value = key;          // Sends 'medgemma', 'gpt-oss-120b', etc.
+                        option.textContent = displayName; // Shows 'MedGemma 4B', 'GPT-OSS 120B', etc.
+                        llmModelSelect.appendChild(option);
+                        hasModels = true;
+                    }
 
                     if (!hasModels) {
                         const opt = document.createElement('option');
@@ -917,71 +927,32 @@
                         llmModelSelect.appendChild(opt);
                     }
 
-                    // Set default
-                    if (data.default_model && llmKeys.includes(data.default_model)) {
+                    // Set default if available
+                    if (data.default_model && llmModels[data.default_model]) {
                         llmModelSelect.value = data.default_model;
                     }
                 } catch (error) {
                     console.error('Error loading LLM models:', error);
+                    updateStatus('Failed to load LLM models.', true);
                 }
             }
-            
+
+            // Simplified: We no longer need a dropdown for the main anonymization model
+            // This function now just verifies the backend is ready, or can be removed entirely.
             async function loadAnonymizationModels() {
                 try {
                     const response = await fetch('/models');
                     const data = await response.json();
                     
-                    modelSelect.innerHTML = ''; // Clear existing options
-
-                    const availableModels = data.available_models;
-                    const localModelsData = availableModels.local_models || {};
-
-                    // Manually add BERT model if it exists at the top level (from older backend versions)
-                    if (availableModels['bert-base-ner'] && !localModelsData['bert-base-ner']) {
-                        localModelsData['bert-base-ner'] = availableModels['bert-base-ner'];
+                    // We don't populate a dropdown anymore, but we can log availability
+                    if (data.available_models && data.available_models['bert-base-ner']) {
+                        console.log('Local BERT Anonymizer is available.');
+                    } else {
+                        console.warn('Local BERT Anonymizer is NOT available.');
+                        updateStatus('Warning: BERT Anonymizer not available.', true);
                     }
-
-                    // Handle Local Models
-                    if (Object.keys(localModelsData).length > 0) {
-                        const localOptgroup = document.createElement('optgroup');
-                        localOptgroup.label = 'Local Models';
-                        for (const key in localModelsData) {
-                            const option = document.createElement('option');
-                            option.value = key;
-                            option.textContent = localModelsData[key];
-                            localOptgroup.appendChild(option);
-                        }
-                        modelSelect.appendChild(localOptgroup);
-                    }
-
-                    // Handle LLM Models from API
-                    const llmOptgroup = document.createElement('optgroup');
-                    llmOptgroup.label = 'LLM Models (API)';
-                    let hasLlmModels = false;
-                    
-                    for (const key in availableModels) {
-                        // Skip keys that are part of local models to avoid duplication
-                        if (key === 'local_models' || key === 'bert-base-ner' || localModelsData[key]) continue;
-
-                        const option = document.createElement('option');
-                        option.value = key;
-                        option.textContent = availableModels[key];
-                        llmOptgroup.appendChild(option);
-                        hasLlmModels = true;
-                    }
-
-                    if (hasLlmModels) {
-                        modelSelect.appendChild(llmOptgroup);
-                    }
-
-                    // Set default model
-                    if (data.default_model) {
-                        modelSelect.value = data.default_model;
-                    }
-
                 } catch (error) {
-                    console.error('Error loading anonymization models:', error);
-                
+                    console.error('Error checking anonymization models:', error);
                 }
             }
 
@@ -1006,26 +977,35 @@
             }
 
             async function checkServerHealth() {
-            try {
-                const response = await fetch('/health');
+                try {
+                    const response = await fetch('/health');
                     const data = await response.json();
                     console.log('Server health:', data);
                     if (!data.chat_ai_configured) {
-                        updateStatus("Warning: Chat AI API key not configured. LLM anonymization will not work.", true);
+                        updateStatus("Warning: Chat AI API key not configured. LLM rewriting will not work.", true);
                     }
                 } catch (error) {
                     console.error('Health check failed:', error);
                     updateStatus("Could not connect to the server.", true);
+                }
             }
+
+            function initialize() {
+                loadAnonymizationModels(); // Optional: just for logging
+                loadTranscriptionModels();
+                loadLLMModels();
+                checkServerHealth();
             }
-            
+
+            // Event Listeners
             recordBtn.addEventListener('click', toggleRecording);
             fileInput.addEventListener('change', handleFileUpload);
             transcribeBtn.addEventListener('click', transcribe);
             anonymizeBtn.addEventListener('click', anonymizeText);
             generateSpeechBtn.addEventListener('click', generateSpeech);
             llmRewriteBtn.addEventListener('click', handleLLMRewrite);
-            
+
+            // Enable LLM button only if text exists
             anonymizedText.addEventListener('input', () => {
                 if (anonymizedText.value.trim().length > 0) {
                     llmRewriteBtn.disabled = false;
@@ -1033,14 +1013,8 @@
                     llmRewriteBtn.disabled = true;
                 }
             });
-            // --- Event Listeners ---  <-- NEW BLOCK ENDS HERE
 
-            function initialize() {
-                loadTranscriptionModels();
-                loadLLMModels();
-                checkServerHealth();
-            }
-            
+            // Run initialization
             initialize();
         });
     </script>
