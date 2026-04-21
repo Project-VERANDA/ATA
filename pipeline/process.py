@@ -883,13 +883,12 @@ class AnonymizationEngine:
 def call_llm_rewriter(text, model_id, system_prompt=None):
     """
     Calls the external LLM API to rewrite text.
-    If system_prompt is None, it defaults to the global LLM_REWRITE_SYSTEM_PROMPT.
+    Handles various response formats from different models (Qwen, MedGemma, etc.).
     """
     if not CHAT_AI_API_KEY:
         logger.error("LLM API Key not configured. Skipping LLM rewrite.")
         return None, "API Key missing"
 
-    # Use the provided prompt or fall back to the global constant
     final_system_prompt = system_prompt if system_prompt is not None else LLM_REWRITE_SYSTEM_PROMPT
 
     try:
@@ -918,24 +917,78 @@ def call_llm_rewriter(text, model_id, system_prompt=None):
             max_tokens=4096
         )
 
-        # Safety check: Ensure content exists and is not None
-        if not chat_completion.choices or not chat_completion.choices[0].message:
-            raise ValueError("API response missing choices or message object.")
+        # --- ROBUST RESPONSE PARSING START ---
+        rewritten_text = None
+
+        # 1. Try standard OpenAI format
+        if (hasattr(chat_completion, 'choices') and 
+            chat_completion.choices and 
+            hasattr(chat_completion.choices[0], 'message') and
+            hasattr(chat_completion.choices[0].message, 'content')):
             
-        content = chat_completion.choices[0].message.content
-        
-        if content is None:
-            raise ValueError("API returned None for message content. The model may have failed silently.")
+            content = chat_completion.choices[0].message.content
             
-        rewritten_text = content.strip()
+            # If content is None, try to find it in raw attributes (some APIs do this)
+            if content is None:
+                # Fallback: check if the message object itself holds the text in a non-standard way
+                # Some ASR models return text directly in the message object or as a string
+                if hasattr(chat_completion.choices[0].message, 'text'):
+                    content = chat_completion.choices[0].message.text
+                elif hasattr(chat_completion.choices[0].message, 'raw_content'):
+                    content = chat_completion.choices[0].message.raw_content
+                else:
+                    # Last resort: try to convert the whole message to string and parse
+                    msg_str = str(chat_completion.choices[0].message)
+                    if "<asr_text>" in msg_str:
+                        # Extract content between tags for Qwen-asr
+                        import re
+                        match = re.search(r'<asr_text>(.*?)</asr_text>', msg_str, re.DOTALL)
+                        if match:
+                            content = match.group(1)
+                        else:
+                            content = msg_str # Fallback to raw string
+                    else:
+                        content = None
+
+            if content is not None:
+                rewritten_text = str(content).strip()
         
+        # 2. Fallback: If standard parsing failed, try to extract from raw response dict
+        if rewritten_text is None:
+            try:
+                # Convert response to dict to inspect keys
+                raw_data = chat_completion.to_dict()
+                if 'choices' in raw_data and raw_data['choices']:
+                    choice = raw_data['choices'][0]
+                    if 'message' in choice:
+                        msg = choice['message']
+                        if 'content' in msg and msg['content']:
+                            rewritten_text = str(msg['content']).strip()
+                        elif 'text' in msg and msg['text']:
+                            rewritten_text = str(msg['text']).strip()
+                        elif 'asr_text' in msg:
+                            rewritten_text = str(msg['asr_text']).strip()
+            except Exception:
+                pass # Ignore dict conversion errors
+
+        # 3. Post-processing: Clean up "Thinking" blocks (MedGemma style)
+        if rewritten_text:
+            # Remove <think>...</think> blocks if present
+            think_pattern = r'<think>.*?</think>'
+            rewritten_text = re.sub(think_pattern, '', rewritten_text, flags=re.DOTALL).strip()
+            
+            # Remove <asr_text> tags if they somehow survived
+            rewritten_text = re.sub(r'<asr_text>|</asr_text>', '', rewritten_text).strip()
+
         if not rewritten_text:
-            raise ValueError("API returned an empty string after stripping.")
+            raise ValueError("Model returned empty content or unrecognized format.")
+
+        # --- ROBUST RESPONSE PARSING END ---
 
         return rewritten_text, "Success"
 
     except Exception as e:
-        logger.error(f"LLM Rewriter failed: {e}")
+        logger.error(f"LLM Rewriter failed for model {final_model}: {e}")
         return None, str(e)
 
 # --- Step 3: Anonymize Existing Transcripts (Active) ---
