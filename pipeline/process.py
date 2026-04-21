@@ -918,13 +918,22 @@ def call_llm_rewriter(text, model_id, system_prompt=None):
             max_tokens=4096
         )
 
-        rewritten_text = chat_completion.choices[0].message.content.strip()
-        return rewritten_text, "Success"
+        # Safety check: Ensure content exists and is not None
+        if not chat_completion.choices or not chat_completion.choices[0].message:
+            raise ValueError("API response missing choices or message object.")
+            
+        content = chat_completion.choices[0].message.content
+        
+        if content is None:
+            raise ValueError("API returned None for message content. The model may have failed silently.")
+            
+        rewritten_text = content.strip()
+        
+        if not rewritten_text:
+            raise ValueError("API returned an empty string after stripping.")
 
-    except Exception as e:
-        logger.error(f"LLM Rewriter failed: {e}")
-        return None, str(e)
-
+        return rewritten_text, "Success
+        
 # --- Step 3: Anonymize Existing Transcripts (Active) ---
 
 def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None):
