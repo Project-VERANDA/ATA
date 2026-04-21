@@ -117,7 +117,7 @@ ANONYMIZATION_METHOD = "local_mmbert"  # Options: 'local_bert', 'local_spacy', '
 # Remote Chat AI API Configuration
 CHAT_AI_API_KEY = os.getenv('CHAT_AI_API_KEY', '')
 CHAT_AI_ENDPOINT = os.getenv('CHAT_AI_ENDPOINT', 'https://llm.cloud.cci.charite.de/v1')
-DEFAULT_CHAT_AI_MODEL = os.getenv('CHAT_AI_MODEL', 'gpt-oss-120b')
+DEFAULT_CHAT_AI_MODEL = os.getenv('CHAT_AI_MODEL', 'Qwen3.5-397B-A17B-FP8')
 LLM_REWRITE_ENABLED = True
 
 LLM_REWRITE_SYSTEM_PROMPT = (
@@ -937,7 +937,7 @@ def call_llm_rewriter(text, model_id, system_prompt=None):
     except Exception as e:
         logger.error(f"LLM Rewriter failed: {e}")
         return None, str(e)
-        
+
 # --- Step 3: Anonymize Existing Transcripts (Active) ---
 
 def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None):
