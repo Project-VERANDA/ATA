@@ -608,22 +608,22 @@ def llm_rewrite_route():
         return jsonify({'error': f'Error rewriting text: {str(e)}'}), 500
 
 if __name__ == '__main__':
-    use_https = os.getenv('USE_HTTPS', 'true').lower() == 'true'
-    #use_https = False
+    #use_https = os.getenv('USE_HTTPS', 'true').lower() == 'true'
+    use_https = False
 
     if use_https:
         try:
             cert_file, key_file = create_self_signed_cert()
             if cert_file and key_file:
                 logger.info("Starting server with HTTPS (self-signed certificate)")
-                app.run(debug=True, host='0.0.0.0', port=5001, ssl_context=(cert_file, key_file))
+                app.run(debug=False, host='0.0.0.0', port=5001, ssl_context=(cert_file, key_file))
             else:
                 logger.info("Starting server with HTTPS (ad-hoc certificate)")
-                app.run(debug=True, host='0.0.0.0', port=5001, ssl_context='adhoc')
+                app.run(debug=False, host='0.0.0.0', port=5001, ssl_context='adhoc')
         except Exception as e:
             logger.error(f"Failed to start HTTPS server: {e}")
             logger.info("Falling back to HTTP")
-            app.run(debug=True, host='0.0.0.0', port=5001)
+            app.run(debug=False, host='0.0.0.0', port=5001)
     else:
         logger.info("Starting server with HTTP")
-        app.run(debug=True, host='0.0.0.0', port=5001)
+        app.run(debug=False, host='0.0.0.0', port=5001)
