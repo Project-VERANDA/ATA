@@ -1031,7 +1031,7 @@ def anonymize_text_locally(text):
     Returns (anonymized_text, success_status, error_message)
     """
     try:
-        # Initialize the engine (this handles loading the model if not already loaded)
+        # Initialize the engine using the paths defined in this file
         # We use the global configuration from process.py
         engine = AnonymizationEngine(
             method="local_mmbert", 
@@ -1040,8 +1040,9 @@ def anonymize_text_locally(text):
         )
         
         if not engine.method:
-            return None, False, "Anonymization engine failed to initialize."
+            return None, False, "Anonymization engine failed to initialize (method not set)."
 
+        # Call the class method
         result_text, success, msg = engine.anonymize(text)
         
         if success:
@@ -1050,7 +1051,7 @@ def anonymize_text_locally(text):
             return None, False, msg
             
     except Exception as e:
-        logger.error(f"Error in anonymize_text_locally: {e}")
+        logger.error(f"Error in anonymize_text_locally: {e}", exc_info=True)
         return None, False, str(e)
 
 # --- Main Execution ---
