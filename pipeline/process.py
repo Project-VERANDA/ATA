@@ -134,7 +134,7 @@ LLM_REWRITE_SYSTEM_PROMPT = (
 AVAILABLE_LLM_MODELS = {
     'medgemma': 'google/medgemma-1.5-4b-it',
     'medgemma27b': 'google/medgemma-27b-it',
-    'gpt-oss-120b': 'openai/gpt-oss-120b',
+    'gpt-oss-120b': 'gpt-oss-120b',
     'Qwen3.5-27B': 'Qwen/Qwen3.5-27B',
     'Qwen3.5-397B-A17B': 'Qwen/Qwen3.5-397B-A17B',
     'qwen3-asr-1.7b': 'Qwen/Qwen3-ASR-1.7B',
