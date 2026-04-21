@@ -883,9 +883,8 @@ class AnonymizationEngine:
 def call_llm_rewriter(text, model_id, system_prompt=None):
     """
     Calls the external LLM API to rewrite text.
-    Handles various response formats from different models.
+    Handles specific quirks of Qwen-asr and MedGemma.
     """
-    # Ensure 're' is available (it is imported at the top of the file, but good to be safe)
     import re
 
     if not CHAT_AI_API_KEY:
@@ -921,75 +920,71 @@ def call_llm_rewriter(text, model_id, system_prompt=None):
         )
 
         rewritten_text = None
+        raw_content = None
 
-        # --- STRATEGY 1: Standard OpenAI Format ---
-        try:
-            if (hasattr(chat_completion, 'choices') and 
-                chat_completion.choices and 
-                hasattr(chat_completion.choices[0], 'message')):
-                
-                msg = chat_completion.choices[0].message
-                
-                # Check standard content
-                if hasattr(msg, 'content') and msg.content is not None:
-                    rewritten_text = str(msg.content).strip()
-                
-                # Fallback for some APIs that put text in 'text' attribute
-                elif hasattr(msg, 'text') and msg.text:
-                    rewritten_text = str(msg.text).strip()
-                
-                # Fallback for raw string conversion (Qwen ASR style)
-                if rewritten_text is None:
-                    msg_str = str(msg)
-                    # Look for <asr_text> tags
-                    match = re.search(r'<asr_text>(.*?)</asr_text>', msg_str, re.DOTALL | re.IGNORECASE)
-                    if match:
-                        rewritten_text = match.group(1).strip()
-                    elif 'language None' in msg_str:
-                        # Handle the specific "language None<asr_text>" case
-                        match = re.search(r'<asr_text>(.*?)$', msg_str, re.DOTALL)
-                        if match:
-                            rewritten_text = match.group(1).strip()
-                        else:
-                            # Fallback: take everything after the first <
-                            idx = msg_str.find('<')
-                            if idx != -1:
-                                rewritten_text = msg_str[idx:].strip()
-                            else:
-                                rewritten_text = msg_str.strip()
-        except Exception as e_parse:
-            logger.warning(f"Standard parsing failed: {e_parse}")
+        # --- 1. Extract Raw Content ---
+        if (hasattr(chat_completion, 'choices') and 
+            chat_completion.choices and 
+            hasattr(chat_completion.choices[0], 'message')):
+            
+            msg = chat_completion.choices[0].message
+            
+            if hasattr(msg, 'content') and msg.content is not None:
+                raw_content = str(msg.content)
+            elif hasattr(msg, 'text') and msg.text:
+                raw_content = str(msg.text)
+            else:
+                # Fallback: convert whole message to string
+                raw_content = str(msg)
 
-        # --- STRATEGY 2: Dict Conversion Fallback ---
-        if rewritten_text is None:
-            try:
-                # Many non-OpenAI APIs return a dict-like object
-                raw_data = chat_completion.to_dict()
-                if 'choices' in raw_data and raw_data['choices']:
-                    choice = raw_data['choices'][0]
-                    if 'message' in choice:
-                        msg = choice['message']
-                        # Check common keys
-                        for key in ['content', 'text', 'asr_text', 'response']:
-                            if key in msg and msg[key]:
-                                rewritten_text = str(msg[key]).strip()
-                                break
-            except Exception as e_dict:
-                logger.warning(f"Dict parsing failed: {e_dict}")
+        # --- 2. Parse Specific Patterns ---
+        if raw_content:
+            # Pattern A: Qwen-asr style "language None<asr_text>..." or just "language None..."
+            # If it starts with "language None", strip it and look for the rest
+            if raw_content.startswith("language None"):
+                # Try to find text after "language None"
+                # Case 1: <asr_text> tags exist
+                match = re.search(r'language None\s*<asr_text>(.*?)</asr_text>', raw_content, re.DOTALL | re.IGNORECASE)
+                if match:
+                    rewritten_text = match.group(1).strip()
+                else:
+                    # Case 2: Just raw text after "language None"
+                    # Remove the prefix and take the rest
+                    rewritten_text = raw_content[len("language None"):].strip()
+            
+            # Pattern B: MedGemma / Thinking blocks (<think> ... </think>)
+            elif "<think>" in raw_content:
+                # Extract content between <think> and </think>
+                match = re.search(r'<think>(.*?)</think>', raw_content, re.DOTALL | re.IGNORECASE)
+                if match:
+                    # If there is text AFTER the thinking block, take that. 
+                    # Usually the model puts the answer after the thinking.
+                    after_thinking = raw_content[match.end():].strip()
+                    if after_thinking:
+                        rewritten_text = after_thinking
+                    else:
+                        # If no text after, maybe the thinking IS the answer (unlikely for rewrite)
+                        # Or maybe the thinking block contains the answer?
+                        # Let's try to extract the last block of text if available
+                        pass
+                else:
+                    # Fallback: Remove <think> tags entirely and keep the rest
+                    rewritten_text = re.sub(r'<think>.*?</think>', '', raw_content, flags=re.DOTALL | re.IGNORECASE).strip()
 
-        # --- POST-PROCESSING: Clean up Thinking Blocks ---
+            # Pattern C: Standard text (gpt-oss-120b)
+            else:
+                rewritten_text = raw_content.strip()
+
+        # --- 3. Final Cleanup ---
         if rewritten_text:
-            # Remove ... blocks (MedGemma style)
-            # Pattern: ... (anything) ...
-            rewritten_text = re.sub(r'\.\.\..*?\.\.\.', '', rewritten_text, flags=re.DOTALL).strip()
-            # Remove ... (anything)
-            rewritten_text = re.sub(r'\.\.\..*', '', rewritten_text, flags=re.DOTALL).strip()
-            
-            # Remove <asr_text> tags if they survived
-            rewritten_text = re.sub(r'<asr_text>|</asr_text>', '', rewritten_text).strip()
-            
-            # Clean up extra whitespace
+            # Remove any remaining tags
+            rewritten_text = re.sub(r'<[^>]+>', '', rewritten_text)
+            # Remove extra whitespace
             rewritten_text = re.sub(r'\s+', ' ', rewritten_text).strip()
+            
+            # Safety check: if it's just "language None" or empty, fail
+            if rewritten_text.lower() in ["language none", "none", ""]:
+                raise ValueError("Extracted text is empty or invalid.")
 
         if not rewritten_text:
             raise ValueError("Model returned empty content or unrecognized format.")
