@@ -565,7 +565,7 @@ def create_self_signed_cert():
         logger.warning("cryptography package not available, using ad-hoc SSL context")
         return None, None
 
-        @app.route('/llm_rewrite', methods=['POST'])
+        #@app.route('/llm_rewrite', methods=['POST'])
 def llm_rewrite_route():
     try:
         data = request.get_json()
