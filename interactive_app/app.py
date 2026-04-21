@@ -85,8 +85,7 @@ except Exception as e:
         return text, []
 
 # Note: spaCy and Ensemble are not available yet
-SPACY_ANONYMIZER_AVAILABLE = False
-ENSEMBLE_ANONYMIZER_AVAILABLE = False
+DEFAULT_MODEL = 'bert-base-ner'
 TTS_AVAILABLE = GTTS_AVAILABLE
 
 import torch
@@ -236,22 +235,13 @@ def index():
 
 @app.route('/models')
 def get_models():
-    models_to_send = AVAILABLE_MODELS.copy()
-    local_models = {}
+    models_to_send = {}
+    
     if BERT_ANONYMIZER_AVAILABLE:
-        local_models['bert-base-ner'] = 'Local BERT Model'
-    if SPACY_ANONYMIZER_AVAILABLE:
-        local_models['spacy-de-ner'] = 'Local spaCy Model'
-    if ENSEMBLE_ANONYMIZER_AVAILABLE:
-        local_models['ensemble-spacy-bert'] = 'Local Ensemble (spaCy + BERT)'
-
-    if local_models:
-        combined_models = {'local_models': local_models, **models_to_send}
-    else:
-        combined_models = models_to_send
-
+        models_to_send['bert-base-ner'] = 'Local BERT Model (PII Removal)'
+    
     return jsonify({
-        'available_models': combined_models,
+        'available_models': models_to_send,
         'default_model': DEFAULT_MODEL
     })
 
@@ -363,77 +353,20 @@ def anonymize_text():
             return jsonify({'error': 'No text provided'}), 400
         
         text = data['text']
-        anonymization_level = data.get('level', 'standard')
-        selected_model = data.get('model', DEFAULT_MODEL)
+        
+        # Force usage of BERT model regardless of what the frontend sends
+        selected_model = 'bert-base-ner'
 
-        # Local Models
-        if selected_model == 'bert-base-ner':
-            if not BERT_ANONYMIZER_AVAILABLE:
-                return jsonify({'error': 'BERT anonymizer not available'}), 500
-            anonymized_text, _ = anonymize_text_with_bert(text)
-            return jsonify({'success': True, 'anonymized_text': anonymized_text, 'model_used': 'Local BERT', 'tts_available': GTTS_AVAILABLE})
+        if not BERT_ANONYMIZER_AVAILABLE:
+            return jsonify({'error': 'BERT anonymizer not available. Please check server logs.'}), 500
         
-        elif selected_model == 'spacy-de-ner':
-            if not SPACY_ANONYMIZER_AVAILABLE:
-                return jsonify({'error': 'spaCy anonymizer not available'}), 500
-            anonymized_text, _ = anonymize_text_with_spacy(text)
-            return jsonify({'success': True, 'anonymized_text': anonymized_text, 'model_used': 'Local spaCy', 'tts_available': GTTS_AVAILABLE})
-        
-        elif selected_model == 'ensemble-spacy-bert':
-            if not ENSEMBLE_ANONYMIZER_AVAILABLE:
-                return jsonify({'error': 'Ensemble anonymizer not available'}), 500
-            anonymized_text = anonymize_text_with_ensemble(text)
-            return jsonify({'success': True, 'anonymized_text': anonymized_text, 'model_used': 'Local Ensemble', 'tts_available': GTTS_AVAILABLE})
-
-        # Remote LLM
-        if selected_model not in AVAILABLE_MODELS:
-            return jsonify({'error': f'Invalid model: {selected_model}'}), 400
-        
-        if not CHAT_AI_API_KEY:
-            return jsonify({'error': 'Chat AI API key not configured'}), 500
-        
-        prompts = {
-            'basic': "Anonymize PII (names, phones, emails, addresses) with specific tags. Keep speaker tags. Return ONLY text.",
-            'standard': "Anonymize PII (names, professions, dates, ages, locations) with specific tags. Keep speaker tags. Return ONLY text.",
-            'strict': "Thoroughly anonymize ALL PII with specific tags. Keep speaker tags. Return ONLY text."
-        }
-        
-        prompt = prompts.get(anonymization_level, prompts['standard'])
-        model_name = AVAILABLE_MODELS.get(selected_model, selected_model)
-        
-        headers = {'Authorization': f'Bearer {CHAT_AI_API_KEY}', 'Content-Type': 'application/json'}
-        payload = {
-            "model": selected_model,
-            "messages": [
-                {"role": "system", "content": prompt},
-                {"role": "user", "content": f"Text to anonymize:\n\n{text}"}
-            ],
-            "max_tokens": 8000,
-            "temperature": 0.1
-        }
-        
-        for attempt in range(3):
-            try:
-                response = requests.post(f"{CHAT_AI_ENDPOINT}/chat/completions", headers=headers, json=payload, timeout=360)
-                break
-            except requests.exceptions.Timeout:
-                if attempt < 2: continue
-                return jsonify({'error': 'Timeout'}), 504
-            except requests.exceptions.RequestException as e:
-                return jsonify({'error': f'Connection error: {str(e)}'}), 503
-        
-        if response.status_code != 200:
-            return jsonify({'error': f'API error: {response.status_code}'}), 500
-        
-        response_data = response.json()
-        anonymized_text = response_data['choices'][0]['message']['content'].strip()
-        anonymized_text = re.sub(r'<thought>.*?</thought>', '', anonymized_text, flags=re.DOTALL).strip()
+        # Call the BERT function directly
+        anonymized_text, entities = anonymize_text_with_bert(text)
         
         return jsonify({
-            'success': True,
-            'anonymized_text': anonymized_text,
-            'level': anonymization_level,
-            'model_used': model_name,
+            'success': True, 
+            'anonymized_text': anonymized_text, 
+            'model_used': 'Local BERT', 
             'tts_available': GTTS_AVAILABLE
         })
     

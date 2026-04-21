@@ -484,27 +484,12 @@
 
         <div class="section">
             <h3>Transcribed Text</h3>
-            <textarea id="transcribed-text" class="text-area" placeholder="Transcription will appear here..."></textarea>
-            <div class="anonymization-controls">
-                <div class="level-selector" id="privacy-level-selector">
-                    <label for="anonymization-level">Privacy Level:</label>
-                    <div id="anonymization-level-radios">
-                        <input type="radio" id="level-basic" name="anonymization-level" value="basic">
-                        <label for="level-basic">Basic</label>
-                        <input type="radio" id="level-standard" name="anonymization-level" value="standard" checked>
-                        <label for="level-standard">Standard</label>
-                        <input type="radio" id="level-strict" name="anonymization-level" value="strict">
-                        <label for="level-strict">Strict</label>
-                    </div>
-                </div>
-                <div class="level-selector">
-                    <label for="model-select">Models:</label>
-                    <select id="model-select">
-                        <!-- Loaded via JS -->
-                    </select>
-                </div>
+            <p style="color: #0066cc; margin-bottom: 15px; font-size: 0.95em;">
+                Using Local BERT Model for PII removal.
+            </p>
+            <div class="button-wrapper">
+                <button id="anonymize-btn" class="button" disabled>Anonymize Text</button>
             </div>
-             <button id="anonymize-btn" class="button" disabled>Anonymize Text</button>
         </div>
 
         <div class="section">
@@ -757,29 +742,25 @@
                 const text = transcribedText.value;
                 if (!text.trim()) {
                     updateStatus("No text to anonymize.", true);
-                return;
-            }
-            
+                    return;
+                }
+                
                 showLoader(true);
                 anonymizeBtn.disabled = true;
                 updateStatus("Anonymization in progress...", false);
-            
-                const selectedModel = modelSelect.value;
-                const selectedLevel = document.querySelector('input[name="anonymization-level"]:checked').value;
-            
-            try {
+
+                try {
                     const response = await fetch('/anonymize', {
-                    method: 'POST',
+                        method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
+                        // Simplified payload: only text is needed
                         body: JSON.stringify({ 
-                            text: text, 
-                            level: selectedLevel,
-                            model: selectedModel
+                            text: text 
                         })
-                });
-                
-                const result = await response.json();
-                
+                    });
+                    
+                    const result = await response.json();
+                    
                     if (response.ok && result.success) {
                         anonymizedText.value = result.anonymized_text;
                         updateStatus(`Anonymization successful with ${result.model_used}.`, false);
@@ -787,19 +768,18 @@
                             ttsContainer.classList.remove('hidden');
                             audioPlayer.classList.add('hidden');
                         }
-                } else {
+                    } else {
                         throw new Error(result.error || "An unknown error occurred during anonymization.");
-                }
-            } catch (error) {
+                    }
+                } catch (error) {
                     console.error('Anonymization error:', error);
                     updateStatus(`Anonymization failed: ${error.message}`, true);
-            } finally {
+                } finally {
                     showLoader(false);
                     anonymizeBtn.disabled = false;
+                }
             }
-            }
-
-                        async function generateSpeech() {
+            async function generateSpeech() {
                 const text = anonymizedText.value;
                 if (!text.trim()) {
                     updateStatus("No anonymized text to generate speech from.", true);
@@ -1053,7 +1033,6 @@
             // --- Event Listeners ---  <-- NEW BLOCK ENDS HERE
 
             function initialize() {
-                loadAnonymizationModels();
                 loadTranscriptionModels();
                 loadLLMModels();
                 checkServerHealth();
