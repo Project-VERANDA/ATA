@@ -117,7 +117,7 @@ ANONYMIZATION_METHOD = "local_mmbert"  # Options: 'local_bert', 'local_spacy', '
 # Remote Chat AI API Configuration
 CHAT_AI_API_KEY = os.getenv('CHAT_AI_API_KEY', '')
 CHAT_AI_ENDPOINT = os.getenv('CHAT_AI_ENDPOINT', 'https://llm.cloud.cci.charite.de/v1')
-DEFAULT_CHAT_AI_MODEL = os.getenv('CHAT_AI_MODEL', 'medgemma-1.5-4b-it')
+DEFAULT_CHAT_AI_MODEL = os.getenv('CHAT_AI_MODEL', 'medgemma')
 LLM_REWRITE_ENABLED = True
 
 LLM_REWRITE_SYSTEM_PROMPT = (
@@ -133,7 +133,7 @@ LLM_REWRITE_SYSTEM_PROMPT = (
 
 
 AVAILABLE_LLM_MODELS = {
-    'medgemma-1.5-4b-it': 'medgemma-1.5-4b-it',
+    'medgemma': 'medgemma',
     'medgemma27b': 'medgemma-27b-it',
     'gpt-oss-120b': 'gpt-oss-120b',
     'Qwen3.5-27B': 'Qwen3.5-27B',
