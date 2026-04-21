@@ -87,11 +87,6 @@ except Exception as e:
 # Note: spaCy and Ensemble are not available yet
 SPACY_ANONYMIZER_AVAILABLE = False
 ENSEMBLE_ANONYMIZER_AVAILABLE = False
-
-LLM_API_KEY = os.getenv('LLM_API_KEY')
-LLM_API_BASE = os.getenv('LLM_API_BASE', 'https://llm.cloud.cci.charite.de/v1')
-LLM_DEFAULT_MODEL = os.getenv('LLM_DEFAULT_MODEL', 'medgemma')
-
 TTS_AVAILABLE = GTTS_AVAILABLE
 
 import torch
