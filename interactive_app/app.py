@@ -608,8 +608,8 @@ def llm_rewrite_route():
         return jsonify({'error': f'Error rewriting text: {str(e)}'}), 500
 
 if __name__ == '__main__':
-    #use_https = os.getenv('USE_HTTPS', 'true').lower() == 'true'
-    use_https = False
+    use_https = os.getenv('USE_HTTPS', 'true').lower() == 'true'
+    #use_https = False
 
     if use_https:
         try:
