@@ -754,7 +754,6 @@
                     uploadedFile = null;
                 }
             }
-
             async function anonymizeText() {
                 const text = transcribedText.value;
                 if (!text.trim()) {
@@ -770,7 +769,6 @@
                     const response = await fetch('/anonymize', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        // Simplified payload: only text is needed
                         body: JSON.stringify({ 
                             text: text 
                         })
@@ -780,6 +778,15 @@
                     
                     if (response.ok && result.success) {
                         anonymizedText.value = result.anonymized_text;
+                        
+                        // --- FIX: Manually enable the LLM button here ---
+                        if (anonymizedText.value.trim().length > 0) {
+                            llmRewriteBtn.disabled = false;
+                        } else {
+                            llmRewriteBtn.disabled = true;
+                        }
+                        // ---------------------------------------------
+                        
                         updateStatus(`Anonymization successful with ${result.model_used}.`, false);
                         if (result.tts_available) {
                             ttsContainer.classList.remove('hidden');
