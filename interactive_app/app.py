@@ -113,19 +113,14 @@ CHAT_AI_ENDPOINT = os.getenv('CHAT_AI_ENDPOINT', 'https://llm.cloud.cci.charite.
 
 # Model mappings for the UI
 AVAILABLE_MODELS = {
-    'medgemma': 'MedGemma 4B',
-    'medgemma27b': 'MedGemma 27B',
-    'gpt-oss-120b': 'GPT-OSS 120B',
-    'Qwen3.5-27B': 'Qwen3.5 27B',
-    'Qwen3.5-397B-A17B': 'Qwen3.5 397B A17B',
-    'qwen3-asr-1.7b': 'Qwen3 ASR 1.7B',
-    'kimi-k2.5': 'Kimi K2.5',
-    'cle-Kimi-K2.5': 'CLE Kimi K2.5',
-    'cle-Qwen3.5-397B-A17B-FP8': 'CLE Qwen3.5 397B FP8',
-    'cle-Qwen3-Coder-Next-FP8': 'CLE Qwen3 Coder Next FP8',
-    'nemotron3-super-120b': 'Nemotron3 Super 120B',
-    'glm-4.6': 'GLM 4.6',
-    'qwen3-embedding-4b': 'Qwen3 Embedding 4B'
+    'medgemma': 'medgemma-1.5-4b-it',
+    'medgemma27b': 'medgemma-27b-it',
+    'gpt-oss-120b': 'gpt-oss-120b',
+    'Qwen3.5-27B': 'Qwen3.5-27B',
+    'Qwen3.5-397B-A17B': 'Qwen3.5-397B-A17B',
+    'qwen3-asr-1.7b': 'Qwen3-ASR-1.7B',
+    'cle-Kimi-K2.5': 'Kimi-K2.5',
+    'cle-Qwen3.5-397B-A17B-FP8': 'Qwen3.5-397B-A17B-FP8'
 }
 
 WHISPER_MODELS = OrderedDict([
