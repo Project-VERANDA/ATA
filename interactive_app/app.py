@@ -18,15 +18,18 @@ main_folder = current_script_dir.parent
 pipeline_path = main_folder / "pipeline"
 if str(pipeline_path) not in sys.path:
     sys.path.insert(0, str(pipeline_path))
-    print(f"DEBUG: Added {pipeline_path} to sys.path")
 
-# 2. Add 'pipeline/model' to sys.path (where anonymizer lives)
+# 2. Add 'pipeline/model' to sys.path (for anonymizer)
 model_folder_path = pipeline_path / "model"
 if str(model_folder_path) not in sys.path:
     sys.path.insert(0, str(model_folder_path))
-    print(f"DEBUG: Added {model_folder_path} to sys.path")
 
-# Import shared functions from process.py
+# 3. Add 'ModelTraining' to sys.path (legacy support)
+model_training_path = main_folder / "ModelTraining"
+if str(model_training_path) not in sys.path:
+    sys.path.insert(0, str(model_training_path))
+
+# --- IMPORTS ---
 try:
     from process import (
         transcribe_audio_locally, 
@@ -44,15 +47,15 @@ except ImportError as e:
     sys.exit(1)
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
 try:
     import whisperx
-    from whisperx import diarize
     WHISPERX_AVAILABLE = True
 except ImportError:
     WHISPERX_AVAILABLE = False
-    logging.error("WhisperX is not available. Please install it to use this application.")
+    logger.error("WhisperX is not available. Exiting.")
     sys.exit("Exiting: WhisperX is a required dependency.")
 
 try:
@@ -69,30 +72,17 @@ try:
 except ImportError:
     PYDUB_AVAILABLE = False
 
-# --- Path Configuration ---
-# Calculate the path to the parent directory of the current script (interactive_app/)
-current_script_dir = Path(__file__).resolve().parent
-main_folder = current_script_dir.parent
-model_training_path = main_folder / "ModelTraining"
-
-# Add to sys.path
-if str(model_training_path) not in sys.path:
-    sys.path.insert(0, str(model_training_path))
-
-logger.info(f"Added ModelTraining path: {model_training_path}")
-
-BERT_ANONYMIZER_AVAILABLE = True # We assume it's available if the import succeeded
+# --- CONFIGURATION ---
+BERT_ANONYMIZER_AVAILABLE = True
 DEFAULT_MODEL = 'bert-base-ner'
 TTS_AVAILABLE = GTTS_AVAILABLE
 
 import torch
-import gc
 from flask import Flask, render_template, request, jsonify, send_file
 from werkzeug.utils import secure_filename
 import requests
 from dotenv import load_dotenv
 
-# Load environment variables
 load_dotenv()
 
 if WHISPERX_AVAILABLE:
@@ -108,64 +98,42 @@ else:
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 app.config['UPLOAD_FOLDER'] = 'uploads'
-
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
-# --- SHARED ENGINE IMPORT (CRITICAL CHANGE) ---
-# Add pipeline to path
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "pipeline"))
-
-# Import the shared functions from process.py
+# --- PRE-LOAD MODELS ---
 try:
-    from process import transcribe_audio_locally, load_models
-    logger.info("Successfully imported shared transcription engine from process.py")
-    
-    # Pre-load models at startup (optional but recommended for speed)
-    try:
-        load_models()
-        logger.info("Interactive App: Models pre-loaded from process.py")
-    except Exception as e:
-        logger.error(f"Interactive App: Failed to pre-load models: {e}")
-        # We continue anyway; lazy loading will happen on first request
-except ImportError as e:
-    logger.critical(f"CRITICAL: Could not import from process.py: {e}")
-    logger.critical("Ensure process.py is in the 'pipeline' folder and defines 'transcribe_audio_locally' and 'load_models'.")
-    sys.exit(1)
-
-# Wrapper for backward compatibility in routes
-def transcribe_audio(audio_path, language='de'):
-    """Calls the shared engine from process.py"""
-    return transcribe_audio_locally(audio_path, language)
+    load_models()
+    logger.info("Interactive App: Models pre-loaded from process.py")
+except Exception as e:
+    logger.error(f"Interactive App: Failed to pre-load models: {e}")
 
 # --- CONFIGURATION ---
 CHAT_AI_API_KEY = os.getenv('CHAT_AI_API_KEY')
 CHAT_AI_ENDPOINT = os.getenv('CHAT_AI_ENDPOINT', 'https://llm.cloud.cci.charite.de/v1')
-DEFAULT_CHAT_AI_MODEL = os.getenv('CHAT_AI_MODEL', 'medgemma')
 
+# Model mappings for the UI
 AVAILABLE_MODELS = {
-    'llama-3.1-8b-instruct': 'Meta Llama 3.1 8B Instruct',
-    'gemma-3-27b-it': 'Google Gemma 3 27B Instruct',
-    'internvl2.5-8b-mpo': 'OpenGVLab InternVL2.5 8B MPO',
-    'qwen-3-235b-a22b': 'Alibaba Qwen 3 235B A22B',
-    'qwen-3-32b': 'Alibaba Qwen 3 32B',
-    'qwq-32b': 'Alibaba Qwen QwQ 32B',
-    'deepseek-r1': 'DeepSeek R1',
-    'deepseek-r1-distill-llama-70b': 'DeepSeek R1 Distill Llama 70B',
-    'llama-3.3-70b-instruct': 'Meta Llama 3.3 70B Instruct',
-    'llama-3.1-sauerkrautlm-70b-instruct': 'VAGOsolutions Llama 3.1 SauerkrautLM 70B Instruct',
-    'mistral-large-instruct': 'Mistral Large Instruct',
-    'codestral-22b': 'Mistral Codestral 22B',
-    'e5-mistral-7b-instruct': 'E5 Mistral 7B Instruct',
-    'qwen-2.5-vl-72b-instruct': 'Alibaba Qwen 2.5 VL 72B Instruct',
-    'qwen-2.5-coder-32b-instruct': 'Alibaba Qwen 2.5 Coder 32B Instruct'
+    'medgemma': 'MedGemma 4B',
+    'medgemma27b': 'MedGemma 27B',
+    'gpt-oss-120b': 'GPT-OSS 120B',
+    'Qwen3.5-27B': 'Qwen3.5 27B',
+    'Qwen3.5-397B-A17B': 'Qwen3.5 397B A17B',
+    'qwen3-asr-1.7b': 'Qwen3 ASR 1.7B',
+    'kimi-k2.5': 'Kimi K2.5',
+    'cle-Kimi-K2.5': 'CLE Kimi K2.5',
+    'cle-Qwen3.5-397B-A17B-FP8': 'CLE Qwen3.5 397B FP8',
+    'cle-Qwen3-Coder-Next-FP8': 'CLE Qwen3 Coder Next FP8',
+    'nemotron3-super-120b': 'Nemotron3 Super 120B',
+    'glm-4.6': 'GLM 4.6',
+    'qwen3-embedding-4b': 'Qwen3 Embedding 4B'
 }
 
 WHISPER_MODELS = OrderedDict([
-    ('tiny', '1: Tiny (Fastest, lowest accuracy)'),
-    ('base', '2: Base (Default, good balance)'),
-    ('small', '3: Small (More accurate, slower)'),
-    ('medium', '4: Medium (High accuracy, very slow)'),
-    ('large', '5: Large (Best accuracy, slowest)')
+    ('tiny', '1: Tiny (Fastest)'),
+    ('base', '2: Base (Default)'),
+    ('small', '3: Small'),
+    ('medium', '4: Medium'),
+    ('large', '5: Large (Best)')
 ])
 
 ALLOWED_EXTENSIONS = {'wav', 'mp3', 'mp4', 'm4a', 'flac', 'ogg', 'webm'}
@@ -194,10 +162,6 @@ def generate_speech(text, voice_settings=None, language='de'):
                 final_audio += beep_sound
             elif part.strip():
                 try:
-                    # Check if part is just whitespace or empty before sending to gTTS
-                    if not part.strip():
-                        continue
-                    
                     tts = gTTS(text=part.strip(), lang=language, slow=False)
                     with io.BytesIO() as fp:
                         tts.write_to_fp(fp)
@@ -209,14 +173,10 @@ def generate_speech(text, voice_settings=None, language='de'):
         
         if len(final_audio) == 0:
             logger.warning("No audio was generated (all segments were tags or empty).")
-            # Create a small silent file or return None to indicate failure
-            # For now, let's return None to prevent the 500 error later
             return None, None
 
         audio_filename = f"speech_output_{int(time.time())}.mp3"
-        # Ensure we use the absolute path defined in app config
         audio_path = os.path.join(os.path.abspath(app.config['UPLOAD_FOLDER']), audio_filename)
-        
         final_audio.export(audio_path, format="mp3")
         logger.info(f"Speech with beeps generated successfully: {audio_path}")
         return audio_path, 'gtts_with_beeps'
@@ -233,13 +193,13 @@ def index():
 @app.route('/models')
 def get_models():
     models_to_send = {}
-    
     if BERT_ANONYMIZER_AVAILABLE:
         models_to_send['bert-base-ner'] = 'Local BERT Model (PII Removal)'
     
     return jsonify({
         'available_models': models_to_send,
-        'default_model': DEFAULT_MODEL
+        'default_model': DEFAULT_MODEL,
+        'llm_models': AVAILABLE_MODELS
     })
 
 @app.route('/transcription_models')
@@ -260,8 +220,6 @@ def upload_file():
             return jsonify({'error': 'No file selected'}), 400
         
         language = request.form.get('language', 'de')
-        # Note: model_size is ignored now as we use the fixed local model from process.py
-        # But we keep the param for UI compatibility
         
         if file and allowed_file(file.filename):
             filename = secure_filename(file.filename)
@@ -269,7 +227,7 @@ def upload_file():
             file.save(filepath)
             
             logger.info(f"Transcribing file: {filename} in language: {language}")
-            transcription = transcribe_audio(filepath, language=language)
+            transcription = transcribe_audio_locally(filepath, language=language)
             
             os.remove(filepath)
             
@@ -322,7 +280,7 @@ def transcribe_recording():
             audio_file_to_transcribe = temp_file_path
         
         logger.info(f"Starting transcription of: {audio_file_to_transcribe}")
-        transcription = transcribe_audio(audio_file_to_transcribe, language=language)
+        transcription = transcribe_audio_locally(audio_file_to_transcribe, language=language)
             
         if temp_file_path and os.path.exists(temp_file_path):
             os.unlink(temp_file_path)
@@ -354,7 +312,6 @@ def anonymize_text():
         if not BERT_ANONYMIZER_AVAILABLE:
             return jsonify({'error': 'BERT anonymizer not available. Please check server logs.'}), 500
         
-        # Call the NEW function from process.py
         anonymized_text, success, error_msg = anonymize_text_locally(text)
         
         if not success:
@@ -364,7 +321,7 @@ def anonymize_text():
         return jsonify({
             'success': True, 
             'anonymized_text': anonymized_text, 
-            'model_used': 'Local BERT (via process.py)', 
+            'model_used': 'Local BERT', 
             'tts_available': GTTS_AVAILABLE
         })
     
@@ -409,11 +366,9 @@ def generate_speech_route():
 @app.route('/download_speech/<filename>')
 def download_speech(filename):
     try:
-        # Security check
         if not filename.startswith('speech_output_') or '..' in filename:
             return jsonify({'error': 'Invalid filename'}), 400
         
-        # Construct the absolute path using the app's config folder
         file_path = os.path.join(os.path.abspath(app.config['UPLOAD_FOLDER']), filename)
         
         if not os.path.exists(file_path):
@@ -437,16 +392,12 @@ def get_available_voices():
 
 @app.route('/health')
 def health_check():
-    # Since we rely on process.py, we check if the import worked
     try:
-        from process import load_models
-        # We can't easily check model state without calling it, so we assume healthy if import succeeded
         return jsonify({
             'status': 'healthy',
             'transcription_available': True,
             'transcription_type': 'shared-engine',
-            'transcription_description': 'Using shared process.py engine',
-            'speaker_diarization': True, # Assumed if process.py loaded
+            'speaker_diarization': True,
             'whisperx_available': WHISPERX_AVAILABLE,
             'chat_ai_configured': CHAT_AI_API_KEY is not None,
             'default_model': DEFAULT_MODEL,
@@ -467,8 +418,6 @@ def create_self_signed_cert():
         from cryptography.hazmat.primitives import hashes
         from cryptography.hazmat.primitives.asymmetric import rsa
         from cryptography.hazmat.primitives import serialization
-        # Ensure timedelta is imported here if not at top level, but top level is better
-        from datetime import datetime, timezone, timedelta 
         
         private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
         
@@ -480,7 +429,6 @@ def create_self_signed_cert():
             x509.NameAttribute(NameOID.COMMON_NAME, "localhost"),
         ])
         
-        # Fixed: Use imported classes directly
         now = datetime.now(timezone.utc)
         cert = x509.CertificateBuilder().subject_name(subject).issuer_name(issuer).public_key(private_key.public_key()).serial_number(x509.random_serial_number()).not_valid_before(now).not_valid_after(now + timedelta(days=365)).add_extension(
             x509.SubjectAlternativeName([
@@ -500,7 +448,7 @@ def create_self_signed_cert():
         logger.warning("cryptography package not available, using ad-hoc SSL context")
         return None, None
 
-        #@app.route('/llm_rewrite', methods=['POST'])
+@app.route('/llm_rewrite', methods=['POST'])
 def llm_rewrite_route():
     try:
         data = request.get_json()
@@ -508,7 +456,7 @@ def llm_rewrite_route():
             return jsonify({'error': 'No text provided'}), 400
         
         text = data['text']
-        model_key = data.get('model', 'medgemma') # Default key
+        model_key = data.get('model', 'medgemma') 
         enabled = data.get('enabled', True)
 
         if not enabled:
@@ -517,12 +465,9 @@ def llm_rewrite_route():
         if not CHAT_AI_API_KEY:
             return jsonify({'error': 'LLM API Key not configured on server'}), 500
 
-        # Resolve the model key to the full ID (e.g., 'medgemma' -> 'google/medgemma-1.5-4b-it')
-        model_id = AVAILABLE_LLM_MODELS.get(model_key, model_key)
-        
+        model_id = AVAILABLE_MODELS.get(model_key, model_key)
         logger.info(f"Web Interface: Requesting LLM rewrite with model {model_id}")
 
-        # Call the function imported from process.py
         rewritten_text, status = call_llm_rewriter(text, model_id)
         
         if not rewritten_text:
@@ -540,7 +485,6 @@ def llm_rewrite_route():
 
 if __name__ == '__main__':
     use_https = os.getenv('USE_HTTPS', 'true').lower() == 'true'
-    #use_https = False
 
     if use_https:
         try:
