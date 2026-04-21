@@ -933,6 +933,11 @@ def call_llm_rewriter(text, model_id, system_prompt=None):
             raise ValueError("API returned an empty string after stripping.")
 
         return rewritten_text, "Success"
+
+    except Exception as e:
+        logger.error(f"LLM Rewriter failed: {e}")
+        return None, str(e)
+        
 # --- Step 3: Anonymize Existing Transcripts (Active) ---
 
 def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None):
