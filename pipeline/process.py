@@ -120,7 +120,7 @@ CHAT_AI_ENDPOINT = os.getenv('CHAT_AI_ENDPOINT', 'https://llm.cloud.cci.charite.
 DEFAULT_CHAT_AI_MODEL = os.getenv('CHAT_AI_MODEL', 'gpt-oss-120b')
 LLM_REWRITE_ENABLED = True
 
-LLM_REWRITE_SYSTEM_PROMPT = (
+""" LLM_REWRITE_SYSTEM_PROMPT = (
     "You are an expert privacy auditor specializing in de-identification. "
     "Your task is to rewrite the provided text to remove any **indirect identifiers**. "
     "Indirect identifiers include: specific job titles, unique combinations of demographics, rare locations, specific dates, "
@@ -129,17 +129,21 @@ LLM_REWRITE_SYSTEM_PROMPT = (
     "IMPORTANT: Preserve the original speaker tags (e.g., SPEAKER_00, SPEAKER_01) exactly as they appear. "
     "Do not change the general meaning or flow of the conversation. "
     "Return ONLY the rewritten text. Do not include any introductory or concluding remarks."
+) """
+
+LLM_REWRITE_SYSTEM_PROMPT = (
+    "Replace the full text with the following statement: This file has been erased."
 )
 
 AVAILABLE_LLM_MODELS = {
-    'medgemma': 'google/medgemma-1.5-4b-it',
-    'medgemma27b': 'google/medgemma-27b-it',
+    'medgemma': 'medgemma-1.5-4b-it',
+    'medgemma27b': 'medgemma-27b-it',
     'gpt-oss-120b': 'gpt-oss-120b',
-    'Qwen3.5-27B': 'Qwen/Qwen3.5-27B',
-    'Qwen3.5-397B-A17B': 'Qwen/Qwen3.5-397B-A17B',
-    'qwen3-asr-1.7b': 'Qwen/Qwen3-ASR-1.7B',
-    'cle-Kimi-K2.5': 'moonshotai/Kimi-K2.5',
-    'cle-Qwen3.5-397B-A17B-FP8': 'Qwen/Qwen3.5-397B-A17B-FP8'
+    'Qwen3.5-27B': 'Qwen3.5-27B',
+    'Qwen3.5-397B-A17B': 'Qwen3.5-397B-A17B',
+    'qwen3-asr-1.7b': 'Qwen3-ASR-1.7B',
+    'cle-Kimi-K2.5': 'Kimi-K2.5',
+    'cle-Qwen3.5-397B-A17B-FP8': 'Qwen3.5-397B-A17B-FP8'
 }
 
 
