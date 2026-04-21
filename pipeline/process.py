@@ -133,14 +133,14 @@ LLM_REWRITE_SYSTEM_PROMPT = (
 
 
 AVAILABLE_LLM_MODELS = {
-    'medgemma': 'medgemma-1.5-4b-it',
-    'medgemma27b': 'medgemma-27b-it',
+    'medgemma': 'medgemma',
+    'medgemma27b': 'medgemma-27b',
     'gpt-oss-120b': 'gpt-oss-120b',
     'Qwen3.5-27B': 'Qwen3.5-27B',
     'Qwen3.5-397B-A17B': 'Qwen3.5-397B-A17B',
-    'qwen3-asr-1.7b': 'Qwen3-ASR-1.7B',
-    'cle-Kimi-K2.5': 'Kimi-K2.5',
-    'cle-Qwen3.5-397B-A17B-FP8': 'Qwen3.5-397B-A17B-FP8'
+    'qwen3-asr-1.7b': 'qwen3-asr-1.7b',
+    'cle-Kimi-K2.5': 'cle-Kimi-K2.5',
+    'cle-Qwen3.5-397B-A17B-FP8': 'cle-Qwen3.5-397B-A17B-FP8'
 }
 
 
