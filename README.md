@@ -39,13 +39,15 @@ Download all the WhisperX models with the following command, which can be copy/p
   huggingface-cli download Systran/faster-whisper-$size \
     --local-dir "models--Systran--faster-whisper-$size" \
     --local-dir-use-symlinks false
-done```
+done
+```
 
 Alternatively, use only the large-v3 model.
 
 ```huggingface-cli download Systran/faster-whisper-large-v3 \
   --local-dir models--Systran--faster-whisper-large-v3 \
-  --local-dir-use-symlinks false```
+  --local-dir-use-symlinks false
+  ```
 
 It may not be necessary to install the whisper-large-v3 file to the models folder. This should be tested.
 
