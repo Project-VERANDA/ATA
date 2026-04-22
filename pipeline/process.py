@@ -117,18 +117,29 @@ ANONYMIZATION_METHOD = "local_mmbert"  # Options: 'local_bert', 'local_spacy', '
 # Remote Chat AI API Configuration
 CHAT_AI_API_KEY = os.getenv('CHAT_AI_API_KEY', '')
 CHAT_AI_ENDPOINT = os.getenv('CHAT_AI_ENDPOINT', 'https://llm.cloud.cci.charite.de/v1')
-DEFAULT_CHAT_AI_MODEL = os.getenv('CHAT_AI_MODEL', 'medgemma')
+DEFAULT_CHAT_AI_MODEL = os.getenv('CHAT_AI_MODEL', 'gpt-oss-120b')
 LLM_REWRITE_ENABLED = True
 
 LLM_REWRITE_SYSTEM_PROMPT = (
-    "You are an expert privacy auditor specializing in de-identification. "
-    "Your task is to rewrite the provided text to remove any **indirect identifiers**. "
-    "Indirect identifiers include: specific job titles, unique combinations of demographics, rare locations, specific dates, "
-    "unique medical conditions, or any detail that could allow someone to identify the speaker when combined with other data. "
+    "You are an expert anonymizer that carefully adapts small parts of the text to make it
+    "anonymous"
+    "Your task is to rewrite the provided text to remove any **indirect identifiers**."
+    "Indirect identifiers include: specific job titles, unique combinations of demographics, rare locations, specific dates,"
+    "unique medical conditions, or any detail that could allow someone to identify the speaker when combined with other data."
     "Replace these specific details with generic placeholders like [INDIRECT_ID] or generalize the description. "
-    "IMPORTANT: Preserve the original speaker tags (e.g., SPEAKER_00, SPEAKER_01) exactly as they appear. "
+    "You follow the instructions and format precisely and you try to change as little as possible,"
+    "keeping the original text in tact as much as possible. Only generalize"
+    "information and do not invent new information."
+    "Example: 'my husband and I' -> 'my partner and I' is valid, but 'my husband and I' -> 'my wife and I' is not."
+    "Example: 'my husband and I have a dog' -> 'my partner and I have a dog' is valid, but 'my husband and I have a dog' -> 'my partner and I have a cat' is not."
+    "Example: 'my husband and I' -> 'I' is also valid as it only removes information."
     "Do not change the general meaning or flow of the conversation. "
-    "Return ONLY the rewritten text. Do not include any introductory or concluding remarks."
+    "CRITICAL INSTRUCTIONS: 
+    "- Do NOT anonymize or modify speaker identification tags like SPEAKER_00, SPEAKER_01, etc. These must be preserved exactly as they appear."
+    "- Do NOT translate any text. Keep ALL text in its original language exactly as it appears."
+    "- Preserve the other tags exactly as they are. For example, [AGE], [NAME_OTHER]. These must be preserved exactly as they appear."
+    "- Preserve the original grammar, sentence structure, and language completely."
+    "IMPORTANT: Return ONLY the anonymized text. Do not include any explanations, reasoning, or additional commentary."
 )
 
 
