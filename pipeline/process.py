@@ -519,39 +519,34 @@ def load_models():
         logger.warning("⚠️ NO GPU DETECTED. Falling back to CPU.")
     logger.info("====================")
 
-    # 1. Load WhisperX Model (GPU) - FIXED TO USE ABSOLUTE PATH
+    # 1. Load WhisperX Model (Direct Path Loading with faster_whisper)
     try:
-        logger.info(f"Loading WhisperX model from: {WHISPERX_MODEL_PATH}")
+        logger.info(f"Loading WhisperX model directly from: {WHISPERX_MODEL_PATH}")
         
-        # whisperx.load_model can accept a local path directly if we pass it as the first argument
-        # and set local_files_only=True.
-        # However, the standard way is to pass the repo_id. 
-        # Since our folder name is "models--Systran--faster-whisper-large-v3", 
-        # we need to convert it back to "Systran/faster-whisper-large-v3" to match the repo_id.
+        # Import faster_whisper directly
+        from faster_whisper import WhisperModel
         
-        # Extract repo_id from folder name
-        folder_name = WHISPERX_MODEL_PATH.name
-        if folder_name.startswith("models--"):
-            repo_id = folder_name.replace("models--", "").replace("--", "/")
-        else:
-            repo_id = folder_name # Fallback
+        # Determine compute type
+        compute_type = "float16" if device_str == "cuda" else "float32"
         
-        logger.info(f"Detected Repo ID: {repo_id}")
-
-        _loaded_whisper_model = whisperx.load_model(
-            repo_id, 
-            device_str, 
-            compute_type="float16" if device_str == "cuda" else "float32", 
-            download_root=str(MODEL_FOLDER), # Point to the folder containing the model folders
+        # Load the model directly from the folder path
+        # This bypasses the HuggingFace cache system entirely
+        # We pass the absolute path to the folder containing model.bin, config.json, etc.
+        _loaded_whisper_model = WhisperModel(
+            str(WHISPERX_MODEL_PATH), 
+            device=device_str, 
+            compute_type=compute_type,
             local_files_only=True
         )
-        logger.info("✅ WhisperX model loaded successfully.")
+        
+        logger.info("✅ WhisperX model loaded successfully (direct path).")
     except Exception as e:
         logger.critical(f"Failed to load WhisperX model: {e}")
-        logger.critical("Hint: Ensure the folder name matches 'models--<org>--<model>' and is inside 'pipeline/model'")
+        logger.critical("Hint: Ensure the folder contains 'model.bin', 'config.json', and 'tokenizer.json'.")
+        logger.critical(f"Folder contents: {list(WHISPERX_MODEL_PATH.iterdir()) if WHISPERX_MODEL_PATH.exists() else 'Folder missing'}")
         return None, None
     
-    # 2. Load Diarization Pipeline (GPU)
+    # 2. Load Diarization Pipeline
     if DIARIZATION_MODEL_PATH and DIARIZATION_MODEL_PATH.exists():
         try:
             logger.info(f"Loading Diarization Pipeline from: {DIARIZATION_MODEL_PATH}")
