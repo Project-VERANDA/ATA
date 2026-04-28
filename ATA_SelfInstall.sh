@@ -217,7 +217,6 @@ else
 fi
 
 # 4. Torchcodec check (unchanged)
-# Torchcodec check (unchanged)
 echo "Checking torchcodec..."
 if pip show torchcodec &> /dev/null; then
     CURRENT_VERSION=$(pip show torchcodec | grep Version | awk '{print $2}')
@@ -233,28 +232,21 @@ else
     pip install torchcodec==0.7.0
 fi
 
-# --- ROBUST TORCHCRF INSTALLATION ---
-echo "Checking torchcrf..."
-if pip show torchcrf &> /dev/null; then
-    # Double check if it actually imports
-    if python -c "import torchcrf" 2>/dev/null; then
-        echo "✅ torchcrf is installed and importable."
-    else
-        echo "⚠️  torchcrf is installed but cannot be imported. Reinstalling..."
-        pip uninstall torchcrf -y
-        pip install torchcrf --no-cache-dir
-    fi
+# --- TorchCRF Installation ---
+echo "Checking CRF library..."
+if python -c "from torchcrf import CRF" 2>/dev/null; then
+    echo "✅ torchcrf is already installed and working."
 else
-    echo "Installing torchcrf..."
-    # Use --no-cache-dir to force fresh download/compile
-    pip install torchcrf --no-cache-dir
+    echo "Installing CRF library (pytorch-crf)..."
+    pip uninstall torchcrf -y 2>/dev/null || true
+    # Install the working package 'pytorch-crf' which exposes 'torchcrf' module
+    pip install pytorch-crf --no-cache-dir
     
-    # Verify immediately
-    if python -c "import torchcrf" 2>/dev/null; then
-        echo "✅ torchcrf installed successfully."
+    # Verify
+    if python -c "from torchcrf import CRF" 2>/dev/null; then
+        echo "✅ CRF library installed successfully."
     else
-        echo "❌ CRITICAL: torchcrf installation failed or is broken."
-        echo "   Please run 'pip install torchcrf --verbose' manually to debug."
+        echo "❌ CRITICAL: Failed to install CRF library."
         exit 1
     fi
 fi
