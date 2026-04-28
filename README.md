@@ -39,7 +39,7 @@ First, authenticate to Huggingface. You will need a Huggingface acccount first, 
 ```huggingface-cli login```
 Then paste your access token.
 
-If your authentication functions correctly, navigate to the ATA/pipeline/model/ folder and downlooad the diarization model with the following command:
+If your authentication functions correctly, navigate to the ATA/pipeline/model/ folder and download the diarization model with the following command:
 ```
 huggingface-cli download pyannote/speaker-diarization-community-1 \
 >   --local-dir models--pyannote--speaker-diarization-community-1 \
