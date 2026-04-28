@@ -384,7 +384,7 @@ def process_audios():
 
             # 2. Transcribe (Using Global Model)
             # Note: _loaded_whisper_model is already on GPU if available
-            result = _loaded_whisper_model.transcribe(audio, batch_size=BATCH_SIZE, verbose=False, print_progress=False)
+            result = _loaded_whisper_model.transcribe(audio, beam_size=BATCH_SIZE, verbose=False, print_progress=False)
             logger.info(f"Transcription completed. Detected language: {result.get('language', 'unknown')}")
 
             # 3. Align
@@ -597,7 +597,7 @@ def transcribe_audio_locally(audio_path, language='de'):
         
         # 3. Transcribe
         logger.info("Running WhisperX transcription...")
-        result = _loaded_whisper_model.transcribe(audio, batch_size=32, language=language)
+        result = _loaded_whisper_model.transcribe(audio, beam_size=32, language=language)
         logger.info(f"Transcription completed. Detected language: {result.get('language', 'unknown')}")
         
         # 4. Align
