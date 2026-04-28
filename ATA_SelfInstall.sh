@@ -3,33 +3,49 @@
 # Exit immediately if a command exits with a non-zero status
 set -e
 
-echo "=== ATA Speech Anonymizer Installer (Updated) ==="
-echo "This script sets up the 'whisperx' environment with all necessary dependencies."
-echo "Includes mmbert PII model, Base BERT, and fixes for missing Python bindings."
+# --- 1. MAIN FOLDER LOGIC ---
+CURRENT_DIR="$(pwd)"
+SCRIPT_NAME="$(basename "$0")"
+MAIN_DIR_NAME="MAIN"
+
+# Check if we are already inside a MAIN folder
+if [ "$(basename "$CURRENT_DIR")" != "$MAIN_DIR_NAME" ]; then
+    if [ -d "$MAIN_DIR_NAME" ]; then
+        echo "Found existing '$MAIN_DIR_NAME' folder. Moving into it..."
+        cd "$MAIN_DIR_NAME"
+        CURRENT_DIR="$(pwd)"
+    else
+        echo "No '$MAIN_DIR_NAME' folder found. Creating one and moving installation inside..."
+        mkdir -p "$MAIN_DIR_NAME"
+        cd "$MAIN_DIR_NAME"
+        if [ -f "../$SCRIPT_NAME" ]; then
+            mv "../$SCRIPT_NAME" "./$SCRIPT_NAME"
+            echo "Moved installer script to: $(pwd)/$SCRIPT_NAME"
+        fi
+        CURRENT_DIR="$(pwd)"
+        echo "Installation will proceed in: $CURRENT_DIR"
+    fi
+fi
+cd "$CURRENT_DIR"
+
+echo "=== ATA Speech Anonymizer Installer (Smart Check Version) ==="
+echo "Working Directory: $(pwd)"
+echo "This script will check for existing dependencies and skip installation if found."
 echo ""
 
-# 1. Check if Conda is installed
+# 2. Check if Conda is installed
 if ! command -v conda &> /dev/null; then
     echo "Conda not found. Installing Miniconda..."
-    
-    # Download Miniconda
     wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh
-    
-    # Install Miniconda silently (-b for batch, -p for path)
     bash miniconda.sh -b -p $HOME/miniconda3
-    
-    # Clean up installer
     rm miniconda.sh
-    
-    # Initialize Conda for the current shell session
     eval "$($HOME/miniconda3/bin/conda shell.bash hook)"
 else
     echo "Conda already installed."
-    # Ensure conda is initialized in the current session
     eval "$(conda shell.bash hook)"
 fi
 
-# 2. Create the environment
+# 3. Create the environment
 ENV_NAME="whisperx"
 echo "Creating conda environment '$ENV_NAME' with Python 3.12..."
 if conda env list | grep -q "^$ENV_NAME "; then
@@ -38,143 +54,221 @@ if conda env list | grep -q "^$ENV_NAME "; then
 fi
 conda create -n $ENV_NAME python=3.12 -y
 
-# 3. Activate the environment
+# 4. Activate the environment
 echo "Activating environment..."
 conda activate $ENV_NAME
 
-# 4. Install core system dependencies via Conda
-# Using conda-forge ensures binary compatibility with PyTorch
-echo "Installing system dependencies (ffmpeg, libsndfile, build tools)..."
+# --- HELPER FUNCTIONS ---
 
-# NOTE: build-essential is an apt package, not conda. 
-# We attempt conda install for gcc/g++ compilers, but rely on system apt if available.
+check_pip_installed() {
+    local pkg=$1
+    if pip show "$pkg" &> /dev/null; then
+        echo "✅ $pkg is already installed. Skipping."
+        return 0
+    else
+        return 1
+    fi
+}
 
-echo "Checking for system build tools..."
-if command -v apt-get &> /dev/null; then
-    echo "Detected apt-get. Installing system build tools (build-essential, libsndfile)..."
-    # Run silently with yes to accept prompts
+check_conda_installed() {
+    local pkg=$1
+    if conda list "$pkg" &> /dev/null; then
+        echo "✅ Conda package $pkg is already installed. Skipping."
+        return 0
+    else
+        return 1
+    fi
+}
+
+check_apt_installed() {
+    local pkg=$1
+    if dpkg -l | grep -q "^ii  $pkg"; then
+        echo "✅ System package $pkg is already installed. Skipping."
+        return 0
+    else
+        return 1
+    fi
+}
+
+install_if_missing() {
+    local pkg_spec=$1
+    local pkg_name=$2
+    
+    if [[ "$pkg_spec" == git+* ]]; then
+        if pip show whisperx &> /dev/null; then
+            echo "✅ whisperx is already installed. Skipping."
+        else
+            echo "Installing whisperx from source..."
+            pip install "$pkg_spec"
+        fi
+    else
+        if ! check_pip_installed "$pkg_name"; then
+            echo "Installing $pkg_name..."
+            pip install "$pkg_spec"
+        fi
+    fi
+}
+
+# 5. Install System Dependencies (APT)
+echo "Checking system build tools..."
+NEEDS_APT=false
+
+if ! check_apt_installed "build-essential"; then NEEDS_APT=true; fi
+if ! check_apt_installed "libsndfile1"; then NEEDS_APT=true; fi
+if ! check_apt_installed "ffmpeg"; then NEEDS_APT=true; fi
+
+if [ "$NEEDS_APT" = true ]; then
+    echo "Installing missing system tools via apt..."
     sudo apt-get update -qq && sudo apt-get install -y -qq build-essential libsndfile1 ffmpeg
 else
-    echo "apt-get not found. Attempting to install compilers via Conda..."
-    conda install -c conda-forge gcc_linux-64 gxx_linux-64 -y
+    echo "All system tools are present."
 fi
 
-# Ensure ffmpeg and libsndfile are present in conda as well for consistency
-echo "Ensuring ffmpeg and libsndfile are in Conda environment..."
-conda install -c conda-forge ffmpeg libsndfile -y
+# Ensure ffmpeg and libsndfile are present in conda as well
+echo "Checking Conda packages (ffmpeg, libsndfile)..."
+if ! check_conda_installed "ffmpeg"; then
+    echo "Installing ffmpeg via Conda..."
+    conda install -c conda-forge ffmpeg -y
+fi
+if ! check_conda_installed "libsndfile"; then
+    echo "Installing libsndfile via Conda..."
+    conda install -c conda-forge libsndfile -y
+fi
 
-# 5. Install Python packages
+# 6. Install Python packages
 echo "Upgrading pip..."
-pip install --upgrade pip
+pip install --upgrade pip -q
 
-# --- CRITICAL FIXES & MISSING DEPENDENCIES ---
+echo "Checking NLP and Audio libraries..."
 
-# 1. WhisperX (Installed from GitHub for latest stability with pyannote)
-echo "Installing whisperx from source..."
-pip install git+https://github.com/m-bain/whisperx.git
+# Install core packages
+install_if_missing "git+https://github.com/m-bain/whisperx.git" "whisperx"
+install_if_missing "pydub" "pydub"
+install_if_missing "ffmpeg-python" "ffmpeg-python"
+install_if_missing "pyannote.audio" "pyannote.audio"
+install_if_missing "transformers" "transformers"
+install_if_missing "accelerate" "accelerate"
+install_if_missing "sentencepiece" "sentencepiece"
+install_if_missing "spacy" "spacy"
+install_if_missing "torchcrf" "torchcrf"
+install_if_missing "pandas" "pandas"
+install_if_missing "openai" "openai"
 
-# 2. Audio Processing (Fixed: ffmpeg-python instead of python-ffmpeg)
-echo "Installing audio processing libraries..."
-pip install pydub ffmpeg-python
+# Spacy model check
+if python -m spacy check de_core_news_sm &> /dev/null; then
+    echo "✅ spaCy German model (de_core_news_sm) is already installed."
+else
+    echo "Installing spaCy German model..."
+    python -m spacy download de_core_news_sm
+fi
 
-# 3. Pyannote (Diarization)
-# Installing before transformers to manage dependency resolution
-echo "Installing pyannote-audio and dependencies..."
-pip install pyannote.audio pyannote.pipeline pyannote.metrics
+# Torchcodec check
+echo "Checking torchcodec..."
+if pip show torchcodec &> /dev/null; then
+    CURRENT_VERSION=$(pip show torchcodec | grep Version | awk '{print $2}')
+    if [ "$CURRENT_VERSION" == "0.7.0" ]; then
+        echo "✅ torchcodec 0.7.0 is already installed."
+    else
+        echo "Updating torchcodec to 0.7.0..."
+        pip uninstall torchcodec -y
+        pip install torchcodec==0.7.0
+    fi
+else
+    echo "Installing torchcodec 0.7.0..."
+    pip install torchcodec==0.7.0
+fi
 
-# 4. Anonymization Libraries (Local BERT/spaCy)
-echo "Installing NLP and anonymization libraries..."
-pip install transformers accelerate sentencepiece
-pip install spacy
-python -m spacy download de_core_news_sm
-
-# 5. CRF Library for the custom mmbert model
-echo "Installing torchcrf..."
-pip install torchcrf
-
-# 6. MISSING DEPENDENCIES (Added based on process.py requirements)
-echo "Installing missing dependencies (pandas, openai)..."
-pip install pandas openai
-
-# 7. Torchcodec (Specific version if needed)
-echo "Handling torchcodec..."
-pip uninstall torchcodec -y || true
-pip install torchcodec==0.7.0 || echo "Warning: torchcodec installation failed, skipping."
-
-# 8. Web Interface Option
+# 7. Web Interface Option
 echo ""
 echo "-------------------------------------------------"
 read -p "Do you want to install the Web Interface (Flask, gTTS, etc.)? (y/n): " INSTALL_WEB
-INSTALL_WEB=${INSTALL_WEB:-y} # Default to 'y' if empty
+INSTALL_WEB=${INSTALL_WEB:-y}
 
 if [[ "$INSTALL_WEB" =~ ^[Yy]$ ]]; then
-    echo "Installing Web Interface dependencies..."
-    pip install flask python-dotenv requests cryptography gtts
-    echo "Web Interface dependencies installed."
+    WEB_PKGS=("flask" "python-dotenv" "requests" "cryptography" "gtts")
+    SKIP_WEB=true
+    for pkg in "${WEB_PKGS[@]}"; do
+        if ! check_pip_installed "$pkg"; then
+            SKIP_WEB=false
+            break
+        fi
+    done
+
+    if [ "$SKIP_WEB" = false ]; then
+        echo "Installing Web Interface dependencies..."
+        pip install flask python-dotenv requests cryptography gtts
+    else
+        echo "✅ All Web Interface dependencies are already installed."
+    fi
 else
-    echo "Skipping Web Interface installation. Command-line only mode selected."
+    echo "Skipping Web Interface installation."
 fi
 
-# 9. Hugging Face Token for Gated Models
+# 8. Hugging Face Token (Fixed Logic)
 echo ""
 echo "-------------------------------------------------"
 echo "The Pyannote Diarization model is gated on Hugging Face."
-echo "You need a token to download it automatically."
 echo "Get your token here: https://huggingface.co/settings/tokens"
-echo "(Read access is sufficient)"
-echo ""
-echo "Note: If you have already logged in via 'hf auth login', you can skip this step."
 echo ""
 
-read -p "Enter your Hugging Face Token (or press Enter if already logged in): " HF_TOKEN
-HF_TOKEN=$(echo "$HF_TOKEN" | tr -d '\r\n\t ')
-
-if [ -z "$HF_TOKEN" ]; then
-    echo "No token provided. Checking for existing login..."
-    if hf whoami > /dev/null 2>&1; then
-        echo "✅ You are already logged in. Skipping token input."
-    else
-        echo "⚠️  No token provided and not logged in. You may need to manually download the Pyannote model later."
-        echo "   To fix: Run 'hf auth login' manually."
-    fi
+# Check if already logged in
+if hf whoami > /dev/null 2>&1; then
+    echo "✅ You are already logged in to Hugging Face."
+    HF_TOKEN=""
 else
-    echo "Logging in to Hugging Face..."
-    # Use the standard login command which works on all versions
-    hf auth login --token "$HF_TOKEN"
+    read -p "Enter your Hugging Face Token (or press Enter if already logged in): " HF_TOKEN
+    HF_TOKEN=$(echo "$HF_TOKEN" | tr -d '\r\n\t ')
     
-    if hf whoami > /dev/null 2>&1; then
-        echo "✅ Successfully logged in."
-        echo "Verifying access and caching Pyannote model..."
-        python -c "from pyannote.audio import Pipeline; print('Downloading model...'); Pipeline.from_pretrained('pyannote/speaker-diarization-3.1')"
-        echo "Pyannote model cached successfully!"
+    if [ -z "$HF_TOKEN" ]; then
+        echo "⚠️  No token provided and not logged in. You may need to manually download models later."
+        echo "   To fix later: Run 'hf auth login' manually."
     else
-        echo "❌ Login failed. Please check your token."
-        exit 1
+        echo "Logging in to Hugging Face..."
+        # Run login and capture output
+        LOGIN_OUTPUT=$(hf auth login --token "$HF_TOKEN" 2>&1)
+        LOGIN_STATUS=$?
+        
+        echo "$LOGIN_OUTPUT"
+        
+        # Check if login was successful based on output text
+        if echo "$LOGIN_OUTPUT" | grep -q "Login successful"; then
+            echo "✅ Login confirmed via output message."
+        else
+            # Fallback: try whoami again
+            if hf whoami > /dev/null 2>&1; then
+                echo "✅ Login confirmed via whoami."
+            else
+                echo "❌ Login failed. Please check your token."
+                exit 1
+            fi
+        fi
     fi
 fi
 
-# 10. Download WhisperX Models (Interactive Selection)
-# FIXED: Path logic now matches process.py expectations (models-- prefix)
+# 9. Create Project Directory Structure
+echo ""
+echo "Creating project directory structure..."
+PIPELINE_DIR="$PWD/pipeline"
+MODEL_DIR="$PIPELINE_DIR/model"
+VIDEOS_DIR="$PIPELINE_DIR/videos"
+AUDIOS_DIR="$PIPELINE_DIR/audios"
+TRANSCRIPTS_DIR="$PIPELINE_DIR/transcripts"
+ANNONYM_DIR="$PIPELINE_DIR/annonym"
+LLM_ANON_DIR="$PIPELINE_DIR/LLM-Anon"
+
+mkdir -p "$MODEL_DIR" "$VIDEOS_DIR" "$AUDIOS_DIR" "$TRANSCRIPTS_DIR" "$ANNONYM_DIR" "$LLM_ANON_DIR"
+echo "✅ Created directories."
+
+# 10. Download WhisperX Models
 echo ""
 echo "-------------------------------------------------"
 echo "WhisperX Model Download Options"
-echo "Select the models you want to download (separate with spaces, e.g., 'base large')."
-echo ""
-echo "Available Models:"
-echo "  - tiny      (Fastest, lowest accuracy)"
-echo "  - base      (Default, good balance)"
-echo "  - small     (More accurate, slower)"
-echo "  - medium    (High accuracy, very slow)"
-echo "  - large     (Best accuracy, slowest - ~3GB)"
+echo "Available Models: tiny, base, small, medium, large"
 echo ""
 
 read -p "Enter model names to download (or press Enter to skip): " WHISPER_MODELS_INPUT
 
 if [ -n "$WHISPER_MODELS_INPUT" ]; then
-    # Define the target directory
-    TARGET_BASE="$PWD/pipeline/model"
-    mkdir -p "$TARGET_BASE"
-
     declare -A MODEL_MAP
     MODEL_MAP["tiny"]="Systran/faster-whisper-tiny"
     MODEL_MAP["base"]="Systran/faster-whisper-base"
@@ -186,29 +280,19 @@ if [ -n "$WHISPER_MODELS_INPUT" ]; then
         model_name=$(echo "$model_name" | tr '[:upper:]' '[:lower:]')
         
         if [ -z "${MODEL_MAP[$model_name]}" ]; then
-            echo "⚠️  Warning: '$model_name' is not a valid option. Skipping."
+            echo "⚠️  Warning: '$model_name' is not valid. Skipping."
             continue
         fi
 
         hf_repo="${MODEL_MAP[$model_name]}"
-        
-        # FIX: Prepend "models--" to match process.py hardcoded paths
-        # Example: Systran/faster-whisper-large-v3 -> models--Systran--faster-whisper-large-v3
         folder_name="models--$(echo "$hf_repo" | sed 's/\//\--/g')"
-        target_dir="$TARGET_BASE/$folder_name"
-
-        echo ""
-        echo "----------------------------------------"
-        echo "Downloading: $model_name ($hf_repo)"
-        echo "Target: $target_dir"
-        echo "----------------------------------------"
+        target_dir="$MODEL_DIR/$folder_name"
 
         if [ -d "$target_dir" ]; then
-            echo "⚠️  Model '$model_name' already exists at $target_dir. Skipping download."
+            echo "✅ Model '$model_name' already exists at $target_dir. Skipping download."
         else
-            echo "Starting download..."
+            echo "Downloading: $model_name ($hf_repo)..."
             huggingface-cli download "$hf_repo" --local-dir "$target_dir" --local-dir-use-symlinks false
-            
             if [ $? -eq 0 ]; then
                 echo "✅ Successfully downloaded: $model_name"
             else
@@ -216,77 +300,46 @@ if [ -n "$WHISPER_MODELS_INPUT" ]; then
             fi
         fi
     done
-    echo ""
-    echo "WhisperX model download phase complete."
 else
     echo "No models selected. Skipping WhisperX downloads."
 fi
 
-# 11. Download mmbert PII Model and Base BERT (CRITICAL FOR OFFLINE)
+# 11. Download mmbert Models
 echo ""
 echo "-------------------------------------------------"
 echo "Downloading mmbert Multilingual PII Model & Base BERT"
-echo "These are required for the local anonymization engine."
-echo "This will download ~2.5GB total."
 echo ""
 
-TARGET_BASE="$PWD/pipeline/model"
-mkdir -p "$TARGET_BASE"
+TARGET_BASE="$MODEL_DIR"
 
-# 11a. Download Base Model
-echo "1. Downloading Base Model: jhu-clsp/mmBERT-base"
+# Base Model
 BASE_TARGET="$TARGET_BASE/mmBERT-base-local"
-
 if [ -d "$BASE_TARGET" ]; then
-    echo "⚠️  Base model already exists at $BASE_TARGET. Skipping."
+    echo "✅ Base model already exists at $BASE_TARGET. Skipping."
 else
-    echo "Downloading base model (this may take a while)..."
+    echo "Downloading base model..."
     huggingface-cli download jhu-clsp/mmBERT-base --local-dir "$BASE_TARGET" --local-dir-use-symlinks false
-    if [ $? -eq 0 ]; then
-        echo "✅ Base model downloaded successfully."
-    else
-        echo "❌ Failed to download base model."
-        exit 1
-    fi
+    if [ $? -eq 0 ]; then echo "✅ Base model downloaded."; else echo "❌ Failed."; exit 1; fi
 fi
 
-# 11b. Download Fine-tuned PII Model
-echo ""
-echo "2. Downloading Fine-tuned Model: deryaerman/mmbert_multilingual_pii_ner"
+# PII Model
 PII_TARGET="$TARGET_BASE/mmbert_multilingual_pii_ner"
-
 if [ -d "$PII_TARGET" ]; then
-    echo "⚠️  PII model already exists at $PII_TARGET. Skipping."
+    echo "✅ PII model already exists at $PII_TARGET. Skipping."
 else
     echo "Downloading PII model..."
-    # Note: This creates a subfolder 'jhu-clsp-mmBERT-base-multilingual-pii' inside the target
     huggingface-cli download deryaerman/mmbert_multilingual_pii_ner --local-dir "$PII_TARGET" --local-dir-use-symlinks false
-    
-    if [ $? -eq 0 ]; then
-        echo "✅ PII model downloaded successfully."
-        echo "   Note: Files are located in $PII_TARGET/jhu-clsp-mmBERT-base-multilingual-pii/"
-    else
-        echo "❌ Failed to download PII model."
-        exit 1
-    fi
+    if [ $? -eq 0 ]; then echo "✅ PII model downloaded."; else echo "❌ Failed."; exit 1; fi
 fi
-
-echo ""
-echo "mmbert model download phase complete."
 
 # 12. Create .env File
 echo ""
-echo "-------------------------------------------------"
 echo "Creating .env configuration file..."
-echo ""
-
-# Check if .env already exists
 if [ -f ".env" ]; then
-    echo "⚠️  .env file already exists. Backing up old one to .env.backup..."
+    echo "⚠️  .env exists. Backing up to .env.backup..."
     cp .env .env.backup
 fi
 
-# Create the new .env file
 cat > .env <<EOF
 # ATA Speech Anonymizer Configuration
 # Generated by ATA_SelfInstall.sh on $(date)
@@ -299,35 +352,41 @@ CHAT_AI_API_KEY=your_api_key_here
 # Replace with your specific endpoint if different from the default
 CHAT_AI_ENDPOINT=https://your-endpoint.com/v1
 
-# Optional: Specify a default model key if desired (matches keys in AVAILABLE_LLM_MODELS)
+# Optional: Specify a default model key if desired
 # CHAT_AI_MODEL=gpt-oss-120b
 
-# Optional: HTTPS toggle for Web Interface (default: true)
+# Optional: HTTPS toggle for Web Interface
 # USE_HTTPS=true
 EOF
 
-echo "✅ .env file created successfully in the current directory."
-echo "   ⚠️  IMPORTANT: You MUST edit this file and replace 'your_api_key_here' with your real API key."
-echo "   ⚠️  Also update 'CHAT_AI_ENDPOINT' if your provider differs."
+echo "✅ .env file created. Edit it with your real API key."
 
 # 13. Final Instructions
 echo ""
 echo "=== Setup Complete! ==="
-echo ""
 echo "To use the environment:"
 echo "  source $HOME/miniconda3/etc/profile.d/conda.sh"
 echo "  conda activate $ENV_NAME"
 echo ""
-echo "Project Structure Expectations:"
-echo "  - Place your 'pipeline' folder (with process.py) in the project root."
-echo "  - The script has automatically downloaded models to 'pipeline/model/'."
-echo "  - If Web Interface installed: Run 'python interactive_app/app.py'."
-echo "  - If CLI only: Run 'python pipeline/process.py'."
+echo "Project Structure:"
+echo "  $(pwd)/"
+echo "    ├── .env"
+echo "    ├── ATA_SelfInstall.sh"
+echo "    └── pipeline/"
+echo "        ├── model/ (Models downloaded here)"
+echo "        ├── videos/ (Place input videos here)"
+echo "        ├── audios/ (Processed audio goes here)"
+echo "        ├── transcripts/ (Raw transcripts)"
+echo "        ├── anonym/ (BERT anonymized)"
+echo "        └── LLM-Anon/ (LLM rewritten)"
 echo ""
-echo "Configuration:"
-echo "  - Edit the newly created '.env' file to add your API Key and Endpoint."
-echo "  - The .env file is automatically loaded by process.py and app.py."
+echo "Next Steps:"
+echo "  1. Edit the '.env' file with your API Key."
+echo "  2. Place your video files in the 'pipeline/videos' folder."
+echo "  3. Run the pipeline:"
+echo "     python pipeline/process.py"
+echo "  4. (Optional) Run the Web Interface:"
+echo "     python interactive_app/app.py"
 echo ""
-echo "Offline Status: All required models (WhisperX, Pyannote, mmbert, Base BERT) are now local."
-echo "You can run the pipeline without an internet connection (after initial setup)."
+echo "Offline Status: All required models are now local."
 echo ""
