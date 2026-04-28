@@ -15,7 +15,7 @@ Speaker diarization via Pyannote.audio
 
 To run the transcription pipeline you'll need Python 3.10. and Anaconda.
 
-ATA_Setup.sh is a bash script that will install all the relevant files including for the required models. Read the sub-steps below FIRST. When you have completed these steps, run the setup by typing into your command line while in the MAIN folder: ./ATA_Setup.sh
+ATA_Setup.sh is a bash script that will install all the relevant files including for the required models. Read the sub-steps below FIRST. When you have completed these steps, run the setup by typing into your command line while in the ATA folder: ./ATA_Setup.sh
 
 ## Model Download / Access
 The WhisperX (AKA Faster Whisper) and anonymization model downloads are fully automated. However, the diarization model is gated on Huggingface - You must provide contact information to be able to use or download it. To do this, create a Huggingface account or log in, then navigate to https://huggingface.co/pyannote/speaker-diarization-community-1. Fill in the requested information on the webpage to gain access to the model. 
@@ -39,7 +39,7 @@ First, authenticate to Huggingface. You will need a Huggingface acccount first, 
 ```huggingface-cli login```
 Then paste your access token.
 
-If your authentication functions correctly, navigate to the MAIN/pipeline/model/ folder and downlooad the diarization model with the following command:
+If your authentication functions correctly, navigate to the ATA/pipeline/model/ folder and downlooad the diarization model with the following command:
 ```
 huggingface-cli download pyannote/speaker-diarization-community-1 \
 >   --local-dir models--pyannote--speaker-diarization-community-1 \
