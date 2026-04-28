@@ -3,33 +3,50 @@
 # Exit immediately if a command exits with a non-zero status
 set -e
 
-# --- 1. MAIN FOLDER LOGIC ---
+# --- 1. MAIN FOLDER LOGIC (CORRECTED) ---
 CURRENT_DIR="$(pwd)"
 SCRIPT_NAME="$(basename "$0")"
 MAIN_DIR_NAME="MAIN"
 
-# Check if we are already inside a MAIN folder
-if [ "$(basename "$CURRENT_DIR")" != "$MAIN_DIR_NAME" ]; then
-    if [ -d "$MAIN_DIR_NAME" ]; then
-        echo "Found existing '$MAIN_DIR_NAME' folder. Moving into it..."
-        cd "$MAIN_DIR_NAME"
-        CURRENT_DIR="$(pwd)"
-    else
-        echo "No '$MAIN_DIR_NAME' folder found. Creating one and moving installation inside..."
+# Check if we are already inside a folder named 'MAIN'
+if [ "$(basename "$CURRENT_DIR")" == "$MAIN_DIR_NAME" ]; then
+    echo "✅ Already inside '$MAIN_DIR_NAME' folder. Proceeding with installation..."
+    # No action needed, we are in the right place
+else
+    echo "📂 Not inside '$MAIN_DIR_NAME'. Checking for project files..."
+    
+    # Check if we are in the root of the Git clone (look for 'pipeline' or 'README.md')
+    if [ -d "pipeline" ] || [ -f "README.md" ]; then
+        echo "✅ Detected project root. Creating '$MAIN_DIR_NAME' and moving files..."
+        
+        # Create the MAIN folder
         mkdir -p "$MAIN_DIR_NAME"
+        
+        # Move EVERYTHING (including the script) into MAIN, EXCEPT the MAIN folder itself if it existed
+        # We use a loop to move files/folders individually to avoid moving the current dir
+        for item in *; do
+            if [ "$item" != "$MAIN_DIR_NAME" ]; then
+                mv "$item" "$MAIN_DIR_NAME/"
+            fi
+        done
+        
+        # Change into the new MAIN folder
         cd "$MAIN_DIR_NAME"
-        if [ -f "../$SCRIPT_NAME" ]; then
-            mv "../$SCRIPT_NAME" "./$SCRIPT_NAME"
-            echo "Moved installer script to: $(pwd)/$SCRIPT_NAME"
-        fi
         CURRENT_DIR="$(pwd)"
-        echo "Installation will proceed in: $CURRENT_DIR"
+        echo "✅ Moved all files into '$MAIN_DIR_NAME'. New location: $CURRENT_DIR"
+    else
+        echo "❌ Error: Not inside '$MAIN_DIR_NAME' and no project files (pipeline/README.md) found."
+        echo "   Please run this script from the root of the cloned ATA repository."
+        exit 1
     fi
 fi
+
+# Ensure we are in the correct directory for the rest of the script
 cd "$CURRENT_DIR"
 
 echo "=== ATA Speech Anonymizer Installer (Smart Check Version) ==="
 echo "Working Directory: $(pwd)"
+echo "Structure: $(pwd)/pipeline, $(pwd)/interactive_app, etc."
 echo "This script will check for existing dependencies and skip installation if found."
 echo ""
 
