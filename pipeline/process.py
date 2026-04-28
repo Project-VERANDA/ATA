@@ -49,12 +49,12 @@ logger.info("="*40)
 SCRIPT_DIR = Path(__file__).resolve().parent
 BASE_PATH = SCRIPT_DIR
 
-# Traverse up until we find a folder named 'MAIN' or hit the root
-while BASE_PATH.name != "MAIN" and BASE_PATH != BASE_PATH.parent:
+# Traverse up until we find a folder named 'ATA' or hit the root
+while BASE_PATH.name != "ATA" and BASE_PATH != BASE_PATH.parent:
     BASE_PATH = BASE_PATH.parent
 
-if BASE_PATH.name != "MAIN":
-    logger.critical(f"Could not locate 'MAIN' folder. Script expects to be run from within .../MAIN/")
+if BASE_PATH.name != "ATA":
+    logger.critical(f"Could not locate 'ATA' folder. Script expects to be run from within .../ATA/")
     logger.critical(f"Current script location: {SCRIPT_DIR}")
     logger.critical(f"Detected base path: {BASE_PATH}")
     sys.exit(1)

@@ -6,7 +6,7 @@ set -e
 # --- 1. MAIN FOLDER LOGIC (CORRECTED) ---
 CURRENT_DIR="$(pwd)"
 SCRIPT_NAME="$(basename "$0")"
-MAIN_DIR_NAME="MAIN"
+MAIN_DIR_NAME="ATA"
 
 # Check if we are already inside a folder named 'MAIN'
 if [ "$(basename "$CURRENT_DIR")" == "$MAIN_DIR_NAME" ]; then
