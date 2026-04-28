@@ -349,6 +349,7 @@ LLM_ANON_DIR="$PIPELINE_DIR/LLM-Anon"
 mkdir -p "$MODEL_DIR" "$VIDEOS_DIR" "$AUDIOS_DIR" "$TRANSCRIPTS_DIR" "$ANNONYM_DIR" "$LLM_ANON_DIR"
 echo "✅ Created directories."
 
+
 # 10. Download WhisperX Models
 echo ""
 echo "-------------------------------------------------"
@@ -396,7 +397,32 @@ else
     echo "No models selected. Skipping WhisperX downloads."
 fi
 
-# 11. Download mmbert Models
+# 11. Download Pyannote Speaker Diarization Model (Community-1)
+echo ""
+echo "-------------------------------------------------"
+echo "Downloading Pyannote Speaker Diarization Model (community-1)"
+echo "This model is required for distinguishing speakers."
+echo ""
+
+# Correct path matching the repo name
+DIARIZE_TARGET="$MODEL_DIR/models--pyannote--speaker-diarization-community-1"
+
+if [ -d "$DIARIZE_TARGET" ]; then
+    echo "✅ Pyannote Diarization model already exists at $DIARIZE_TARGET. Skipping."
+else
+    echo "Downloading Pyannote model (this may take a while)..."
+    # Ensure you are logged in to Hugging Face with a valid token
+    huggingface-cli download pyannote/speaker-diarization-community-1 --local-dir "$DIARIZE_TARGET" --local-dir-use-symlinks False
+    
+    if [ $? -eq 0 ]; then
+        echo "✅ Pyannote Diarization model downloaded successfully."
+    else
+        echo "❌ Failed to download Pyannote model. Diarization may be disabled."
+        echo "   Ensure you are logged in to Hugging Face with a valid token."
+    fi
+fi
+
+# 12. Download mmbert Models
 echo ""
 echo "-------------------------------------------------"
 echo "Downloading mmbert Multilingual PII Model & Base BERT"
