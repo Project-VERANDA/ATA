@@ -135,26 +135,80 @@ if ! check_conda_installed "libsndfile"; then
     conda install -c conda-forge libsndfile -y
 fi
 
-# 6. Install Python packages
+# --- HELPER FUNCTION: Normalize package name (handle - vs _) ---
+normalize_pkg_name() {
+    echo "$1" | tr '-' '_'
+}
+
+# --- HELPER FUNCTION: Check if pip package is installed (Robust) ---
+check_pip_installed_robust() {
+    local pkg=$1
+    local norm_pkg=$(normalize_pkg_name "$pkg")
+    
+    # Try exact name first
+    if pip show "$pkg" &> /dev/null; then
+        return 0
+    fi
+    # Try normalized name (hyphen vs underscore)
+    if pip show "$norm_pkg" &> /dev/null; then
+        return 0
+    fi
+    return 1
+}
+
+# --- HELPER FUNCTION: Check if Git package is installed ---
+check_git_installed() {
+    local url=$1
+    local pkg_name=$2
+    
+    # Check if the package is installed
+    if ! check_pip_installed_robust "$pkg_name"; then
+        return 1
+    fi
+    
+    # Optional: Check if it's the correct version/source (advanced)
+    # For now, if it's installed, we assume it's fine unless you need a specific commit
+    return 0
+}
+
+# 6. Install Python packages (Optimized)
 echo "Upgrading pip..."
 pip install --upgrade pip -q
 
 echo "Checking NLP and Audio libraries..."
 
-# Install core packages
-install_if_missing "git+https://github.com/m-bain/whisperx.git" "whisperx"
-install_if_missing "pydub" "pydub"
-install_if_missing "ffmpeg-python" "ffmpeg-python"
-install_if_missing "pyannote.audio" "pyannote.audio"
-install_if_missing "transformers" "transformers"
-install_if_missing "accelerate" "accelerate"
-install_if_missing "sentencepiece" "sentencepiece"
-install_if_missing "spacy" "spacy"
-install_if_missing "torchcrf" "torchcrf"
-install_if_missing "pandas" "pandas"
-install_if_missing "openai" "openai"
+# 1. WhisperX (Special handling for Git)
+if check_git_installed "git+https://github.com/m-bain/whisperx.git" "whisperx"; then
+    echo "✅ whisperx is already installed. Skipping."
+else
+    echo "Installing whisperx from source..."
+    pip install git+https://github.com/m-bain/whisperx.git
+fi
 
-# Spacy model check
+# 2. Define list of standard packages to check
+STANDARD_PKGS=(
+    "pydub"
+    "ffmpeg-python"
+    "pyannote.audio"
+    "transformers"
+    "accelerate"
+    "sentencepiece"
+    "spacy"
+    "torchcrf"
+    "pandas"
+    "openai"
+)
+
+for pkg in "${STANDARD_PKGS[@]}"; do
+    if check_pip_installed_robust "$pkg"; then
+        echo "✅ $pkg is already installed. Skipping."
+    else
+        echo "Installing $pkg..."
+        pip install "$pkg"
+    fi
+done
+
+# 3. Spacy model check (unchanged)
 if python -m spacy check de_core_news_sm &> /dev/null; then
     echo "✅ spaCy German model (de_core_news_sm) is already installed."
 else
@@ -162,7 +216,7 @@ else
     python -m spacy download de_core_news_sm
 fi
 
-# Torchcodec check
+# 4. Torchcodec check (unchanged)
 echo "Checking torchcodec..."
 if pip show torchcodec &> /dev/null; then
     CURRENT_VERSION=$(pip show torchcodec | grep Version | awk '{print $2}')
