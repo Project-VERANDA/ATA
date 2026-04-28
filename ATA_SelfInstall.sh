@@ -217,6 +217,7 @@ else
 fi
 
 # 4. Torchcodec check (unchanged)
+# Torchcodec check (unchanged)
 echo "Checking torchcodec..."
 if pip show torchcodec &> /dev/null; then
     CURRENT_VERSION=$(pip show torchcodec | grep Version | awk '{print $2}')
@@ -230,6 +231,32 @@ if pip show torchcodec &> /dev/null; then
 else
     echo "Installing torchcodec 0.7.0..."
     pip install torchcodec==0.7.0
+fi
+
+# --- ROBUST TORCHCRF INSTALLATION ---
+echo "Checking torchcrf..."
+if pip show torchcrf &> /dev/null; then
+    # Double check if it actually imports
+    if python -c "import torchcrf" 2>/dev/null; then
+        echo "✅ torchcrf is installed and importable."
+    else
+        echo "⚠️  torchcrf is installed but cannot be imported. Reinstalling..."
+        pip uninstall torchcrf -y
+        pip install torchcrf --no-cache-dir
+    fi
+else
+    echo "Installing torchcrf..."
+    # Use --no-cache-dir to force fresh download/compile
+    pip install torchcrf --no-cache-dir
+    
+    # Verify immediately
+    if python -c "import torchcrf" 2>/dev/null; then
+        echo "✅ torchcrf installed successfully."
+    else
+        echo "❌ CRITICAL: torchcrf installation failed or is broken."
+        echo "   Please run 'pip install torchcrf --verbose' manually to debug."
+        exit 1
+    fi
 fi
 
 # 7. Web Interface Option
