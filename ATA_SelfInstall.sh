@@ -45,7 +45,23 @@ conda activate $ENV_NAME
 # 4. Install core system dependencies via Conda
 # Using conda-forge ensures binary compatibility with PyTorch
 echo "Installing system dependencies (ffmpeg, libsndfile, build tools)..."
-conda install -c conda-forge ffmpeg libsndfile build-essential -y
+
+# NOTE: build-essential is an apt package, not conda. 
+# We attempt conda install for gcc/g++ compilers, but rely on system apt if available.
+
+echo "Checking for system build tools..."
+if command -v apt-get &> /dev/null; then
+    echo "Detected apt-get. Installing system build tools (build-essential, libsndfile)..."
+    # Run silently with yes to accept prompts
+    sudo apt-get update -qq && sudo apt-get install -y -qq build-essential libsndfile1 ffmpeg
+else
+    echo "apt-get not found. Attempting to install compilers via Conda..."
+    conda install -c conda-forge gcc_linux-64 gxx_linux-64 -y
+fi
+
+# Ensure ffmpeg and libsndfile are present in conda as well for consistency
+echo "Ensuring ffmpeg and libsndfile are in Conda environment..."
+conda install -c conda-forge ffmpeg libsndfile -y
 
 # 5. Install Python packages
 echo "Upgrading pip..."
