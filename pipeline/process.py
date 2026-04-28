@@ -500,10 +500,9 @@ def process_audios():
 # Global variables to hold loaded models (so we don't reload every time)
 _loaded_whisper_model = None
 _loaded_diarize_model = None
-
+    
 def load_models():
     """Loads models locally on GPU if available."""
-def load_models():
     global _loaded_whisper_model, _loaded_diarize_model
     
     if _loaded_whisper_model and _loaded_diarize_model:
@@ -1049,7 +1048,7 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None):
     anonymizer = AnonymizationEngine(
         method=ANONYMIZATION_METHOD,
         level=ANONYMIZATION_LEVEL,
-        model_path=MODEL_FOLDER / "mmbert_multilingual_pii_ner" / "jhu-clsp-mmBERT-base-multilingual-pii"
+        model_path=MODEL_FOLDER / "mmbert_multilingual_pii_ner"
     )
 
     if not anonymizer.method:
@@ -1155,7 +1154,7 @@ def anonymize_text_locally(text):
         engine = AnonymizationEngine(
             method="local_mmbert", 
             level="standard", 
-            model_path=MODEL_FOLDER / "mmbert_multilingual_pii_ner" / "jhu-clsp-mmBERT-base-multilingual-pii"
+            model_path=MODEL_FOLDER / "mmbert_multilingual_pii_ner"
         )
         
         if not engine.method:

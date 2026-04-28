@@ -410,7 +410,6 @@ if [ -d "$BASE_TARGET" ]; then
     echo "✅ Base model already exists at $BASE_TARGET. Skipping."
 else
     echo "Downloading base model..."
-    # FIX: Changed 'false' to 'False'
     huggingface-cli download jhu-clsp/mmBERT-base --local-dir "$BASE_TARGET" --local-dir-use-symlinks False
     if [ $? -eq 0 ]; then echo "✅ Base model downloaded."; else echo "❌ Failed."; exit 1; fi
 fi
@@ -421,45 +420,8 @@ if [ -d "$PII_TARGET" ]; then
     echo "✅ PII model already exists at $PII_TARGET. Skipping."
 else
     echo "Downloading PII model..."
-    # FIX: Changed 'false' to 'False'
     huggingface-cli download deryaerman/mmbert_multilingual_pii_ner --local-dir "$PII_TARGET" --local-dir-use-symlinks False
     if [ $? -eq 0 ]; then echo "✅ PII model downloaded."; else echo "❌ Failed."; exit 1; fi
-fi
-
-# 11. Download mmbert Models
-echo ""
-echo "-------------------------------------------------"
-echo "Downloading mmbert Multilingual PII Model & Base BERT"
-echo ""
-
-TARGET_BASE="$MODEL_DIR"
-
-# Base Model
-BASE_TARGET="$TARGET_BASE/mmBERT-base-local"
-if [ -d "$BASE_TARGET" ]; then
-    echo "✅ Base model already exists at $BASE_TARGET. Skipping."
-else
-    echo "Downloading base model..."
-    huggingface-cli download jhu-clsp/mmBERT-base --local-dir "$BASE_TARGET" --local-dir-use-symlinks false
-    if [ $? -eq 0 ]; then echo "✅ Base model downloaded."; else echo "❌ Failed."; exit 1; fi
-fi
-
-# PII Model
-PII_TARGET="$TARGET_BASE/mmbert_multilingual_pii_ner"
-if [ -d "$PII_TARGET" ]; then
-    echo "✅ PII model already exists at $PII_TARGET. Skipping."
-else
-    echo "Downloading PII model..."
-    huggingface-cli download deryaerman/mmbert_multilingual_pii_ner --local-dir "$PII_TARGET" --local-dir-use-symlinks false
-    if [ $? -eq 0 ]; then echo "✅ PII model downloaded."; else echo "❌ Failed."; exit 1; fi
-fi
-
-# 12. Create .env File
-echo ""
-echo "Creating .env configuration file..."
-if [ -f ".env" ]; then
-    echo "⚠️  .env exists. Backing up to .env.backup..."
-    cp .env .env.backup
 fi
 
 cat > .env <<EOF
