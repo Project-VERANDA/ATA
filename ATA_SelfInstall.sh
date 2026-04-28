@@ -123,28 +123,27 @@ echo "You need a token to download it automatically."
 echo "Get your token here: https://huggingface.co/settings/tokens"
 echo "(Read access is sufficient)"
 echo ""
-read -sp "Enter your Hugging Face Token (will not be stored): " HF_TOKEN
+echo "Note: If you have already logged in via 'hf auth login', you can skip this step."
 echo ""
 
-# Trim whitespace and carriage returns from the token
+read -p "Enter your Hugging Face Token (or press Enter if already logged in): " HF_TOKEN
 HF_TOKEN=$(echo "$HF_TOKEN" | tr -d '\r\n\t ')
 
 if [ -z "$HF_TOKEN" ]; then
-    echo "No token provided. You may need to manually download the Pyannote model later."
-    echo "Set the token manually later with: hf auth login --token YOUR_TOKEN"
+    echo "No token provided. Checking for existing login..."
+    if hf whoami > /dev/null 2>&1; then
+        echo "✅ You are already logged in. Skipping token input."
+    else
+        echo "⚠️  No token provided and not logged in. You may need to manually download the Pyannote model later."
+        echo "   To fix: Run 'hf auth login' manually."
+    fi
 else
     echo "Logging in to Hugging Face..."
-    pip install huggingface_hub
+    # Use the standard login command which works on all versions
+    hf auth login --token "$HF_TOKEN"
     
-    # Use the modern 'hf auth login' command which is more robust
-    # We pass the token via stdin to avoid shell expansion issues
-    echo "$HF_TOKEN" | hf auth login --token-stdin
-    
-    # Verify login
     if hf whoami > /dev/null 2>&1; then
-        echo "✅ Successfully logged in to Hugging Face."
-        
-        # Trigger a dummy download to verify access and cache the model
+        echo "✅ Successfully logged in."
         echo "Verifying access and caching Pyannote model..."
         python -c "from pyannote.audio import Pipeline; print('Downloading model...'); Pipeline.from_pretrained('pyannote/speaker-diarization-3.1')"
         echo "Pyannote model cached successfully!"
