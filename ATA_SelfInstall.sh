@@ -3,9 +3,9 @@
 # Exit immediately if a command exits with a non-zero status
 set -e
 
-echo "=== ATA Speech Anonymizer Installer ==="
-echo "This script sets up the 'whisperx' environment and installs all necessary dependencies."
-echo "It includes the mmbert PII model and its base BERT backbone for fully offline operation."
+echo "=== ATA Speech Anonymizer Installer (Updated) ==="
+echo "This script sets up the 'whisperx' environment with all necessary dependencies."
+echo "Includes mmbert PII model, Base BERT, and fixes for missing Python bindings."
 echo ""
 
 # 1. Check if Conda is installed
@@ -42,42 +42,50 @@ conda create -n $ENV_NAME python=3.12 -y
 echo "Activating environment..."
 conda activate $ENV_NAME
 
-# 4. Install core system dependencies
-echo "Installing ffmpeg via conda-forge..."
-conda install ffmpeg -c conda-forge -y
+# 4. Install core system dependencies via Conda
+# Using conda-forge ensures binary compatibility with PyTorch
+echo "Installing system dependencies (ffmpeg, libsndfile, build tools)..."
+conda install -c conda-forge ffmpeg libsndfile build-essential -y
 
 # 5. Install Python packages
-echo "Installing core Python packages..."
+echo "Upgrading pip..."
 pip install --upgrade pip
 
-# WhisperX and dependencies
-echo "Installing whisperx..."
-pip install whisperx
+# --- CRITICAL FIXES & MISSING DEPENDENCIES ---
 
-# Audio processing
-echo "Installing pydub and python-ffmpeg..."
-pip install pydub python-ffmpeg
+# 1. WhisperX (Installed from GitHub for latest stability with pyannote)
+echo "Installing whisperx from source..."
+pip install git+https://github.com/m-bain/whisperx.git
 
-# Pyannote (for diarization) - Requires HF Token later
-echo "Installing pyannote-audio and related dependencies..."
+# 2. Audio Processing (Fixed: ffmpeg-python instead of python-ffmpeg)
+echo "Installing audio processing libraries..."
+pip install pydub ffmpeg-python
+
+# 3. Pyannote (Diarization)
+# Installing before transformers to manage dependency resolution
+echo "Installing pyannote-audio and dependencies..."
 pip install pyannote.audio pyannote.pipeline pyannote.metrics
 
-# Anonymization Libraries (Local BERT/spaCy)
-echo "Installing anonymization libraries..."
+# 4. Anonymization Libraries (Local BERT/spaCy)
+echo "Installing NLP and anonymization libraries..."
 pip install transformers accelerate sentencepiece
 pip install spacy
 python -m spacy download de_core_news_sm
 
-# CRF Library for the custom mmbert model
-echo "Installing torchcrf (required for mmbert PII model)..."
+# 5. CRF Library for the custom mmbert model
+echo "Installing torchcrf..."
 pip install torchcrf
 
-# Torchcodec specific versions (if needed for your setup)
+# 6. MISSING DEPENDENCIES (Added based on process.py requirements)
+echo "Installing missing dependencies (pandas, openai)..."
+pip install pandas openai
+
+# 7. Torchcodec (Specific version if needed)
 echo "Handling torchcodec..."
 pip uninstall torchcodec -y || true
 pip install torchcodec==0.7.0 || echo "Warning: torchcodec installation failed, skipping."
 
-# 6. Web Interface Option
+# 8. Web Interface Option
 echo ""
 echo "-------------------------------------------------"
 read -p "Do you want to install the Web Interface (Flask, gTTS, etc.)? (y/n): " INSTALL_WEB
@@ -85,13 +93,13 @@ INSTALL_WEB=${INSTALL_WEB:-y} # Default to 'y' if empty
 
 if [[ "$INSTALL_WEB" =~ ^[Yy]$ ]]; then
     echo "Installing Web Interface dependencies..."
-    pip install flask python-dotenv requests cryptography
+    pip install flask python-dotenv requests cryptography gtts
     echo "Web Interface dependencies installed."
 else
     echo "Skipping Web Interface installation. Command-line only mode selected."
 fi
 
-# 7. Hugging Face Token for Gated Models
+# 9. Hugging Face Token for Gated Models
 echo ""
 echo "-------------------------------------------------"
 echo "The Pyannote Diarization model is gated on Hugging Face."
@@ -116,7 +124,8 @@ else
     echo "Pyannote model cached successfully!"
 fi
 
-# 8. Download WhisperX Models (Interactive Selection)
+# 10. Download WhisperX Models (Interactive Selection)
+# FIXED: Path logic now matches process.py expectations (models-- prefix)
 echo ""
 echo "-------------------------------------------------"
 echo "WhisperX Model Download Options"
@@ -153,7 +162,10 @@ if [ -n "$WHISPER_MODELS_INPUT" ]; then
         fi
 
         hf_repo="${MODEL_MAP[$model_name]}"
-        folder_name=$(echo "$hf_repo" | sed 's/\//\--/g')
+        
+        # FIX: Prepend "models--" to match process.py hardcoded paths
+        # Example: Systran/faster-whisper-large-v3 -> models--Systran--faster-whisper-large-v3
+        folder_name="models--$(echo "$hf_repo" | sed 's/\//\--/g')"
         target_dir="$TARGET_BASE/$folder_name"
 
         echo ""
@@ -181,7 +193,7 @@ else
     echo "No models selected. Skipping WhisperX downloads."
 fi
 
-# 9. Download mmbert PII Model and Base BERT (CRITICAL FOR OFFLINE)
+# 11. Download mmbert PII Model and Base BERT (CRITICAL FOR OFFLINE)
 echo ""
 echo "-------------------------------------------------"
 echo "Downloading mmbert Multilingual PII Model & Base BERT"
@@ -192,7 +204,7 @@ echo ""
 TARGET_BASE="$PWD/pipeline/model"
 mkdir -p "$TARGET_BASE"
 
-# 9a. Download Base Model
+# 11a. Download Base Model
 echo "1. Downloading Base Model: jhu-clsp/mmBERT-base"
 BASE_TARGET="$TARGET_BASE/mmBERT-base-local"
 
@@ -209,7 +221,7 @@ else
     fi
 fi
 
-# 9b. Download Fine-tuned PII Model
+# 11b. Download Fine-tuned PII Model
 echo ""
 echo "2. Downloading Fine-tuned Model: deryaerman/mmbert_multilingual_pii_ner"
 PII_TARGET="$TARGET_BASE/mmbert_multilingual_pii_ner"
@@ -233,7 +245,43 @@ fi
 echo ""
 echo "mmbert model download phase complete."
 
-# 10. Final Instructions
+# 12. Create .env File
+echo ""
+echo "-------------------------------------------------"
+echo "Creating .env configuration file..."
+echo ""
+
+# Check if .env already exists
+if [ -f ".env" ]; then
+    echo "⚠️  .env file already exists. Backing up old one to .env.backup..."
+    cp .env .env.backup
+fi
+
+# Create the new .env file
+cat > .env <<EOF
+# ATA Speech Anonymizer Configuration
+# Generated by ATA_SelfInstall.sh on $(date)
+
+# LLM API Configuration (Required for indirect identifier removal)
+# Replace 'your_api_key_here' with your actual API key
+CHAT_AI_API_KEY=your_api_key_here
+
+# LLM Endpoint URL
+# Replace with your specific endpoint if different from the default
+CHAT_AI_ENDPOINT=https://your-endpoint.com/v1
+
+# Optional: Specify a default model key if desired (matches keys in AVAILABLE_LLM_MODELS)
+# CHAT_AI_MODEL=gpt-oss-120b
+
+# Optional: HTTPS toggle for Web Interface (default: true)
+# USE_HTTPS=true
+EOF
+
+echo "✅ .env file created successfully in the current directory."
+echo "   ⚠️  IMPORTANT: You MUST edit this file and replace 'your_api_key_here' with your real API key."
+echo "   ⚠️  Also update 'CHAT_AI_ENDPOINT' if your provider differs."
+
+# 13. Final Instructions
 echo ""
 echo "=== Setup Complete! ==="
 echo ""
@@ -247,10 +295,10 @@ echo "  - The script has automatically downloaded models to 'pipeline/model/'."
 echo "  - If Web Interface installed: Run 'python interactive_app/app.py'."
 echo "  - If CLI only: Run 'python pipeline/process.py'."
 echo ""
-echo "IMPORTANT: Ensure your .env file (if using Web Interface) contains:"
-echo "  CHAT_AI_API_KEY=your_api_key_here"
-echo "  CHAT_AI_ENDPOINT=https://your-endpoint.com/v1"
+echo "Configuration:"
+echo "  - Edit the newly created '.env' file to add your API Key and Endpoint."
+echo "  - The .env file is automatically loaded by process.py and app.py."
 echo ""
 echo "Offline Status: All required models (WhisperX, Pyannote, mmbert, Base BERT) are now local."
-echo "You can run the pipeline without an internet connection."
+echo "You can run the pipeline without an internet connection (after initial setup)."
 echo ""
