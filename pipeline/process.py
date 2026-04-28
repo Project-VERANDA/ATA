@@ -383,23 +383,33 @@ def process_audios():
             logger.debug(f"Audio loaded. Duration: {len(audio)/16000:.2f}s")
 
             # 2. Transcribe (Using Global Model)
-            # faster_whisper returns a generator, not a dict
             segments, info = _loaded_whisper_model.transcribe(
                 audio, 
                 beam_size=BATCH_SIZE, 
                 vad_filter=True
             )
             
-            # Convert generator to list
-            segments = list(segments)
+            # Convert generator to list of Segment objects
+            raw_segments = list(segments)
             
-            # Extract language from the 'info' object returned by faster_whisper
+            # CRITICAL FIX: Convert Segment objects to dictionaries
+            # faster_whisper returns immutable Segment objects, but whisperx expects dicts
+            segments_list = []
+            for seg in raw_segments:
+                # Convert to dict manually
+                seg_dict = {
+                    "start": seg.start,
+                    "end": seg.end,
+                    "text": seg.text,
+                    "words": getattr(seg, 'words', None) # Preserve words if available
+                }
+                segments_list.append(seg_dict)
+            
             detected_language = info.language if info else 'unknown'
             logger.info(f"Transcription completed. Detected language: {detected_language}")
             
-            # Reconstruct the result structure to match what the rest of the code expects
-            # (whisperx expects a dict with 'segments' key)
-            result = {"segments": segments, "language": detected_language}
+            # Reconstruct result dict to match whisperx expectations
+            result = {"segments": segments_list, "language": detected_language}
 
             # 3. Align
             if result.get("language"):
@@ -618,14 +628,25 @@ def transcribe_audio_locally(audio_path, language='de'):
             vad_filter=True
         )
         
-        # Convert generator to list
-        segments = list(segments)
+        # Convert generator to list of Segment objects
+        raw_segments = list(segments)
+        
+        # CRITICAL FIX: Convert Segment objects to dictionaries
+        segments_list = []
+        for seg in raw_segments:
+            seg_dict = {
+                "start": seg.start,
+                "end": seg.end,
+                "text": seg.text,
+                "words": getattr(seg, 'words', None)
+            }
+            segments_list.append(seg_dict)
         
         detected_language = info.language if info else language
         logger.info(f"Transcription completed. Detected language: {detected_language}")
         
         # Reconstruct result dict
-        result = {"segments": segments, "language": detected_language}
+        result = {"segments": segments_list, "language": detected_language}
         
         # 4. Align
         if result.get("language"):
