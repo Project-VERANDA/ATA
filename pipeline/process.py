@@ -99,6 +99,16 @@ if not WHISPERX_MODEL_PATH.exists():
     logger.critical(f"Available folders in model directory: {list(MODEL_FOLDER.iterdir())}")
     sys.exit(1)
 
+if not WHISPERX_MODEL_PATH.exists():
+    # Fallback to any available whisper model if large-v3 is missing
+    whisper_folders = [f for f in MODEL_FOLDER.iterdir() if f.is_dir() and f.name.startswith("models--Systran--faster-whisper-")]
+    if whisper_folders:
+        WHISPERX_MODEL_PATH = whisper_folders[0]
+        logger.warning(f"Using fallback model: {WHISPERX_MODEL_PATH.name}")
+    else:
+        logger.critical(f"CRITICAL: No WhisperX model found in {MODEL_FOLDER}.")
+        sys.exit(1)
+
 if not DIARIZATION_MODEL_PATH.exists():
     logger.warning(f"WARNING: Diarization model not found at {DIARIZATION_MODEL_PATH}.")
     logger.warning("Speaker diarization will be disabled. Using generic speaker labels.")
@@ -493,12 +503,12 @@ _loaded_diarize_model = None
 
 def load_models():
     """Loads models locally on GPU if available."""
+def load_models():
     global _loaded_whisper_model, _loaded_diarize_model
     
     if _loaded_whisper_model and _loaded_diarize_model:
         return _loaded_whisper_model, _loaded_diarize_model
 
-    # 1. Determine Device
     device_str = "cuda" if torch.cuda.is_available() else "cpu"
     device = torch.device(device_str)
     
@@ -506,51 +516,61 @@ def load_models():
     logger.info(f"CUDA Available: {torch.cuda.is_available()}")
     if device_str == "cuda":
         logger.info(f"GPU Detected: {torch.cuda.get_device_name(0)}")
-        logger.info(f"Device Object: {device}")
     else:
-        logger.warning("⚠️ NO GPU DETECTED. Falling back to CPU. Performance will be slow.")
+        logger.warning("⚠️ NO GPU DETECTED. Falling back to CPU.")
     logger.info("====================")
 
-    # 2. Load WhisperX Model (GPU)
+    # 1. Load WhisperX Model (GPU) - FIXED TO USE ABSOLUTE PATH
     try:
-        logger.info(f"Loading WhisperX model on {device_str}...")
+        logger.info(f"Loading WhisperX model from: {WHISPERX_MODEL_PATH}")
+        
+        # whisperx.load_model can accept a local path directly if we pass it as the first argument
+        # and set local_files_only=True.
+        # However, the standard way is to pass the repo_id. 
+        # Since our folder name is "models--Systran--faster-whisper-large-v3", 
+        # we need to convert it back to "Systran/faster-whisper-large-v3" to match the repo_id.
+        
+        # Extract repo_id from folder name
+        folder_name = WHISPERX_MODEL_PATH.name
+        if folder_name.startswith("models--"):
+            repo_id = folder_name.replace("models--", "").replace("--", "/")
+        else:
+            repo_id = folder_name # Fallback
+        
+        logger.info(f"Detected Repo ID: {repo_id}")
+
         _loaded_whisper_model = whisperx.load_model(
-            "large-v3", 
+            repo_id, 
             device_str, 
             compute_type="float16" if device_str == "cuda" else "float32", 
-            download_root=str(MODEL_FOLDER),
+            download_root=str(MODEL_FOLDER), # Point to the folder containing the model folders
             local_files_only=True
         )
         logger.info("✅ WhisperX model loaded successfully.")
     except Exception as e:
         logger.critical(f"Failed to load WhisperX model: {e}")
+        logger.critical("Hint: Ensure the folder name matches 'models--<org>--<model>' and is inside 'pipeline/model'")
         return None, None
     
-    # 3. Load Diarization Pipeline (GPU)
-    if DIARIZATION_MODEL_PATH.exists():
+    # 2. Load Diarization Pipeline (GPU)
+    if DIARIZATION_MODEL_PATH and DIARIZATION_MODEL_PATH.exists():
         try:
-            logger.info(f"Loading Diarization Pipeline on {device_str}...")
+            logger.info(f"Loading Diarization Pipeline from: {DIARIZATION_MODEL_PATH}")
             from pyannote.audio import Pipeline
             
-            # Load the pipeline
-            _loaded_diarize_model = Pipeline.from_pretrained(
-                str(DIARIZATION_MODEL_PATH)
-            )
+            _loaded_diarize_model = Pipeline.from_pretrained(str(DIARIZATION_MODEL_PATH))
             
-            # Set pipeline to use GPU if nvidia GPU detected.
             if device_str == "cuda":
-                _loaded_diarize_model.to(device)  # Uses the torch.device object
-                logger.info("✅ Diarization Pipeline moved to GPU using .to(torch.device('cuda')).")
+                _loaded_diarize_model.to(device)
+                logger.info("✅ Diarization Pipeline moved to GPU.")
             else:
                 logger.warning("⚠️ Diarization Pipeline loaded on CPU.")
                 
         except Exception as e:
             logger.error(f"Failed to load Diarization Pipeline: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
             _loaded_diarize_model = None
     else:
-        logger.warning("Diarization model path not found. Skipping.")
+        logger.warning("Diarization model path not found or invalid. Skipping.")
         _loaded_diarize_model = None
 
     logger.info("Models loaded successfully.")
@@ -683,7 +703,7 @@ class AnonymizationEngine:
         self.method = method
         self.level = level
         # Point to the folder containing crf_config.json and pytorch_model.bin
-        self.model_path = model_path or (MODEL_FOLDER / "mmbert_multilingual_pii_ner" / "jhu-clsp-mmBERT-base-multilingual-pii")
+        self.model_path = model_path or (MODEL_FOLDER / "mmbert_multilingual_pii_ner")
         self.model = None
         self.tokenizer = None
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
