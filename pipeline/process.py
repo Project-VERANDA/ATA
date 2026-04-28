@@ -383,9 +383,23 @@ def process_audios():
             logger.debug(f"Audio loaded. Duration: {len(audio)/16000:.2f}s")
 
             # 2. Transcribe (Using Global Model)
-            # Note: _loaded_whisper_model is already on GPU if available
-            result = _loaded_whisper_model.transcribe(audio, beam_size=BATCH_SIZE, language=None, vad_filter=True)
-            logger.info(f"Transcription completed. Detected language: {result.get('language', 'unknown')}")
+            # faster_whisper returns a generator, not a dict
+            segments, info = _loaded_whisper_model.transcribe(
+                audio, 
+                beam_size=BATCH_SIZE, 
+                vad_filter=True
+            )
+            
+            # Convert generator to list
+            segments = list(segments)
+            
+            # Extract language from the 'info' object returned by faster_whisper
+            detected_language = info.language if info else 'unknown'
+            logger.info(f"Transcription completed. Detected language: {detected_language}")
+            
+            # Reconstruct the result structure to match what the rest of the code expects
+            # (whisperx expects a dict with 'segments' key)
+            result = {"segments": segments, "language": detected_language}
 
             # 3. Align
             if result.get("language"):
@@ -597,8 +611,21 @@ def transcribe_audio_locally(audio_path, language='de'):
         
         # 3. Transcribe
         logger.info("Running WhisperX transcription...")
-        result = _loaded_whisper_model.transcribe(audio, beam_size=32, language=language, vad_filter=True)
-        logger.info(f"Transcription completed. Detected language: {result.get('language', 'unknown')}")
+        segments, info = _loaded_whisper_model.transcribe(
+            audio, 
+            beam_size=32, 
+            language=language,
+            vad_filter=True
+        )
+        
+        # Convert generator to list
+        segments = list(segments)
+        
+        detected_language = info.language if info else language
+        logger.info(f"Transcription completed. Detected language: {detected_language}")
+        
+        # Reconstruct result dict
+        result = {"segments": segments, "language": detected_language}
         
         # 4. Align
         if result.get("language"):
