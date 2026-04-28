@@ -126,18 +126,32 @@ echo ""
 read -sp "Enter your Hugging Face Token (will not be stored): " HF_TOKEN
 echo ""
 
+# Trim whitespace and carriage returns from the token
+HF_TOKEN=$(echo "$HF_TOKEN" | tr -d '\r\n\t ')
+
 if [ -z "$HF_TOKEN" ]; then
     echo "No token provided. You may need to manually download the Pyannote model later."
-    echo "Set the token manually later with: huggingface-cli login --token YOUR_TOKEN"
+    echo "Set the token manually later with: hf auth login --token YOUR_TOKEN"
 else
     echo "Logging in to Hugging Face..."
     pip install huggingface_hub
-    huggingface-cli login --token "$HF_TOKEN"
     
-    # Trigger a dummy download to verify access and cache the model
-    echo "Verifying access and caching Pyannote model..."
-    python -c "from pyannote.audio import Pipeline; print('Downloading model...'); Pipeline.from_pretrained('pyannote/speaker-diarization-3.1')"
-    echo "Pyannote model cached successfully!"
+    # Use the modern 'hf auth login' command which is more robust
+    # We pass the token via stdin to avoid shell expansion issues
+    echo "$HF_TOKEN" | hf auth login --token-stdin
+    
+    # Verify login
+    if hf whoami > /dev/null 2>&1; then
+        echo "✅ Successfully logged in to Hugging Face."
+        
+        # Trigger a dummy download to verify access and cache the model
+        echo "Verifying access and caching Pyannote model..."
+        python -c "from pyannote.audio import Pipeline; print('Downloading model...'); Pipeline.from_pretrained('pyannote/speaker-diarization-3.1')"
+        echo "Pyannote model cached successfully!"
+    else
+        echo "❌ Login failed. Please check your token."
+        exit 1
+    fi
 fi
 
 # 10. Download WhisperX Models (Interactive Selection)
