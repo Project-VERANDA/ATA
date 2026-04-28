@@ -15,9 +15,22 @@ Speaker diarization via Pyannote.audio
 
 To run the transcription pipeline you'll need Python 3.10. and Anaconda.
 
-ATA_Setup.sh is a bash script that will install all the relevant files EXCEPT for the required models. Run the setup by typing into your command line: ./ATA_Setup.sh
+ATA_Setup.sh is a bash script that will install all the relevant files including for the required models. Read the sub-steps below FIRST. When you have completed these steps, run the setup by typing into your command line while in the MAIN folder: ./ATA_Setup.sh
 
-This script requires models--Systran--faster-whisper-large-v3 and the pyannote/speaker-diarization-community-1 model (https://huggingface.co/pyannote/speaker-diarization-community-1) to be downloaded to the pipeline/model/ folder. These must be downloaded separately from Huggingface after accepting the pre-requisite agreements and providing the requested information.
+## Model Download / Access
+The WhisperX (AKA Faster Whisper) and anonymization model downloads are fully automated. However, the diarization model is gated on Huggingface - You must provide contact information to be able to use or download it. To do this, create a Huggingface account or log in, then navigate to https://huggingface.co/pyannote/speaker-diarization-community-1. Fill in the requested information on the webpage to gain access to the model. 
+
+We highly suggest using the large-v3 model for best accuracy in the transcription.
+
+
+## Huggingface Tokens
+While logged in, navigate to https://huggingface.co/settings/tokens and create a read-only token. Save the token code somewhere (for good data security practises, don't save it on the cloud unless your cloud is encrypted! For example, with Proton (link)).
+
+When you run the self-install script, you will be prompted for the huggingface token. Paste the token when prompted.
+
+
+
+If the model download fails due to a missing token, or you want to install the models at a later time, you can download them with following commands:
 
 Download the community-1 model with the following guide:
 
@@ -30,7 +43,7 @@ If your authentication functions correctly, navigate to the MAIN/pipeline/model/
 ```
 huggingface-cli download pyannote/speaker-diarization-community-1 \
 >   --local-dir models--pyannote--speaker-diarization-community-1 \
->   --local-dir-use-symlinks false
+>   --local-dir-use-symlinks False
 ```
 
 Download all the WhisperX models with the following command, which can be copy/pasted into the command line when in the pipeline/model/ folder.
@@ -38,7 +51,7 @@ Download all the WhisperX models with the following command, which can be copy/p
   echo "Downloading faster-whisper-$size..."
   huggingface-cli download Systran/faster-whisper-$size \
     --local-dir "models--Systran--faster-whisper-$size" \
-    --local-dir-use-symlinks false
+    --local-dir-use-symlinks False
 done
 ```
 
@@ -46,31 +59,31 @@ Alternatively, use only the large-v3 model.
 
 ```huggingface-cli download Systran/faster-whisper-large-v3 \
   --local-dir models--Systran--faster-whisper-large-v3 \
-  --local-dir-use-symlinks false
+  --local-dir-use-symlinks False
   ```
 
-It may not be necessary to install the whisper-large-v3 file to the models folder. This should be tested.
+_It may not be necessary to install the whisper-large-v3 file to the models folder. This should be tested._
 
 
 # Running the script
 
 Open the pipeline script and update all fields marked with *** and save your changes. 
-Run the script. In your command-line, type: python process.py 
+Run the script. From the MAIN folder, in your command-line, type: python pipeline/process.py 
+To start the web interface, type instead: python interactive_app/app.py
 
 
 # Pending updates
 
-* [ ] Re-adding the anonymization process.
-    * This is pending the addition of anonymization models.
+* [x] Re-adding the anonymization process.
 * [ ] Adding the models to the Github Repo.
-* [ ] Add a web interface.
-* [ ] Add a recording button to the web interface for demos.
+* [x] Add a web interface.
+* [x] Add a recording button to the web interface for demos.
 * [ ] Add batch transcripting via selected folder.
 * [ ] Add automatic cleanup of the input video/audio folders. 
 * [ ] Add arguments for a debug running of the pipeline.
-* [ ] Add text to speech for the output transcripts.
+* [x] Add text to speech for the output transcripts.
 * [x] Switch the diarization to speaker-diarization-community-1 from the older diarization model.
-* [ ] Automate the downloading of WhisperX models.
+* [x] Automate the downloading of WhisperX models.
 
 # Future additions
 
