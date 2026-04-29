@@ -7,10 +7,15 @@ It can be used for interviews, therapy sessions or conversations involving multi
 # Features
 
 Isolation of audio from video files
+
 Automatic transcription via WhisperX
+
 Speaker diarization via Pyannote.audio
+
 Text anonymization with BERT via https://huggingface.co/deryaerman/mmbert_multilingual_pii_ner (Master's thesis project @ the German Research Centre for Artificial Intelligence)
+
 LLM rewriting of text to remove indirect identifiers that BERT will not detect.
+
 Conversation back into synthetic audio,
 
 
