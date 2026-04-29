@@ -141,6 +141,10 @@ _It may not be necessary to install the whisper-large-v3 file to the models fold
 * [ ] Add arguments for process.py to enable/disable each feature in the pipeline.
 * [ ] Add code enabling other non-nvidia GPUs.
 * [ ] Switch from Google TTS to a new, locally-running text-to-speech tool.
+* [ ] Disable the translation feature of WhisperX.
+* [ ] Look into whether there can be chunk-processing of live-recorded data for live transcription and anonymization.
+
+
 
 * [ ]
 
