@@ -85,6 +85,7 @@ To start the web interface, type instead: python interactive_app/app.py
 * [x] Switch the diarization to speaker-diarization-community-1 from the older diarization model.
 * [x] Automate the downloading of WhisperX models.
 * [ ] Switch from API calls for the AI models to local model processing.
+* [ ] Update the Running the Script section of this ReadMe.
 
 # Future additions
 
