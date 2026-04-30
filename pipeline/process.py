@@ -882,9 +882,9 @@ class AnonymizationEngine:
         """Main entry point for anonymization using the custom CRF model."""
         if not self.method or not self.model or not self.tokenizer:
             return None, False, "Anonymization model not loaded."
-
+ 
         logger.info(f"Running anonymization via mmbert (CRF)...")
-
+ 
         try:
             # Tokenize
             inputs = self.tokenizer(text, return_tensors="pt", truncation=True, max_length=512)
@@ -892,65 +892,54 @@ class AnonymizationEngine:
             # Remove token_type_ids if present to match model expectation
             if "token_type_ids" in inputs:
                 del inputs["token_type_ids"]
-
+ 
             # Inference
             with torch.no_grad():
                 outputs = self.model(**inputs)
                 emissions = outputs["logits"]
                 mask = inputs["attention_mask"].bool()
-                
                 # CRF Decoding
                 predictions = self.model.decode(emissions, mask)
-
+ 
             # Map predictions to labels
             # predictions is a list of lists (batch_size x seq_len)
             pred_ids = predictions[0] # Take first batch item
-            
             tokens = self.tokenizer.convert_ids_to_tokens(inputs['input_ids'][0])
             id2label = self.config["id2label"]
             labels = [id2label[str(pid)] for pid in pred_ids]
-            
             # Reconstruct text
             label_map = self._get_labels()
             result_tokens = []
-            i = 0
-            while i < len(tokens):
-                token = tokens[i]
-                label = labels[i]
-                
-                # Skip special tokens
-                if token in ['[CLS]', '[SEP]', '[PAD]', '<pad>', '<cls>', '<sep>']:
-                    i += 1
-                    continue
-                
-                # Handle B- and I- tags
-                if label.startswith('B-') or label.startswith('I-'):
-                    entity_type = label.split('-')[1]
-                    replacement_tag = label_map.get(entity_type, '[UNKNOWN_PII]')
-                    result_tokens.append(replacement_tag)
-                    
-                    # Skip subsequent I- tags for this entity
-                    j = i + 1
-                    while j < len(labels) and labels[j].startswith('I-') and labels[j].split('-')[1] == entity_type:
-                        j += 1
-                    i = j
-                else:
-                    # Clean token
-                    clean_token = token.replace('##', '').replace('▁', ' ')
-                    result_tokens.append(clean_token)
-                    i += 1
-            
-            # Join and clean spacing
-            anonymized_text = "".join(result_tokens).replace("  ", " ").strip()
-            anonymized_text = re.sub(r'\s+\[', '[', anonymized_text)
-            anonymized_text = re.sub(r'\]\s+', ']', anonymized_text)
-            
+            tokens = tokens[1:-1]
+            labels = labels[1:-1]
+            anonymized_text=""
+            out_array=[]
+ 
+            if len(labels)==len(tokens):
+                #select either token or entity
+                for i in range(len(labels)):
+                    if labels[i]=='O':
+                        out_array.append(tokens[i])
+                    else:
+                        out_array.append(labels[i])
+                #merge BIO format
+                for i in range(len(out_array)-1, -1, -1):
+                    #print (out_array[i], i)
+                    if out_array[i][0:2].startswith("I-"):
+                        del out_array[i]
+                    if out_array[i][0:2].startswith("B-"):
+                        out_array[i]="▁["+out_array[i][2:]+"]"
+                #generate output string
+                anonymized_text="".join(out_array)
+                anonymized_text=re.sub("▁", " ", anonymized_text)
+                anonymized_text=re.sub("^ ", "", anonymized_text)
             logger.info(f"Anonymization complete. Length: {len(anonymized_text)}")
             return anonymized_text, True, "Success"
-
+ 
         except Exception as e:
             logger.error(f"Anonymization failed: {e}", exc_info=True)
             return None, False, str(e)
+
 
 def call_llm_rewriter(text, model_id, system_prompt=None):
     """
