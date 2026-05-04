@@ -349,6 +349,7 @@ LLM_ANON_DIR="$PIPELINE_DIR/LLM-Anon"
 
 mkdir -p "$MODEL_DIR" "$VIDEOS_DIR" "$AUDIOS_DIR" "$TRANSCRIPTS_DIR" "$ANNONYM_DIR" "$LLM_ANON_DIR"
 echo "✅ Created directories."
+TARGET_BASE="$MODEL_DIR"
 
 
 # 10. Download WhisperX Models
@@ -429,26 +430,55 @@ echo "-------------------------------------------------"
 echo "Downloading mmbert Multilingual PII Model & Base BERT"
 echo ""
 
-TARGET_BASE="$MODEL_DIR"
+TARGET_BASE="$TARGET_BASE"
 
-# Base Model
+# --- Base Model (mmBERT-base) ---
 BASE_TARGET="$TARGET_BASE/mmBERT-base-local"
 if [ -d "$BASE_TARGET" ]; then
     echo "✅ Base model already exists at $BASE_TARGET. Skipping."
 else
     echo "Downloading base model..."
+    # Ensure we download directly to the target, not a subfolder
     huggingface-cli download jhu-clsp/mmBERT-base --local-dir "$BASE_TARGET" --local-dir-use-symlinks False
+    
+    # Verify and flatten if necessary
+    if [ -d "$BASE_TARGET/jhu-clsp-mmBERT-base" ]; then
+        echo "⚠️  Detected nested folder. Flattening structure..."
+        mv "$BASE_TARGET/jhu-clsp-mmBERT-base"/* "$BASE_TARGET/"
+        rmdir "$BASE_TARGET/jhu-clsp-mmBERT-base"
+    fi
+    
     if [ $? -eq 0 ]; then echo "✅ Base model downloaded."; else echo "❌ Failed."; exit 1; fi
 fi
 
-# PII Model
+# --- PII Model (mmbert_multilingual_pii_ner) ---
 PII_TARGET="$TARGET_BASE/mmbert_multilingual_pii_ner"
 if [ -d "$PII_TARGET" ]; then
     echo "✅ PII model already exists at $PII_TARGET. Skipping."
 else
     echo "Downloading PII model..."
     huggingface-cli download deryaerman/mmbert_multilingual_pii_ner --local-dir "$PII_TARGET" --local-dir-use-symlinks False
-    if [ $? -eq 0 ]; then echo "✅ PII model downloaded."; else echo "❌ Failed."; exit 1; fi
+
+    SUBFOLDER=$(find "$PII_TARGET" -mindepth 1 -maxdepth 1 -type d | head -n 1)
+    
+    if [ -n "$SUBFOLDER" ] && [ "$SUBFOLDER" != "$PII_TARGET" ]; then
+        echo "⚠️  Detected nested folder structure. Flattening to match code expectations..."
+        mv "$SUBFOLDER"/* "$PII_TARGET/"
+        rmdir "$SUBFOLDER"
+        echo "✅ Structure flattened successfully."
+    fi
+
+    if [ $? -eq 0 ]; then 
+        echo "✅ PII model downloaded and structure verified."
+        
+        # Final verification: Check for critical files
+        if [ ! -f "$PII_TARGET/crf_config.json" ]; then
+            echo "❌ CRITICAL: crf_config.json missing after flattening. Installation may fail."
+            exit 1
+        fi
+    else 
+        echo "❌ Failed to download PII model."; exit 1
+    fi
 fi
 
 cat > .env <<EOF
