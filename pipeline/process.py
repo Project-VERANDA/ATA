@@ -424,24 +424,23 @@ def process_audios():
             # 4. Diarize (Using Global Model)
             if _loaded_diarize_model:
                 try:
-                    logger.debug("Running speaker diarization...")
+                    logger.debug("Running speaker diarization with custom thresholds...")
                     
-                    # --- CONFIGURATION FOR TIMELINE PRESERVATION ---
-                    # Minimum duration a speaker must speak to be considered a valid turn (seconds)
-                    # Prevents "fragmentation" where 1-second utterances are split
-                    MIN_DURATION_ON = 1.5 
+                    # --- CRITICAL FIX: Set thresholds on the object directly ---
+                    # These attributes control the merging of segments BEFORE the pipeline runs
+                    _loaded_diarize_model.min_duration_on = 1.5  # Ignore turns < 1.5s
+                    _loaded_diarize_model.min_duration_off = 1.0 # Merge turns separated by < 1.0s silence
                     
-                    # Minimum silence required between two turns of the SAME speaker to be considered a new segment
-                    # Prevents splitting a single speaker's long pause into two segments
-                    MIN_DURATION_OFF = 1.0
-                    
-                    # Run the pipeline with these constraints
+                    # Also set the number of speakers if the model supports dynamic setting
+                    # (Some versions require this to be set on the pipeline object too)
+                    # _loaded_diarize_model.params['min_speakers'] = MIN_SPEAKERS
+                    # _loaded_diarize_model.params['max_speakers'] = MAX_SPEAKERS
+
+                    # Call the pipeline WITHOUT the extra arguments (they are now object properties)
                     diarize_output = _loaded_diarize_model(
                         str(audio_path), 
                         min_speakers=MIN_SPEAKERS, 
-                        max_speakers=MAX_SPEAKERS,
-                        min_duration_on=MIN_DURATION_ON,
-                        min_duration_off=MIN_DURATION_OFF
+                        max_speakers=MAX_SPEAKERS
                     )
                     
                     speaker_diarization = diarize_output.speaker_diarization
