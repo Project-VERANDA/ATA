@@ -516,7 +516,7 @@ def process_audios():
                     segment["speaker"] = f"SPEAKER_{i%2:02d}"
 
             # 5. Merge Consecutive Segments
-            merged_segments = merge_consecutive_speaker_segments(result["segments"], max_gap_seconds=2.0)
+            merged_segments = merge_consecutive_speaker_segments(result["segments"], max_gap_seconds=3.5)
             logger.debug(f"Merged into {len(merged_segments)} final segments.")
 
             # 6. Save Transcript
@@ -679,7 +679,7 @@ def transcribe_audio_locally(audio_path, language='de'):
         logger.info("Running WhisperX transcription...")
         segments, info = _loaded_whisper_model.transcribe(
             audio, 
-            beam_size=32, 
+            beam_size=BATCH_SIZE, 
             language=language,
             vad_filter=True
         )
