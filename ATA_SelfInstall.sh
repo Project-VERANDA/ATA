@@ -214,6 +214,7 @@ STANDARD_PKGS=(
     "torchcrf"
     "pandas"
     "openai"
+    "python-dotenv"
 )
 
 for pkg in "${STANDARD_PKGS[@]}"; do
