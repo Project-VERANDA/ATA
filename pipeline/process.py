@@ -425,9 +425,24 @@ def process_audios():
             if _loaded_diarize_model:
                 try:
                     logger.debug("Running speaker diarization...")
-                    # Pass the file path to the pipeline (Pyannote handles loading internally)
-                    # The pipeline is already on GPU thanks to load_models()
-                    diarize_output = _loaded_diarize_model(str(audio_path), min_speakers=MIN_SPEAKERS, max_speakers=MAX_SPEAKERS)
+                    
+                    # --- CONFIGURATION FOR TIMELINE PRESERVATION ---
+                    # Minimum duration a speaker must speak to be considered a valid turn (seconds)
+                    # Prevents "fragmentation" where 1-second utterances are split
+                    MIN_DURATION_ON = 1.5 
+                    
+                    # Minimum silence required between two turns of the SAME speaker to be considered a new segment
+                    # Prevents splitting a single speaker's long pause into two segments
+                    MIN_DURATION_OFF = 1.0
+                    
+                    # Run the pipeline with these constraints
+                    diarize_output = _loaded_diarize_model(
+                        str(audio_path), 
+                        min_speakers=MIN_SPEAKERS, 
+                        max_speakers=MAX_SPEAKERS,
+                        min_duration_on=MIN_DURATION_ON,
+                        min_duration_off=MIN_DURATION_OFF
+                    )
                     
                     speaker_diarization = diarize_output.speaker_diarization
                     
@@ -440,7 +455,7 @@ def process_audios():
                             'speaker': speaker
                         })
                     
-                    logger.info(f"Diarization extracted {len(segments_list)} speaker segments")
+                    logger.info(f"Diarization extracted {len(segments_list)} speaker segments (filtered).")
                     
                     # Assign speakers to transcribed segments
                     import pandas as pd
@@ -665,7 +680,7 @@ def transcribe_audio_locally(audio_path, language='de'):
         if _loaded_diarize_model:
             logger.info("Running speaker diarization...")
             try:
-                diarize_output = _loaded_diarize_model(audio_path, min_speakers=2, max_speakers=4)
+                diarize_output = _loaded_diarize_model(audio_path, min_speakers=2, max_speakers=10)
                 speaker_diarization = diarize_output.speaker_diarization
                 
                 import pandas as pd
