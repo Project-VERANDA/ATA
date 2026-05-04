@@ -745,7 +745,7 @@ class AnonymizationEngine:
         self.method = method
         self.level = level
         # Point to the folder containing crf_config.json and pytorch_model.bin
-        self.model_path = model_path or (MODEL_FOLDER / "mmbert_multilingual_pii_ner / jhu-clsp-mmBERT-base-multilingual-pii")
+        self.model_path = model_path or (MODEL_FOLDER / "mmbert_multilingual_pii_ner")
         self.model = None
         self.tokenizer = None
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
