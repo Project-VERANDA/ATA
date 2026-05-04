@@ -466,19 +466,21 @@ def process_audios():
             # 4. Diarize (Using Global Model)
             if _loaded_diarize_model:
                 try:
-                    logger.debug("Running speaker diarization with custom thresholds...")
+                    logger.debug("Running speaker diarization with AGGRESSIVE smoothing...")
                     
-                    # --- CRITICAL FIX: Set thresholds on the object directly ---
-                    # These attributes control the merging of segments BEFORE the pipeline runs
-                    _loaded_diarize_model.min_duration_on = 1.5  # Ignore turns < 1.5s
-                    _loaded_diarize_model.min_duration_off = 1.0 # Merge turns separated by < 1.0s silence
+                    # --- CRITICAL: Force strict thresholds ---
+                    # These MUST be set BEFORE calling the pipeline
+                    # 1.5s minimum speech duration (ignores anything shorter)
+                    _loaded_diarize_model.min_duration_on = 2.0 
+                    # 1.0s minimum silence between turns (merges short pauses)
+                    _loaded_diarize_model.min_duration_off = 1.5
                     
-                    # Also set the number of speakers if the model supports dynamic setting
-                    # (Some versions require this to be set on the pipeline object too)
+                    # Optional: Force the number of speakers if the model is over-segmenting
+                    # This prevents the model from inventing new speakers for noise
                     # _loaded_diarize_model.params['min_speakers'] = MIN_SPEAKERS
                     # _loaded_diarize_model.params['max_speakers'] = MAX_SPEAKERS
 
-                    # Call the pipeline WITHOUT the extra arguments (they are now object properties)
+                    # Run the pipeline
                     diarize_output = _loaded_diarize_model(
                         str(audio_path), 
                         min_speakers=MIN_SPEAKERS, 
@@ -496,8 +498,13 @@ def process_audios():
                             'speaker': speaker
                         })
                     
-                    logger.info(f"Diarization extracted {len(segments_list)} speaker segments (filtered).")
+                    logger.info(f"Diarization extracted {len(segments_list)} speaker segments (AGGRESSIVELY filtered).")
                     
+                    # If we still have > 20 segments for a 4-min clip, the model is failing
+                    if len(segments_list) > 20:
+                        logger.warning(f"⚠️ High segment count ({len(segments_list)}) suggests diarization is still too sensitive.")
+                        logger.warning("Consider increasing min_duration_on to 3.0 or checking audio quality.")
+
                     # Assign speakers to transcribed segments
                     import pandas as pd
                     diarize_df = pd.DataFrame(segments_list)
