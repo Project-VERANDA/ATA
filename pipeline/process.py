@@ -183,24 +183,66 @@ def validate_path(path, base):
     except ValueError:
         return False
 
-def merge_consecutive_speaker_segments(segments):
-    """Merges consecutive segments spoken by the same speaker."""
+def merge_consecutive_speaker_segments(segments, max_gap_seconds=2.0):
+    """
+    Merges consecutive segments spoken by the same speaker.
+    If a speaker speaks again after a short gap (< max_gap_seconds), 
+    the segments are merged into one continuous block.
+    
+    Args:
+        segments: List of dicts with 'start', 'end', 'speaker', 'text'
+        max_gap_seconds: Maximum silence allowed between segments to merge them.
+    """
+    if not segments:
+        return []
+
     merged_segments = []
-    prev_segment = None
+    current_segment = None
 
     for segment in segments:
         speaker = segment.get("speaker", "Unknown")
         text = segment.get("text", "")
+        start = segment.get("start", 0)
+        end = segment.get("end", 0)
 
-        if prev_segment and prev_segment["speaker"] == speaker:
-            prev_segment["text"] += " " + text
+        if current_segment is None:
+            # First segment
+            current_segment = {
+                "speaker": speaker,
+                "text": text,
+                "start": start,
+                "end": end
+            }
         else:
-            if prev_segment:
-                merged_segments.append(prev_segment)
-            prev_segment = {"speaker": speaker, "text": text}
+            # Check if same speaker and gap is small enough
+            if current_segment["speaker"] == speaker:
+                gap = start - current_segment["end"]
+                if gap <= max_gap_seconds:
+                    # Merge: extend text and end time
+                    current_segment["text"] += " " + text
+                    current_segment["end"] = end
+                else:
+                    # Gap too large: finalize current, start new
+                    merged_segments.append(current_segment)
+                    current_segment = {
+                        "speaker": speaker,
+                        "text": text,
+                        "start": start,
+                        "end": end
+                    }
+            else:
+                # Different speaker: finalize current, start new
+                merged_segments.append(current_segment)
+                current_segment = {
+                    "speaker": speaker,
+                    "text": text,
+                    "start": start,
+                    "end": end
+                }
 
-    if prev_segment:
-        merged_segments.append(prev_segment)
+    # Append the last segment
+    if current_segment:
+        merged_segments.append(current_segment)
 
     return merged_segments
 
@@ -474,7 +516,7 @@ def process_audios():
                     segment["speaker"] = f"SPEAKER_{i%2:02d}"
 
             # 5. Merge Consecutive Segments
-            merged_segments = merge_consecutive_speaker_segments(result["segments"])
+            merged_segments = merge_consecutive_speaker_segments(result["segments"], max_gap_seconds=2.0)
             logger.debug(f"Merged into {len(merged_segments)} final segments.")
 
             # 6. Save Transcript
