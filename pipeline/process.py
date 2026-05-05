@@ -471,9 +471,9 @@ def process_audios():
                     # --- CRITICAL: Force strict thresholds ---
                     # These MUST be set BEFORE calling the pipeline
                     # 1.5s minimum speech duration (ignores anything shorter)
-                    _loaded_diarize_model.min_duration_on = 2.0 
+                    _loaded_diarize_model.min_duration_on = 4.0 
                     # 1.0s minimum silence between turns (merges short pauses)
-                    _loaded_diarize_model.min_duration_off = 1.5
+                    _loaded_diarize_model.min_duration_off = 2
                     
                     # Optional: Force the number of speakers if the model is over-segmenting
                     # This prevents the model from inventing new speakers for noise
@@ -734,9 +734,9 @@ def transcribe_audio_locally(audio_path, language='de'):
         if _loaded_diarize_model:
             logger.info("Running speaker diarization...")
             try:
-                # CRITICAL FIX: Apply aggressive thresholds to prevent over-segmentation
-                _loaded_diarize_model.min_duration_on = 2.0
-                _loaded_diarize_model.min_duration_off = 1.5
+                # Apply aggressive thresholds to prevent over-segmentation
+                _loaded_diarize_model.min_duration_on = 4.0
+                _loaded_diarize_model.min_duration_off = 2
                 
                 diarize_output = _loaded_diarize_model(audio_path, min_speakers=2, max_speakers=10)
                 speaker_diarization = diarize_output.speaker_diarization
