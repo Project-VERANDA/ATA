@@ -505,7 +505,9 @@ def process_audios():
                         logger.warning(f"⚠️ High segment count ({len(segments_list)}) suggests diarization is still too sensitive.")
                         logger.warning("Consider increasing min_duration_on to 3.0 or checking audio quality.")
 
-                    # Assign speakers to transcribed segments
+                    # CRITICAL FIX: Sort segments by start time before assigning speakers
+                    segments_list = sorted(segments_list, key=lambda x: x.get('start', 0))
+                    
                     import pandas as pd
                     diarize_df = pd.DataFrame(segments_list)
                     result = whisperx.assign_word_speakers(diarize_df, result)
@@ -521,6 +523,11 @@ def process_audios():
                 logger.warning("No diarization model loaded. Using generic speaker labels.")
                 for i, segment in enumerate(result["segments"]):
                     segment["speaker"] = f"SPEAKER_{i%2:02d}"
+
+            # CRITICAL FIX: Ensure segments are sorted by time BEFORE merging
+            if 'segments' in result:
+                result["segments"] = sorted(result["segments"], key=lambda x: x.get('start', 0))
+                logger.debug(f"Segments sorted by time. Count: {len(result['segments'])}")
 
             # 5. Merge Consecutive Segments
             merged_segments = merge_consecutive_speaker_segments(result["segments"], max_gap_seconds=3.5)
@@ -582,7 +589,6 @@ def process_audios():
     # Optional: Clear global models if you want to free VRAM after the whole batch
     del _loaded_whisper_model, _loaded_diarize_model
     cleanup_gpu_resources()
-
 
 # Global variables to hold loaded models (so we don't reload every time)
 _loaded_whisper_model = None
@@ -728,6 +734,10 @@ def transcribe_audio_locally(audio_path, language='de'):
         if _loaded_diarize_model:
             logger.info("Running speaker diarization...")
             try:
+                # CRITICAL FIX: Apply aggressive thresholds to prevent over-segmentation
+                _loaded_diarize_model.min_duration_on = 2.0
+                _loaded_diarize_model.min_duration_off = 1.5
+                
                 diarize_output = _loaded_diarize_model(audio_path, min_speakers=2, max_speakers=10)
                 speaker_diarization = diarize_output.speaker_diarization
                 
@@ -742,6 +752,10 @@ def transcribe_audio_locally(audio_path, language='de'):
                 
                 logger.info(f"Diarization extracted {len(segments_list)} speaker segments.")
                 
+                # CRITICAL FIX: Sort segments by start time before assigning speakers
+                # This ensures chronological order for proper merging later
+                segments_list = sorted(segments_list, key=lambda x: x.get('start', 0))
+                
                 diarize_df = pd.DataFrame(segments_list)
                 result = whisperx.assign_word_speakers(diarize_df, result)
                 logger.info("Speakers assigned to segments.")
@@ -755,19 +769,29 @@ def transcribe_audio_locally(audio_path, language='de'):
             for i, segment in enumerate(result["segments"]):
                 segment["speaker"] = f"SPEAKER_{i%2:02d}"
 
+        # CRITICAL FIX: Ensure segments are sorted by time BEFORE merging
+        # Diarization models sometimes return segments out of order or grouped by speaker
+        if 'segments' in result:
+            result["segments"] = sorted(result["segments"], key=lambda x: x.get('start', 0))
+            logger.info(f"Segments sorted by time. Count: {len(result['segments'])}")
+
         # 6. MERGE CONSECUTIVE SEGMENTS
         logger.info("Merging consecutive speaker segments...")
         merged_segments = []
         prev_segment = None
+        
         for segment in result["segments"]:
             speaker = segment.get("speaker", "Unknown")
             text = segment.get("text", "")
+            
+            # Only merge if it's the SAME speaker AND it's immediately following
             if prev_segment and prev_segment["speaker"] == speaker:
                 prev_segment["text"] += " " + text
             else:
                 if prev_segment:
                     merged_segments.append(prev_segment)
                 prev_segment = {"speaker": speaker, "text": text}
+        
         if prev_segment:
             merged_segments.append(prev_segment)
         
@@ -797,7 +821,6 @@ def transcribe_audio_locally(audio_path, language='de'):
         return error_msg
 
 # --- Anonymization Engine Class (Custom CRF Implementation) ---
-
 class AnonymizationEngine:
     """
     Encapsulates all logic related to text anonymization using the local mmbert model
