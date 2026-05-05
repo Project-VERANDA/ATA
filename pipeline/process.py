@@ -782,7 +782,13 @@ def transcribe_audio_locally(audio_path, language='de'):
         
         for segment in result["segments"]:
             speaker = segment.get("speaker", "Unknown")
-            text = segment.get("text", "")
+            text = segment.get("text", "").strip()
+            
+            # FILTER: Discard extremely short segments (likely noise/hallucinations)
+            # Unless the text is a known tag or very short valid word (like "I", "a")
+            if len(text) < 4 and text.lower() not in ["i", "a", "ok", "no", "yes", "hi"]:
+                logger.debug(f"Discarding short segment: '{text}' (Length: {len(text)})")
+                continue
             
             # Only merge if it's the SAME speaker AND it's immediately following
             if prev_segment and prev_segment["speaker"] == speaker:
