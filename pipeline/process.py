@@ -382,29 +382,25 @@ def process_audios():
 
     # Load WhisperX Model
     try:
-        logger.info(f"Loading WhisperX model from: {WHISPERX_MODEL_PATH}...")
+        target_model_path = str(WHISPERX_MODEL_PATH) 
+        
+        logger.info(f"Loading WhisperX model directly from: {target_model_path}...")
+        
         device = "cuda" if torch.cuda.is_available() else "cpu"
         compute_type = "float16" if device == "cuda" else "float32"
         
         model = whisperx.load_model(
-            "large-v3",
+            target_model_path, 
             device, 
             compute_type=compute_type, 
-            download_root=str(MODEL_FOLDER), # Point to your model folder
-            local_files_only=True,           # STRICTLY local
-            revision=None                    # Prevents HF from checking for updates
+            local_files_only=True
         )
-        logger.info("WhisperX model loaded successfully.")
+        logger.info("WhisperX model loaded successfully (Direct Path).")
         
     except Exception as e:
         logger.critical(f"Failed to load WhisperX model: {e}")
-        # Optional: Fallback to loading directly if the name mapping fails
-        # logger.warning("Attempting direct path load...")
-        # try:
-        #     model = whisperx.load_model(str(WHISPERX_MODEL_PATH), device, compute_type=compute_type, local_files_only=True)
-        #     logger.info("WhisperX model loaded successfully via direct path.")
-        # except Exception as e2:
-        #     logger.critical(f"Direct path load also failed: {e2}")
+        # Optional: Print available folders to help debug
+        logger.critical(f"Available folders in {MODEL_FOLDER}: {list(MODEL_FOLDER.iterdir())}")
         return
 
     # Load Diarization Pipeline
