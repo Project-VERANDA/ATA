@@ -442,7 +442,7 @@ def process_audios():
         try:
             # --- STEP A: Transcribe ---
             audio = whisperx.load_audio(str(file))
-            result = model.transcribe(audio, batch_size=BATCH_SIZE, verbose=False, print_progress=False)
+            result = model.transcribe(audio, batch_size=BATCH_SIZE, verbose=False, task="transcribe", print_progress=False)
             
             # --- STEP B: Align ---
             if result.get("language"):
