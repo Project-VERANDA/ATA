@@ -373,195 +373,164 @@ def process_videos():
     if processed_count == 0:
         logger.info("No new files processed.")
 
-# --- Step 2: Transcribe & Diarize ---
-
 def process_audios():
     if not AUDIOS_FOLDER.exists():
         logger.warning(f"No 'audios' folder found at {AUDIOS_FOLDER}. Skipping transcription.")
         return
 
-    logger.info(f"Found 'audios' folder at {AUDIOS_FOLDER}. Starting transcription process...")
-
-    # Verify local models exist before proceeding
-    logger.info("Verifying local model files...")
-    
-    whisperx_model_valid = verify_whisperx_model(WHISPERX_MODEL_PATH)
-    diarization_model_valid = verify_diarization_model(DIARIZATION_MODEL_PATH)
-    
-    if not whisperx_model_valid or not diarization_model_valid:
-        logger.critical("One or more required local models are missing or invalid.")
-        return
+    logger.info(f"Found 'audios' folder at {AUDIOS_FOLDER}. Starting STREAMLINE processing...")
 
     # Load WhisperX Model
     try:
-        logger.info(f"Loading WhisperX model from: {WHISPERX_MODEL_PATH}")
-        
-        # Use float32 for CPU, float16 for GPU to save memory
+        logger.info(f"Loading WhisperX model from: {WHISPERX_MODEL_PATH}...")
         device = "cuda" if torch.cuda.is_available() else "cpu"
         compute_type = "float16" if device == "cuda" else "float32"
         
         model = whisperx.load_model(
-            "large-v3", 
+            "large-v3",
             device, 
             compute_type=compute_type, 
-            download_root=str(MODEL_FOLDER),
-            local_files_only=True
+            download_root=str(MODEL_FOLDER), # Point to your model folder
+            local_files_only=True,           # STRICTLY local
+            revision=None                    # Prevents HF from checking for updates
         )
         logger.info("WhisperX model loaded successfully.")
         
     except Exception as e:
         logger.critical(f"Failed to load WhisperX model: {e}")
+        # Optional: Fallback to loading directly if the name mapping fails
+        # logger.warning("Attempting direct path load...")
+        # try:
+        #     model = whisperx.load_model(str(WHISPERX_MODEL_PATH), device, compute_type=compute_type, local_files_only=True)
+        #     logger.info("WhisperX model loaded successfully via direct path.")
+        # except Exception as e2:
+        #     logger.critical(f"Direct path load also failed: {e2}")
         return
 
-    # Load Diarization Pipeline from local model
+    # Load Diarization Pipeline
     try:
-        logger.info(f"Loading Diarization Pipeline from local model: {DIARIZATION_MODEL_PATH}")
+        logger.info(f"Loading Diarization Pipeline from: {DIARIZATION_MODEL_PATH}...")
         from pyannote.audio import Pipeline
         
         diarize_pipeline = Pipeline.from_pretrained(
             str(DIARIZATION_MODEL_PATH),
             local_files_only=True
         )
-        
         diarize_model = diarize_pipeline
-        logger.info("Diarization Pipeline loaded successfully (offline mode).")
+        logger.info("Diarization Pipeline loaded successfully.")
         
     except Exception as e:
-        logger.critical(f"Failed to load local Diarization Pipeline: {e}")
+        logger.critical(f"Failed to load Diarization Pipeline: {e}")
         if 'model' in locals():
             del model
         cleanup_gpu_resources()
         return
 
-    # --- PROCESS EACH FILE ---
-    files_processed = 0
-    files_failed = 0
+    # --- 2. Process files ---
+    files = [f for f in AUDIOS_FOLDER.iterdir() if f.is_file() and f.suffix.lower() == ".wav"]
+    total_files = len(files)
+    
+    if total_files == 0:
+        logger.info("No .wav files found in audios folder.")
+        return
 
-    for file in AUDIOS_FOLDER.iterdir():
-        if not file.is_file() or not file.suffix.lower() == ".wav":
-            continue
+    logger.info(f"Found {total_files} files to process. Starting stream...")
 
+    for idx, file in enumerate(files, 1):
         if not validate_path(file, AUDIOS_FOLDER):
-            logger.error(f"Security Alert: Attempted path traversal detected for {file.name}. Skipping.")
+            logger.error(f"Security Alert: Skipping {file.name} (path traversal).")
             continue
 
-        audio_path = file
-        logger.info(f"--- Processing: {file.name} ---")
+        logger.info(f"[{idx}/{total_files}] Processing: {file.name}")
 
         try:
-            # 1. Load Audio
-            audio = whisperx.load_audio(str(audio_path))
-            logger.info(f"Audio loaded. Duration: {len(audio)/16000:.2f}s")
-
-            # 2. Transcribe
+            # --- STEP 1: Transcribe ---
+            audio = whisperx.load_audio(str(file))
             result = model.transcribe(audio, batch_size=BATCH_SIZE, verbose=False, print_progress=False)
-            logger.info(f"Transcription completed. Language: {result.get('language', 'unknown')}")
-
-            # 3. Align
+            
+            # --- STEP 2: Align ---
             if result.get("language"):
                 try:
                     align_device = "cuda" if torch.cuda.is_available() else "cpu"
                     model_a, metadata = whisperx.load_align_model(language_code=result["language"], device=align_device)
                     result = whisperx.align(result["segments"], model_a, metadata, audio, align_device, return_char_alignments=False)
-                    logger.info("Alignment completed.")
                 except Exception as e:
-                    logger.warning(f"Alignment failed: {e}. Proceeding without alignment.")
+                    logger.warning(f"Alignment failed for {file.name}: {e}")
             else:
-                logger.warning("No language detected. Skipping alignment.")
+                logger.warning(f"No language detected for {file.name}.")
 
-            # 4. Diarization
+            # --- STEP 3: Diarize ---
             if diarize_model:
                 try:
-                    # Use min_speakers=1 to avoid forcing a second speaker
-                    diarize_output = diarize_model(str(audio_path), min_speakers=1, max_speakers=6)
+                    # min_speakers=1 to avoid forcing speakers
+                    diarize_output = diarize_model(str(file), MIN_SPEAKERS, MAX_SPEAKERS)
                     speaker_diarization = diarize_output.speaker_diarization
                     
-                    # Convert to list
                     segments_list = []
                     for turn, _, speaker in speaker_diarization.itertracks(yield_label=True):
                         duration = turn.end - turn.start
+                        if duration < 0.5: continue # Filter noise
                         
-                        # FILTER: Skip segments shorter than 0.5s (noise/artifacts)
-                        if duration < 0.5:
-                            continue
-                        
-                        segments_list.append({
-                            'start': turn.start,
-                            'end': turn.end,
-                            'speaker': speaker
-                        })
-                    
-                    logger.info(f"Diarization extracted {len(segments_list)} valid speaker segments.")
+                        segments_list.append({'start': turn.start, 'end': turn.end, 'speaker': speaker})
                     
                     if not segments_list:
-                        logger.warning("No valid speaker segments found. Using fallback generic labels.")
-                        # Fallback: Alternate speakers based on transcription segments
-                        for i, segment in enumerate(result["segments"]):
-                            segment["speaker"] = f"SPEAKER_{i%2:02d}"
+                        logger.warning(f"No valid speakers for {file.name}. Using fallback.")
+                        for i, seg in enumerate(result["segments"]):
+                            seg["speaker"] = f"SPEAKER_{i%2:02d}"
                     else:
-                        # Convert to DataFrame and assign
                         import pandas as pd
                         diarize_df = pd.DataFrame(segments_list)
                         result = whisperx.assign_word_speakers(diarize_df, result)
                         
                 except Exception as e:
-                    logger.error(f"Diarization failed for {file.name}: {e}")
-                    # Fallback on error
-                    for i, segment in enumerate(result["segments"]):
-                        segment["speaker"] = f"SPEAKER_{i%2:02d}"
+                    logger.error(f"Diarization failed for {file.name}: {e}. Using fallback.")
+                    for i, seg in enumerate(result["segments"]):
+                        seg["speaker"] = f"SPEAKER_{i%2:02d}"
             else:
-                logger.warning("No diarization model loaded. Using generic labels.")
-                for i, segment in enumerate(result["segments"]):
-                    segment["speaker"] = f"SPEAKER_{i%2:02d}"
+                for i, seg in enumerate(result["segments"]):
+                    seg["speaker"] = f"SPEAKER_{i%2:02d}"
 
-            # 5. Merge Consecutive Segments
+            # --- STEP 4: Merge & Save ---
             result["segments"] = merge_consecutive_speaker_segments(result["segments"])
-
-            # 6. Save Transcript
+            
             base_name = sanitize_filename(file.stem)
             transcript_file = TRANSCRIPTS_FOLDER / f"{base_name}.txt"
             
-            try:
-                with open(transcript_file, "w", encoding="utf-8") as f:
-                    for segment in result["segments"]:
-                        speaker = segment.get("speaker", "Unknown")
-                        text = segment.get("text", "")
-                        if text.strip():
-                            f.write(f"{speaker}: {text}\n")
-                logger.info(f"Transcription saved: {transcript_file}")
-                files_processed += 1
-            except Exception as e:
-                logger.error(f"Permission denied or IO error writing to {transcript_file}: {e}")
-                files_failed += 1
-
-            # 7. CRITICAL: CLEANUP MEMORY AFTER EVERY FILE
-            # Delete large objects
-            del audio, result, model_a, metadata, diarize_output, speaker_diarization, segments_list, diarize_df
+            with open(transcript_file, "w", encoding="utf-8") as f:
+                for segment in result["segments"]:
+                    text = segment.get("text", "").strip()
+                    if text:
+                        f.write(f"{segment.get('speaker', 'Unknown')}: {text}\n")
             
-            # Force Garbage Collection
-            gc.collect()
-            
-            # Clear GPU Cache
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-            
-            # Small pause to let system settle
-            time.sleep(0.2)
+            logger.info(f"✅ COMPLETED: {file.name} -> {transcript_file.name}")
 
         except Exception as e:
-            logger.error(f"Error processing {file.name}: {e}")
+            logger.error(f"❌ FAILED: {file.name} - {e}")
             import traceback
             logger.error(traceback.format_exc())
-            files_failed += 1
+        
+        finally:
+            # Delete large objects to free RAM/VRAM immediately
+            if 'audio' in locals(): del audio
+            if 'result' in locals(): del result
+            if 'model_a' in locals(): del model_a
+            if 'metadata' in locals(): del metadata
+            if 'diarize_output' in locals(): del diarize_output
+            if 'speaker_diarization' in locals(): del speaker_diarization
+            if 'segments_list' in locals(): del segments_list
+            if 'diarize_df' in locals(): del diarize_df
             
-            # Cleanup on error
             gc.collect()
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
+            
+            # Small delay to prevent GPU thrashing
+            time.sleep(0.1)
 
     # Final Cleanup
     del model, diarize_model
     cleanup_gpu_resources()
+    logger.info("Stream processing finished.")
     
     logger.info(f"Transcription phase complete. Processed: {files_processed}, Failed: {files_failed}")
 
