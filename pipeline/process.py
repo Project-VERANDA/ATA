@@ -442,8 +442,20 @@ def process_audios():
         try:
             # --- STEP A: Transcribe ---
             audio = whisperx.load_audio(str(file))
-            result = model.transcribe(audio, batch_size=BATCH_SIZE, verbose=False, task="transcribe", print_progress=False)
-            
+            detected_lang = None 
+            result = model.transcribe(
+                audio, 
+                batch_size=BATCH_SIZE, 
+                verbose=False, 
+                task="transcribe",
+                language=detected_lang 
+                print_progress=False
+                )
+            if not result.get("language"):
+                logger.warning(f"Language not detected for {file.name}. Defaulting to 'en' for alignment.")
+                result["language"] = "en"
+            else:
+                logger.info(f"Detected language: {result.get('language')}")
             # --- STEP B: Align ---
             if result.get("language"):
                 try:
