@@ -405,22 +405,32 @@ def process_audios():
 
     # Load Diarization Pipeline
     try:
-        logger.info(f"Loading Diarization Pipeline from: {DIARIZATION_MODEL_PATH}...")
+        logger.info(f"Loading Diarization Pipeline directly from: {DIARIZATION_MODEL_PATH}...")
+        
         from pyannote.audio import Pipeline
         
-        diarize_pipeline = Pipeline.from_pretrained(
-            str(DIARIZATION_MODEL_PATH),
-            local_files_only=True
-        )
+        # Method 1: Try passing the path directly (works in most versions)
+        # If this fails, we fall back to Method 2
+        try:
+            diarize_pipeline = Pipeline.from_pretrained(
+                str(DIARIZATION_MODEL_PATH)
+            )
+        except TypeError:
+            # Method 2: Fallback for older versions that might expect use_auth_token
+            # We pass None to force local loading without network checks
+            logger.warning("Standard load failed. Trying fallback with use_auth_token=None...")
+            diarize_pipeline = Pipeline.from_pretrained(
+                str(DIARIZATION_MODEL_PATH),
+                use_auth_token=None
+            )
+        
         diarize_model = diarize_pipeline
-        logger.info("Diarization Pipeline loaded successfully.")
+        logger.info("Diarization Pipeline loaded successfully (Direct Path).")
         
     except Exception as e:
         logger.critical(f"Failed to load Diarization Pipeline: {e}")
-        if 'model' in locals():
-            del model
-        cleanup_gpu_resources()
-        return
+        logger.critical("Diarization will be skipped. Using generic speaker labels.")
+        diarize_model = None
 
     # --- 2. Process files ---
     files = [f for f in AUDIOS_FOLDER.iterdir() if f.is_file() and f.suffix.lower() == ".wav"]
