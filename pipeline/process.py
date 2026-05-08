@@ -317,7 +317,7 @@ def verify_diarization_model(model_path):
     logger.info(f"Diarization model verified at: {model_path}")
     return True
 
-# --- Step 1: Extract Audio ---
+# --- Extract Audio ---
 
 def process_videos():
     if not VIDEOS_FOLDER.exists():
@@ -380,17 +380,16 @@ def process_audios():
 
     logger.info(f"Found 'audios' folder at {AUDIOS_FOLDER}. Starting STREAMLINE processing...")
 
+    # --- 1. LOAD MODELS ONCE ---
+    
     # Load WhisperX Model
     try:
-        target_model_path = str(WHISPERX_MODEL_PATH) 
-        
-        logger.info(f"Loading WhisperX model directly from: {target_model_path}...")
-        
+        logger.info(f"Loading WhisperX model directly from: {WHISPERX_MODEL_PATH}...")
         device = "cuda" if torch.cuda.is_available() else "cpu"
         compute_type = "float16" if device == "cuda" else "float32"
         
         model = whisperx.load_model(
-            target_model_path, 
+            str(WHISPERX_MODEL_PATH), 
             device, 
             compute_type=compute_type, 
             local_files_only=True
@@ -399,30 +398,20 @@ def process_audios():
         
     except Exception as e:
         logger.critical(f"Failed to load WhisperX model: {e}")
-        # Optional: Print available folders to help debug
-        logger.critical(f"Available folders in {MODEL_FOLDER}: {list(MODEL_FOLDER.iterdir())}")
         return
 
     # Load Diarization Pipeline
     try:
         logger.info(f"Loading Diarization Pipeline directly from: {DIARIZATION_MODEL_PATH}...")
-        
         from pyannote.audio import Pipeline
         
-        # Method 1: Try passing the path directly (works in most versions)
-        # If this fails, we fall back to Method 2
+        # Try standard load first
         try:
-            diarize_pipeline = Pipeline.from_pretrained(
-                str(DIARIZATION_MODEL_PATH)
-            )
+            diarize_pipeline = Pipeline.from_pretrained(str(DIARIZATION_MODEL_PATH))
         except TypeError:
-            # Method 2: Fallback for older versions that might expect use_auth_token
-            # We pass None to force local loading without network checks
+            # Fallback for older versions
             logger.warning("Standard load failed. Trying fallback with use_auth_token=None...")
-            diarize_pipeline = Pipeline.from_pretrained(
-                str(DIARIZATION_MODEL_PATH),
-                use_auth_token=None
-            )
+            diarize_pipeline = Pipeline.from_pretrained(str(DIARIZATION_MODEL_PATH), use_auth_token=None)
         
         diarize_model = diarize_pipeline
         logger.info("Diarization Pipeline loaded successfully (Direct Path).")
@@ -431,8 +420,9 @@ def process_audios():
         logger.critical(f"Failed to load Diarization Pipeline: {e}")
         logger.critical("Diarization will be skipped. Using generic speaker labels.")
         diarize_model = None
+        # Do not return; continue with generic labels
 
-    # --- 2. Process files ---
+    # --- 2. PROCESS FILES ONE BY ONE ---
     files = [f for f in AUDIOS_FOLDER.iterdir() if f.is_file() and f.suffix.lower() == ".wav"]
     total_files = len(files)
     
@@ -450,11 +440,11 @@ def process_audios():
         logger.info(f"[{idx}/{total_files}] Processing: {file.name}")
 
         try:
-            # --- STEP 1: Transcribe ---
+            # --- STEP A: Transcribe ---
             audio = whisperx.load_audio(str(file))
             result = model.transcribe(audio, batch_size=BATCH_SIZE, verbose=False, print_progress=False)
             
-            # --- STEP 2: Align ---
+            # --- STEP B: Align ---
             if result.get("language"):
                 try:
                     align_device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -465,11 +455,14 @@ def process_audios():
             else:
                 logger.warning(f"No language detected for {file.name}.")
 
-            # --- STEP 3: Diarize ---
+            # --- STEP C: Diarize ---
             if diarize_model:
                 try:
-                    # min_speakers=1 to avoid forcing speakers
-                    diarize_output = diarize_model(str(file), MIN_SPEAKERS, MAX_SPEAKERS)
+
+                    # Local models estimate speakers automatically.
+                    logger.info(f"Running local diarization on {file.name}...")
+                    diarize_output = diarize_model(str(file))
+                    
                     speaker_diarization = diarize_output.speaker_diarization
                     
                     segments_list = []
@@ -478,6 +471,8 @@ def process_audios():
                         if duration < 0.5: continue # Filter noise
                         
                         segments_list.append({'start': turn.start, 'end': turn.end, 'speaker': speaker})
+                    
+                    logger.info(f"Diarization extracted {len(segments_list)} valid speaker segments.")
                     
                     if not segments_list:
                         logger.warning(f"No valid speakers for {file.name}. Using fallback.")
@@ -490,13 +485,15 @@ def process_audios():
                         
                 except Exception as e:
                     logger.error(f"Diarization failed for {file.name}: {e}. Using fallback.")
+                    # Fallback: Alternate speakers
                     for i, seg in enumerate(result["segments"]):
                         seg["speaker"] = f"SPEAKER_{i%2:02d}"
             else:
+                logger.warning("No diarization model loaded. Using generic labels.")
                 for i, seg in enumerate(result["segments"]):
                     seg["speaker"] = f"SPEAKER_{i%2:02d}"
 
-            # --- STEP 4: Merge & Save ---
+            # --- STEP D: Merge & Save (IMMEDIATE OUTPUT) ---
             result["segments"] = merge_consecutive_speaker_segments(result["segments"])
             
             base_name = sanitize_filename(file.stem)
@@ -516,6 +513,7 @@ def process_audios():
             logger.error(traceback.format_exc())
         
         finally:
+            # --- CRITICAL: CLEANUP AFTER EVERY FILE ---
             # Delete large objects to free RAM/VRAM immediately
             if 'audio' in locals(): del audio
             if 'result' in locals(): del result
@@ -534,11 +532,10 @@ def process_audios():
             time.sleep(0.1)
 
     # Final Cleanup
-    del model, diarize_model
+    if 'model' in locals(): del model
+    if 'diarize_model' in locals(): del diarize_model
     cleanup_gpu_resources()
     logger.info("Stream processing finished.")
-    
-    logger.info(f"Transcription phase complete. Processed: {files_processed}, Failed: {files_failed}")
 
 # Global variables to hold loaded models (so we don't reload every time)
 _loaded_whisper_model = None
