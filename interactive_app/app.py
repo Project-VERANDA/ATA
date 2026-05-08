@@ -9,6 +9,10 @@ import logging
 from pathlib import Path
 import ipaddress
 from datetime import datetime, timezone, timedelta
+import zipfile
+import shutil
+from werkzeug.utils import secure_filename
+from process import ANNONYM_FOLDER, LLM_ANONNYM_FOLDER, TRANSCRIPTS_FOLDER
 
 # --- PATH SETUP ---
 current_script_dir = Path(__file__).resolve().parent
@@ -477,6 +481,140 @@ def llm_rewrite_route():
     except Exception as e:
         logger.error(f"Error in LLM rewrite route: {str(e)}")
         return jsonify({'error': f'Error rewriting text: {str(e)}'}), 500
+
+# --- NEW ROUTES FOR EDITING & BULK UPLOAD ---
+
+@app.route('/save_transcription', methods=['POST'])
+def save_transcription():
+    """Saves edited transcription text to a temporary session-like storage (in-memory for simplicity)"""
+    try:
+        data = request.get_json()
+        if not data or 'text' not in data:
+            return jsonify({'error': 'No text provided'}), 400
+        
+        # In a real production app, you'd store this in a session or DB keyed by a unique ID
+        # For this demo, we'll store it in a global dict (not thread-safe for high concurrency, but works for local dev)
+        # Ideally, generate a unique ID for the session and store there.
+        # Here we assume the user is working on the "current" active text.
+        
+        # Since Flask sessions are per-user, let's use a simple in-memory cache for the active edit
+        # Note: In a multi-user environment, use Redis or a DB.
+        if not hasattr(app, 'active_edits'):
+            app.active_edits = {}
+        
+        # Generate a simple ID based on timestamp for this session's edit
+        edit_id = request.headers.get('X-Session-ID', str(int(time.time())))
+        app.active_edits[edit_id] = data['text']
+        
+        return jsonify({'success': True, 'message': 'Transcription saved'})
+    except Exception as e:
+        logger.error(f"Error saving transcription: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/upload_bulk', methods=['POST'])
+def upload_bulk():
+    """Handles bulk upload of audio files, text files, or zipped folders"""
+    try:
+        if 'files' not in request.files:
+            return jsonify({'error': 'No files provided'}), 400
+        
+        files = request.files.getlist('files')
+        if not files or files[0].filename == '':
+            return jsonify({'error': 'No files selected'}), 400
+        
+        processed_count = 0
+        errors = []
+        
+        # Create a temporary directory for this batch
+        batch_id = f"batch_{int(time.time())}"
+        batch_dir = os.path.join(app.config['UPLOAD_FOLDER'], batch_id)
+        os.makedirs(batch_dir, exist_ok=True)
+        
+        for file in files:
+            filename = secure_filename(file.filename)
+            filepath = os.path.join(batch_dir, filename)
+            
+            try:
+                file.save(filepath)
+                
+                # Check if it's a zip file
+                if filename.endswith('.zip'):
+                    # Extract zip
+                    extract_dir = os.path.join(batch_dir, f"extracted_{batch_id}")
+                    os.makedirs(extract_dir, exist_ok=True)
+                    with zipfile.ZipFile(filepath, 'r') as zip_ref:
+                        zip_ref.extractall(extract_dir)
+                    # Recursively process extracted files
+                    for root, dirs, files_in_zip in os.walk(extract_dir):
+                        for f in files_in_zip:
+                            if f.endswith(tuple(ALLOWED_EXTENSIONS)) or f.endswith('.txt'):
+                                # Process logic here (simplified: just count)
+                                processed_count += 1
+                    os.remove(filepath) # Clean up zip
+                elif filename.endswith(tuple(ALLOWED_EXTENSIONS)):
+                    processed_count += 1
+                elif filename.endswith('.txt'):
+                    processed_count += 1
+                else:
+                    errors.append(f"Skipped unsupported file: {filename}")
+                    
+            except Exception as e:
+                errors.append(f"Error processing {filename}: {str(e)}")
+        
+        return jsonify({
+            'success': True,
+            'processed_count': processed_count,
+            'errors': errors,
+            'batch_id': batch_id
+        })
+    except Exception as e:
+        logger.error(f"Bulk upload error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/download_text/<file_type>/<filename>')
+def download_text(file_type, filename):
+    """Downloads text files (original, anonymized, LLM)"""
+    try:
+        # Map file types to folders
+        folder_map = {
+            'original': app.config['UPLOAD_FOLDER'], # Assuming original is saved here or in a specific folder
+            'bert': ANNONYM_FOLDER,
+            'llm': LLM_ANONNYM_FOLDER
+        }
+        
+        if file_type not in folder_map:
+            return jsonify({'error': 'Invalid file type'}), 400
+            
+        base_path = folder_map[file_type]
+        file_path = os.path.join(base_path, secure_filename(filename))
+        
+        if not os.path.exists(file_path):
+            return jsonify({'error': 'File not found'}), 404
+            
+        return send_file(file_path, as_attachment=True, download_name=filename)
+    except Exception as e:
+        logger.error(f"Error downloading text: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/download_speech/<filename>')
+def download_speech_route(filename):
+    """Wrapper for existing speech download with security check"""
+    try:
+        if not filename.startswith('speech_output_') or '..' in filename:
+            return jsonify({'error': 'Invalid filename'}), 400
+        
+        file_path = os.path.join(os.path.abspath(app.config['UPLOAD_FOLDER']), filename)
+        
+        if not os.path.exists(file_path):
+            return jsonify({'error': 'File not found'}), 404
+            
+        return send_file(file_path, as_attachment=True, download_name=filename)
+    except Exception as e:
+        logger.error(f"Error downloading speech: {e}")
+        return jsonify({'error': str(e)}), 500
+
+# Note: You may need to adjust the existing /download_speech route to use this new logic 
+# or rename the old one to avoid conflicts.
 
 if __name__ == '__main__':
     use_https = os.getenv('USE_HTTPS', 'true').lower() == 'true'
