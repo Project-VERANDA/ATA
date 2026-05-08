@@ -7,6 +7,7 @@ import subprocess
 import gc
 import logging
 import re
+import time
 from collections import defaultdict
 from pathlib import Path
 from pydub import AudioSegment
@@ -375,38 +376,66 @@ def process_videos():
 # --- Step 2: Transcribe & Diarize ---
 
 def process_audios():
-    """
-    Processes all audio files in the AUDIOS_FOLDER using the globally loaded models.
-    Ensures GPU usage via load_models().
-    """
-    global _loaded_whisper_model, _loaded_diarize_model
-
     if not AUDIOS_FOLDER.exists():
         logger.warning(f"No 'audios' folder found at {AUDIOS_FOLDER}. Skipping transcription.")
         return
 
     logger.info(f"Found 'audios' folder at {AUDIOS_FOLDER}. Starting transcription process...")
 
-    # ---------------------------------------------------------
-    # STEP 1: Load Models (Triggers GPU Check & .to(device))
-    # ---------------------------------------------------------
-    logger.info("Loading models (this will trigger GPU detection logs)...")
-    _loaded_whisper_model, _loaded_diarize_model = load_models()
-
-    if not _loaded_whisper_model:
-        logger.critical("Failed to load WhisperX model. Aborting transcription.")
-        return
+    # Verify local models exist before proceeding
+    logger.info("Verifying local model files...")
     
-    if not _loaded_diarize_model:
-        logger.warning("Diarization model failed to load. Proceeding with generic speaker labels.")
+    whisperx_model_valid = verify_whisperx_model(WHISPERX_MODEL_PATH)
+    diarization_model_valid = verify_diarization_model(DIARIZATION_MODEL_PATH)
+    
+    if not whisperx_model_valid or not diarization_model_valid:
+        logger.critical("One or more required local models are missing or invalid.")
+        return
 
-    logger.info("Models loaded successfully. Starting file processing...")
+    # Load WhisperX Model
+    try:
+        logger.info(f"Loading WhisperX model from: {WHISPERX_MODEL_PATH}")
+        
+        # Use float32 for CPU, float16 for GPU to save memory
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        compute_type = "float16" if device == "cuda" else "float32"
+        
+        model = whisperx.load_model(
+            "large-v3", 
+            device, 
+            compute_type=compute_type, 
+            download_root=str(MODEL_FOLDER),
+            local_files_only=True
+        )
+        logger.info("WhisperX model loaded successfully.")
+        
+    except Exception as e:
+        logger.critical(f"Failed to load WhisperX model: {e}")
+        return
 
-    # ---------------------------------------------------------
-    # STEP 2: Process Files
-    # ---------------------------------------------------------
-    processed_count = 0
-    failed_count = 0
+    # Load Diarization Pipeline from local model
+    try:
+        logger.info(f"Loading Diarization Pipeline from local model: {DIARIZATION_MODEL_PATH}")
+        from pyannote.audio import Pipeline
+        
+        diarize_pipeline = Pipeline.from_pretrained(
+            str(DIARIZATION_MODEL_PATH),
+            local_files_only=True
+        )
+        
+        diarize_model = diarize_pipeline
+        logger.info("Diarization Pipeline loaded successfully (offline mode).")
+        
+    except Exception as e:
+        logger.critical(f"Failed to load local Diarization Pipeline: {e}")
+        if 'model' in locals():
+            del model
+        cleanup_gpu_resources()
+        return
+
+    # --- PROCESS EACH FILE ---
+    files_processed = 0
+    files_failed = 0
 
     for file in AUDIOS_FOLDER.iterdir():
         if not file.is_file() or not file.suffix.lower() == ".wav":
@@ -417,121 +446,76 @@ def process_audios():
             continue
 
         audio_path = file
-        logger.info(f"Processing: {file.name}")
+        logger.info(f"--- Processing: {file.name} ---")
 
         try:
             # 1. Load Audio
             audio = whisperx.load_audio(str(audio_path))
-            logger.debug(f"Audio loaded. Duration: {len(audio)/16000:.2f}s")
+            logger.info(f"Audio loaded. Duration: {len(audio)/16000:.2f}s")
 
-            # 2. Transcribe (Using Global Model)
-            segments, info = _loaded_whisper_model.transcribe(
-                audio, 
-                beam_size=BATCH_SIZE, 
-                vad_filter=True
-            )
-            
-            # Convert generator to list of Segment objects
-            raw_segments = list(segments)
-            
-            # CRITICAL FIX: Convert Segment objects to dictionaries
-            # faster_whisper returns immutable Segment objects, but whisperx expects dicts
-            segments_list = []
-            for seg in raw_segments:
-                # Convert to dict manually
-                seg_dict = {
-                    "start": seg.start,
-                    "end": seg.end,
-                    "text": seg.text,
-                    "words": getattr(seg, 'words', None) # Preserve words if available
-                }
-                segments_list.append(seg_dict)
-            
-            detected_language = info.language if info else 'unknown'
-            logger.info(f"Transcription completed. Detected language: {detected_language}")
-            
-            # Reconstruct result dict to match whisperx expectations
-            result = {"segments": segments_list, "language": detected_language}
+            # 2. Transcribe
+            result = model.transcribe(audio, batch_size=BATCH_SIZE, verbose=False, print_progress=False)
+            logger.info(f"Transcription completed. Language: {result.get('language', 'unknown')}")
 
             # 3. Align
             if result.get("language"):
                 try:
-                    device = "cuda" if torch.cuda.is_available() else "cpu"
-                    model_a, metadata = whisperx.load_align_model(language_code=result["language"], device=device)
-                    result = whisperx.align(result["segments"], model_a, metadata, audio, device, return_char_alignments=False)
-                    logger.debug("Alignment completed.")
+                    align_device = "cuda" if torch.cuda.is_available() else "cpu"
+                    model_a, metadata = whisperx.load_align_model(language_code=result["language"], device=align_device)
+                    result = whisperx.align(result["segments"], model_a, metadata, audio, align_device, return_char_alignments=False)
+                    logger.info("Alignment completed.")
                 except Exception as e:
                     logger.warning(f"Alignment failed: {e}. Proceeding without alignment.")
+            else:
+                logger.warning("No language detected. Skipping alignment.")
 
-            # 4. Diarize (Using Global Model)
-            if _loaded_diarize_model:
+            # 4. Diarization
+            if diarize_model:
                 try:
-                    logger.debug("Running speaker diarization with AGGRESSIVE smoothing...")
-                    
-                    # --- CRITICAL: Force strict thresholds ---
-                    # These MUST be set BEFORE calling the pipeline
-                    # 1.5s minimum speech duration (ignores anything shorter)
-                    _loaded_diarize_model.min_duration_on = 4.0 
-                    # 1.0s minimum silence between turns (merges short pauses)
-                    _loaded_diarize_model.min_duration_off = 2
-                    
-                    # Optional: Force the number of speakers if the model is over-segmenting
-                    # This prevents the model from inventing new speakers for noise
-                    # _loaded_diarize_model.params['min_speakers'] = MIN_SPEAKERS
-                    # _loaded_diarize_model.params['max_speakers'] = MAX_SPEAKERS
-
-                    # Run the pipeline
-                    diarize_output = _loaded_diarize_model(
-                        str(audio_path), 
-                        min_speakers=MIN_SPEAKERS, 
-                        max_speakers=MAX_SPEAKERS
-                    )
-                    
+                    # Use min_speakers=1 to avoid forcing a second speaker
+                    diarize_output = diarize_model(str(audio_path), min_speakers=1, max_speakers=6)
                     speaker_diarization = diarize_output.speaker_diarization
                     
-                    # Convert to list of segments
+                    # Convert to list
                     segments_list = []
                     for turn, _, speaker in speaker_diarization.itertracks(yield_label=True):
+                        duration = turn.end - turn.start
+                        
+                        # FILTER: Skip segments shorter than 0.5s (noise/artifacts)
+                        if duration < 0.5:
+                            continue
+                        
                         segments_list.append({
                             'start': turn.start,
                             'end': turn.end,
                             'speaker': speaker
                         })
                     
-                    logger.info(f"Diarization extracted {len(segments_list)} speaker segments (AGGRESSIVELY filtered).")
+                    logger.info(f"Diarization extracted {len(segments_list)} valid speaker segments.")
                     
-                    # If we still have > 20 segments for a 4-min clip, the model is failing
-                    if len(segments_list) > 20:
-                        logger.warning(f"⚠️ High segment count ({len(segments_list)}) suggests diarization is still too sensitive.")
-                        logger.warning("Consider increasing min_duration_on to 3.0 or checking audio quality.")
-
-                    # CRITICAL FIX: Sort segments by start time before assigning speakers
-                    segments_list = sorted(segments_list, key=lambda x: x.get('start', 0))
-                    
-                    import pandas as pd
-                    diarize_df = pd.DataFrame(segments_list)
-                    result = whisperx.assign_word_speakers(diarize_df, result)
-                    logger.debug("Speakers assigned.")
-                    
+                    if not segments_list:
+                        logger.warning("No valid speaker segments found. Using fallback generic labels.")
+                        # Fallback: Alternate speakers based on transcription segments
+                        for i, segment in enumerate(result["segments"]):
+                            segment["speaker"] = f"SPEAKER_{i%2:02d}"
+                    else:
+                        # Convert to DataFrame and assign
+                        import pandas as pd
+                        diarize_df = pd.DataFrame(segments_list)
+                        result = whisperx.assign_word_speakers(diarize_df, result)
+                        
                 except Exception as e:
-                    logger.error(f"Diarization failed: {e}")
-                    logger.warning("Falling back to generic speaker labels.")
+                    logger.error(f"Diarization failed for {file.name}: {e}")
+                    # Fallback on error
                     for i, segment in enumerate(result["segments"]):
                         segment["speaker"] = f"SPEAKER_{i%2:02d}"
             else:
-                # Fallback if no model loaded
-                logger.warning("No diarization model loaded. Using generic speaker labels.")
+                logger.warning("No diarization model loaded. Using generic labels.")
                 for i, segment in enumerate(result["segments"]):
                     segment["speaker"] = f"SPEAKER_{i%2:02d}"
 
-            # CRITICAL FIX: Ensure segments are sorted by time BEFORE merging
-            if 'segments' in result:
-                result["segments"] = sorted(result["segments"], key=lambda x: x.get('start', 0))
-                logger.debug(f"Segments sorted by time. Count: {len(result['segments'])}")
-
             # 5. Merge Consecutive Segments
-            merged_segments = merge_consecutive_speaker_segments(result["segments"], max_gap_seconds=3.5)
-            logger.debug(f"Merged into {len(merged_segments)} final segments.")
+            result["segments"] = merge_consecutive_speaker_segments(result["segments"])
 
             # 6. Save Transcript
             base_name = sanitize_filename(file.stem)
@@ -539,56 +523,47 @@ def process_audios():
             
             try:
                 with open(transcript_file, "w", encoding="utf-8") as f:
-                    for segment in merged_segments:
+                    for segment in result["segments"]:
                         speaker = segment.get("speaker", "Unknown")
                         text = segment.get("text", "")
-                        f.write(f"{speaker}: {text}\n")
+                        if text.strip():
+                            f.write(f"{speaker}: {text}\n")
                 logger.info(f"Transcription saved: {transcript_file}")
-                processed_count += 1
-            except PermissionError:
-                logger.error(f"Permission denied writing to {transcript_file}")
-                failed_count += 1
-            except IOError as e:
-                logger.error(f"I/O error writing transcript: {e}")
-                failed_count += 1
+                files_processed += 1
+            except Exception as e:
+                logger.error(f"Permission denied or IO error writing to {transcript_file}: {e}")
+                files_failed += 1
 
-            # 7. Cleanup GPU Resources for this file
-            cleanup_gpu_resources(
-                audio, 
-                result, 
-                model_a if 'model_a' in locals() else None, 
-                metadata if 'metadata' in locals() else None, 
-                diarize_output if 'diarize_output' in locals() else None, 
-                speaker_diarization if 'speaker_diarization' in locals() else None, 
-                segments_list if 'segments_list' in locals() else None, 
-                diarize_df if 'diarize_df' in locals() else None
-            )
+            # 7. CRITICAL: CLEANUP MEMORY AFTER EVERY FILE
+            # Delete large objects
+            del audio, result, model_a, metadata, diarize_output, speaker_diarization, segments_list, diarize_df
             
-            # Explicitly delete references
-            del audio, result
-            if 'model_a' in locals(): del model_a
-            if 'metadata' in locals(): del metadata
-            if 'diarize_output' in locals(): del diarize_output
-            if 'speaker_diarization' in locals(): del speaker_diarization
-            if 'segments_list' in locals(): del segments_list
-            if 'diarize_df' in locals(): del diarize_df
+            # Force Garbage Collection
+            gc.collect()
+            
+            # Clear GPU Cache
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            
+            # Small pause to let system settle
+            time.sleep(0.2)
 
         except Exception as e:
             logger.error(f"Error processing {file.name}: {e}")
             import traceback
             logger.error(traceback.format_exc())
-            failed_count += 1
+            files_failed += 1
             
-            # Safe cleanup for error cases
-            cleanup_gpu_resources()
+            # Cleanup on error
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
-    # End of file loop
-    logger.info(f"Transcription phase complete.")
-    logger.info(f"  Processed: {processed_count}, Failed: {failed_count}")
-    
-    # Optional: Clear global models if you want to free VRAM after the whole batch
-    del _loaded_whisper_model, _loaded_diarize_model
+    # Final Cleanup
+    del model, diarize_model
     cleanup_gpu_resources()
+    
+    logger.info(f"Transcription phase complete. Processed: {files_processed}, Failed: {files_failed}")
 
 # Global variables to hold loaded models (so we don't reload every time)
 _loaded_whisper_model = None
