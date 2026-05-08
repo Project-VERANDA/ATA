@@ -4,15 +4,15 @@ import tempfile
 import time
 import re
 import subprocess
-from collections import OrderedDict
 import logging
-from pathlib import Path
 import ipaddress
-from datetime import datetime, timezone, timedelta
 import zipfile
 import shutil
+from pathlib import Path
+from datetime import datetime, timezone, timedelta
 from werkzeug.utils import secure_filename
 from process import ANNONYM_FOLDER, LLM_ANONNYM_FOLDER, TRANSCRIPTS_FOLDER
+from collections import OrderedDict
 
 # --- PATH SETUP ---
 current_script_dir = Path(__file__).resolve().parent
@@ -34,6 +34,7 @@ if str(model_training_path) not in sys.path:
     sys.path.insert(0, str(model_training_path))
 
 # --- IMPORTS ---
+#sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "pipeline"))
 try:
     from process import (
         transcribe_audio_locally, 
@@ -111,6 +112,22 @@ try:
 except Exception as e:
     logger.error(f"Interactive App: Failed to pre-load models: {e}")
 
+def transcribe_audio(audio_path, language='auto'):
+    """
+    Calls the shared engine from process.py with language support.
+    Args:
+        audio_path: Path to audio file
+        language: 'auto', 'SP', 'ES', 'DE', etc.
+    """
+    lang_code = None
+    if language and language != 'auto' and language in WHISPER_LANG_MAP:
+        lang_code = WHISPER_LANG_MAP[language]
+        logger.info(f"Transcribing with forced language: {lang_code}")
+    else:
+        logger.info("Transcribing with auto-detect")
+    
+    return transcribe_audio_locally(audio_path, language=lang_code)
+
 # --- CONFIGURATION ---
 CHAT_AI_API_KEY = os.getenv('CHAT_AI_API_KEY')
 CHAT_AI_ENDPOINT = os.getenv('CHAT_AI_ENDPOINT', 'https://llm.cloud.cci.charite.de/v1')
@@ -134,6 +151,31 @@ WHISPER_MODELS = OrderedDict([
     ('medium', '4: Medium'),
     ('large', '5: Large (Best)')
 ])
+
+# --- Language Configuration ---
+# Supported Languages for UI
+SUPPORTED_LANGUAGES = {
+    'AR': 'Arabic',
+    'DE': 'German',
+    'EN': 'English',
+    'FI': 'Finnish',
+    'FR': 'French',
+    'HI': 'Hindi',
+    'IT': 'Italian',
+    'PL': 'Polish',
+    'PT': 'Portuguese',
+    'SP': 'Spanish',
+    'ES': 'Spanish',
+    'TR': 'Turkish'
+}
+
+# Mapping for WhisperX
+WHISPER_LANG_MAP = {
+    'AR': 'ar', 'DE': 'de', 'EN': 'en', 'FI': 'fi', 'FR': 'fr',
+    'HI': 'hi', 'IT': 'it', 'PL': 'pl', 'PT': 'pt', 
+    'SP': 'es', 'ES': 'es', # Both map to 'es'
+    'TR': 'tr'
+}
 
 ALLOWED_EXTENSIONS = {'wav', 'mp3', 'mp4', 'm4a', 'flac', 'ogg', 'webm'}
 

@@ -8,6 +8,7 @@ import gc
 import logging
 import re
 import time
+import argparse
 from collections import defaultdict
 from pathlib import Path
 from pydub import AudioSegment
@@ -119,6 +120,37 @@ logger.info(f"✅ Paths verified successfully.")
 logger.info(f"   Model Folder: {MODEL_FOLDER}")
 logger.info(f"   WhisperX Model: {WHISPERX_MODEL_PATH.name}")
 logger.info(f"   Diarization Model: {DIARIZATION_MODEL_PATH.name if DIARIZATION_MODEL_PATH.exists() else 'MISSING'}")
+
+# Supported Languages
+
+SUPPORTED_LANGUAGES = {
+    'AR': 'Arabic',
+    'DE': 'German',
+    'EN': 'English',
+    'FI': 'Finnish',
+    'FR': 'French',
+    'HI': 'Hindi',
+    'IT': 'Italian',
+    'PL': 'Polish',
+    'PT': 'Portuguese',
+    'SP': 'Spanish',
+    'ES': 'Spanish', # Added ES alias
+    'TR': 'Turkish'
+}
+
+WHISPER_LANG_MAP = {
+    'AR': 'ar', 'DE': 'de', 'EN': 'en', 'FI': 'fi', 'FR': 'fr',
+    'HI': 'hi', 'IT': 'it', 'PL': 'pl', 'PT': 'pt', 
+    'SP': 'es', 'ES': 'es',
+    'TR': 'tr'
+}
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Batch Audio Processing Pipeline")
+    parser.add_argument('--lang', type=str, default=None, 
+                        choices=list(SUPPORTED_LANGUAGES.keys()),
+                        help=f"Force language (e.g., DE, EN, SP, ES). Default: Auto-detect.")
+    return parser.parse_args()
 
 # Anonymization Configuration
 ANONYMIZATION_ENABLED = True
@@ -374,15 +406,23 @@ def process_videos():
         logger.info("No new files processed.")
 
 def process_audios():
-    if not AUDIOS_FOLDER.exists():
-        logger.warning(f"No 'audios' folder found at {AUDIOS_FOLDER}. Skipping transcription.")
-        return
-
-    logger.info(f"Found 'audios' folder at {AUDIOS_FOLDER}. Starting STREAMLINE processing...")
+    # Parse command line args
+    args = parse_args()
+    force_language = args.lang
+    
+    # Normalize language code
+    whisper_code = None
+    if force_language:
+        whisper_code = WHISPER_LANG_MAP.get(force_language)
+        if not whisper_code:
+            logger.error(f"Invalid language code: {force_language}")
+            return
+        logger.info(f"Language forced to: {SUPPORTED_LANGUAGES[force_language]} ({whisper_code})")
+    else:
+        logger.info("Language set to Auto-Detect.")
 
     # --- 1. LOAD MODELS ONCE ---
-    
-    # Load WhisperX Model
+    # Load WhisperX Model (Direct Path)
     try:
         logger.info(f"Loading WhisperX model directly from: {WHISPERX_MODEL_PATH}...")
         device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -400,16 +440,14 @@ def process_audios():
         logger.critical(f"Failed to load WhisperX model: {e}")
         return
 
-    # Load Diarization Pipeline
+    # Load Diarization Pipeline (Direct Path)
     try:
         logger.info(f"Loading Diarization Pipeline directly from: {DIARIZATION_MODEL_PATH}...")
         from pyannote.audio import Pipeline
         
-        # Try standard load first
         try:
             diarize_pipeline = Pipeline.from_pretrained(str(DIARIZATION_MODEL_PATH))
         except TypeError:
-            # Fallback for older versions
             logger.warning("Standard load failed. Trying fallback with use_auth_token=None...")
             diarize_pipeline = Pipeline.from_pretrained(str(DIARIZATION_MODEL_PATH), use_auth_token=None)
         
@@ -420,7 +458,6 @@ def process_audios():
         logger.critical(f"Failed to load Diarization Pipeline: {e}")
         logger.critical("Diarization will be skipped. Using generic speaker labels.")
         diarize_model = None
-        # Do not return; continue with generic labels
 
     # --- 2. PROCESS FILES ONE BY ONE ---
     files = [f for f in AUDIOS_FOLDER.iterdir() if f.is_file() and f.suffix.lower() == ".wav"]
@@ -442,20 +479,24 @@ def process_audios():
         try:
             # --- STEP A: Transcribe ---
             audio = whisperx.load_audio(str(file))
-            detected_lang = None 
-            result = model.transcribe(
-                audio, 
-                batch_size=BATCH_SIZE, 
-                verbose=False, 
-                task="transcribe",
-                language=detected_lang 
-                print_progress=False
-                )
-            if not result.get("language"):
-                logger.warning(f"Language not detected for {file.name}. Defaulting to 'en' for alignment.")
-                result["language"] = "en"
+            
+            # Prepare transcription arguments
+            transcribe_kwargs = {
+                "audio": audio,
+                "batch_size": BATCH_SIZE,
+                "verbose": False,
+                "print_progress": False,
+                "task": "transcribe" # Force transcription, not translation
+            }
+            
+            if whisper_code:
+                transcribe_kwargs["language"] = whisper_code
+                logger.info(f"  -> Forced Language: {whisper_code}")
             else:
-                logger.info(f"Detected language: {result.get('language')}")
+                logger.info(f"  -> Language: Auto-Detect")
+
+            result = model.transcribe(**transcribe_kwargs)
+            
             # --- STEP B: Align ---
             if result.get("language"):
                 try:
@@ -470,9 +511,7 @@ def process_audios():
             # --- STEP C: Diarize ---
             if diarize_model:
                 try:
-
-                    # Local models estimate speakers automatically.
-                    logger.info(f"Running local diarization on {file.name}...")
+                    logger.info(f"  -> Running local diarization...")
                     diarize_output = diarize_model(str(file))
                     
                     speaker_diarization = diarize_output.speaker_diarization
@@ -480,14 +519,12 @@ def process_audios():
                     segments_list = []
                     for turn, _, speaker in speaker_diarization.itertracks(yield_label=True):
                         duration = turn.end - turn.start
-                        if duration < 0.5: continue # Filter noise
+                        if duration < 0.5: continue
                         
                         segments_list.append({'start': turn.start, 'end': turn.end, 'speaker': speaker})
                     
-                    logger.info(f"Diarization extracted {len(segments_list)} valid speaker segments.")
-                    
                     if not segments_list:
-                        logger.warning(f"No valid speakers for {file.name}. Using fallback.")
+                        logger.warning(f"  -> No valid speakers found. Using fallback.")
                         for i, seg in enumerate(result["segments"]):
                             seg["speaker"] = f"SPEAKER_{i%2:02d}"
                     else:
@@ -496,16 +533,14 @@ def process_audios():
                         result = whisperx.assign_word_speakers(diarize_df, result)
                         
                 except Exception as e:
-                    logger.error(f"Diarization failed for {file.name}: {e}. Using fallback.")
-                    # Fallback: Alternate speakers
+                    logger.error(f"  -> Diarization failed: {e}. Using fallback.")
                     for i, seg in enumerate(result["segments"]):
                         seg["speaker"] = f"SPEAKER_{i%2:02d}"
             else:
-                logger.warning("No diarization model loaded. Using generic labels.")
                 for i, seg in enumerate(result["segments"]):
                     seg["speaker"] = f"SPEAKER_{i%2:02d}"
 
-            # --- STEP D: Merge & Save (IMMEDIATE OUTPUT) ---
+            # --- STEP D: Merge & Save ---
             result["segments"] = merge_consecutive_speaker_segments(result["segments"])
             
             base_name = sanitize_filename(file.stem)
@@ -525,22 +560,13 @@ def process_audios():
             logger.error(traceback.format_exc())
         
         finally:
-            # --- CRITICAL: CLEANUP AFTER EVERY FILE ---
-            # Delete large objects to free RAM/VRAM immediately
-            if 'audio' in locals(): del audio
-            if 'result' in locals(): del result
-            if 'model_a' in locals(): del model_a
-            if 'metadata' in locals(): del metadata
-            if 'diarize_output' in locals(): del diarize_output
-            if 'speaker_diarization' in locals(): del speaker_diarization
-            if 'segments_list' in locals(): del segments_list
-            if 'diarize_df' in locals(): del diarize_df
+            # Cleanup
+            for var in ['audio', 'result', 'model_a', 'metadata', 'diarize_output', 'speaker_diarization', 'segments_list', 'diarize_df']:
+                if var in locals(): del locals()[var]
             
             gc.collect()
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
-            
-            # Small delay to prevent GPU thrashing
             time.sleep(0.1)
 
     # Final Cleanup
@@ -549,7 +575,7 @@ def process_audios():
     cleanup_gpu_resources()
     logger.info("Stream processing finished.")
 
-# Global variables to hold loaded models (so we don't reload every time)
+# Global variables to hold loaded models
 _loaded_whisper_model = None
 _loaded_diarize_model = None
     
