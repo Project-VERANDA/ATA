@@ -193,6 +193,47 @@ MAX_SPEAKERS = 4
 
 # Local Model Paths
 WHISPERX_MODEL_PATH = MODEL_FOLDER / "models--Systran--faster-whisper-large-v3"
+
+# CRITICAL FALLBACK LOGIC
+if not WHISPERX_MODEL_PATH.exists():
+    logger.warning("❌ large-v3 model NOT found. Searching for alternatives...")
+    
+    # List of preferred fallback models in order of quality
+    fallback_candidates = [
+        "models--Systran--faster-whisper-tiny",
+        "models--Systran--faster-whisper-base",
+        "models--Systran--faster-whisper-small",
+        "models--Systran--faster-whisper-medium"
+    ]
+    
+    found_fallback = False
+    for candidate_name in fallback_candidates:
+        candidate_path = MODEL_FOLDER / candidate_name
+        if candidate_path.exists():
+            WHISPERX_MODEL_PATH = candidate_path
+            logger.info(f"✅ SUCCESS: Switching to fallback model: {candidate_name}")
+            found_fallback = True
+            break
+    
+    if not found_fallback:
+        # Last resort: Any folder starting with the prefix
+        whisper_folders = [f for f in MODEL_FOLDER.iterdir() if f.is_dir() and f.name.startswith("models--Systran--faster-whisper-")]
+        if whisper_folders:
+            WHISPERX_MODEL_PATH = whisper_folders[0]
+            logger.warning(f"⚠️  Using arbitrary fallback: {WHISPERX_MODEL_PATH.name}")
+        else:
+            logger.critical(f"CRITICAL: No WhisperX model found in {MODEL_FOLDER}.")
+            logger.critical(f"Available folders: {list(MODEL_FOLDER.iterdir())}")
+            sys.exit(1)
+else:
+    logger.info(f"✅ Using default model: large-v3")
+
+# Verify the final path
+if not WHISPERX_MODEL_PATH.exists():
+    logger.critical(f"CRITICAL: Final model path {WHISPERX_MODEL_PATH} does not exist.")
+    sys.exit(1)
+
+logger.info(f"✅ WhisperX Model Path Set: {WHISPERX_MODEL_PATH.name}")
 DIARIZATION_MODEL_PATH = MODEL_FOLDER / "models--pyannote--speaker-diarization-community-1"
 
 if not MODEL_FOLDER.exists():
