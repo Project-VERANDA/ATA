@@ -1017,65 +1017,87 @@ class AnonymizationEngine:
     def anonymize(self, text):
         """
         Anonymizes text using the local mmbert model with chunking.
-        Splits text into overlapping chunks based on token count.
+        Splits text into character-based chunks to avoid exceeding model context limits,
+        processes each chunk, and reassembles the result.
         """
         if not self.method or not self.model or not self.tokenizer:
             return None, False, "Anonymization model not loaded."
 
         logger.info(f"Running anonymization via mmbert (CRF) with chunking...")
 
-        # Configuration
-        MAX_TOKENS = 512
-        OVERLAP_TOKENS = 50
+        # 1. Determine Model Limits
+        # Attempt to read max context length from config, default to 512 if unavailable
+        max_model_len = 512
+        if hasattr(self.config, 'max_position_embeddings'):
+            val = self.config.max_position_embeddings
+            if isinstance(val, int):
+                max_model_len = val
+            elif isinstance(val, dict) and 'max_position_embeddings' in val:
+                max_model_len = val['max_position_embeddings']
         
-        # 1. Tokenize the full text WITHOUT truncation to get total token count
-        full_encoding = self.tokenizer(
-            text, 
-            return_tensors="pt", 
-            truncation=False, 
-            add_special_tokens=False
-        )
-        
-        input_ids = full_encoding['input_ids'][0]
-        total_tokens = len(input_ids)
-        
-        logger.info(f"Total tokens detected: {total_tokens}")
+        # Safety cap to prevent exceeding model limits
+        if not isinstance(max_model_len, int) or max_model_len < 512:
+            max_model_len = 512
+            
+        logger.info(f"Detected model max context length: {max_model_len}")
 
-        # If text is short enough, process in one go
-        if total_tokens <= MAX_TOKENS:
-            chunks = [(0, total_tokens)]
+        # Configuration for chunking
+        # Estimate characters per token (avg ~4.5) to split text safely before tokenization
+        EST_CHARS_PER_TOKEN = 4.5
+        CHUNK_SIZE_TOKENS = max_model_len - 50
+        MAX_CHUNK_CHARS = int(CHUNK_SIZE_TOKENS * EST_CHARS_PER_TOKEN)
+        OVERLAP_CHARS = int(OVERLAP_TOKENS * EST_CHARS_PER_TOKEN) if 'OVERLAP_TOKENS' in globals() else 200
+        
+        # 2. Split text into character-based chunks
+        # This prevents the "sequence too long" error by never feeding the full text to the tokenizer at once
+        if len(text) <= MAX_CHUNK_CHARS:
+            chunks = [(0, len(text))]
         else:
-            # Create overlapping chunks based on token indices
             chunks = []
             start = 0
-            while start < total_tokens:
-                end = min(start + MAX_TOKENS, total_tokens)
+            while start < len(text):
+                end = min(start + MAX_CHUNK_CHARS, len(text))
                 
-                if end < total_tokens:
-                    overlap_start = end - OVERLAP_TOKENS
-                    if overlap_start <= start:
-                        overlap_start = start + 1
-                    end = overlap_start
+                # Try to break at a space to avoid cutting words in the middle
+                if end < len(text):
+                    space_idx = text.rfind(' ', start, end)
+                    if space_idx > start:
+                        end = space_idx + 1
                 
                 chunks.append((start, end))
                 start = end
-                
-                if start >= total_tokens:
-                    break
 
-        logger.info(f"Split text into {len(chunks)} chunks.")
+        logger.info(f"Split text into {len(chunks)} character-based chunks.")
 
-        # 2. Process each chunk
+        # 3. Process each chunk
         anonymized_chunks = []
         
         for i, (start_idx, end_idx) in enumerate(chunks):
-            chunk_ids = input_ids[start_idx:end_idx].unsqueeze(0)
-            attention_mask = torch.ones_like(chunk_ids)
+            chunk_text = text[start_idx:end_idx]
             
-            chunk_ids = chunk_ids.to(self.device)
-            attention_mask = attention_mask.to(self.device)
-            
+            # Tokenize this specific chunk
             try:
+                encoding = self.tokenizer(
+                    chunk_text,
+                    return_tensors="pt",
+                    truncation=True,
+                    max_length=max_model_len,
+                    add_special_tokens=False
+                )
+                
+                chunk_ids = encoding['input_ids'][0]
+                total_tokens = len(chunk_ids)
+                
+                if total_tokens == 0:
+                    continue
+
+                # Create attention mask
+                attention_mask = torch.ones_like(chunk_ids)
+                
+                # Move to device
+                chunk_ids = chunk_ids.to(self.device)
+                attention_mask = attention_mask.to(self.device)
+                
                 with torch.no_grad():
                     outputs = self.model(chunk_ids, attention_mask=attention_mask)
                     emissions = outputs["logits"]
@@ -1083,10 +1105,11 @@ class AnonymizationEngine:
                     predictions = self.model.decode(emissions, mask)
                 
                 pred_ids = predictions[0]
-                tokens = self.tokenizer.convert_ids_to_tokens(chunk_ids[0])
+                tokens = self.tokenizer.convert_ids_to_tokens(chunk_ids)
                 id2label = self.config["id2label"]
                 labels = [id2label[str(pid)] for pid in pred_ids]
                 
+                # Reconstruct text
                 label_map = self._get_labels()
                 result_tokens = []
                 j = 0
@@ -1112,19 +1135,19 @@ class AnonymizationEngine:
                         result_tokens.append(clean_token)
                         j += 1
                 
-                chunk_text = "".join(result_tokens).replace("  ", " ").strip()
-                chunk_text = re.sub(r'\s+\[', '[', chunk_text)
-                chunk_text = re.sub(r'\]\s+', ']', chunk_text)
+                chunk_result = "".join(result_tokens).replace("  ", " ").strip()
+                chunk_result = re.sub(r'\s+\[', '[', chunk_result)
+                chunk_result = re.sub(r'\]\s+', ']', chunk_result)
                 
-                anonymized_chunks.append(chunk_text)
+                anonymized_chunks.append(chunk_result)
                 logger.debug(f"Processed chunk {i+1}/{len(chunks)}")
 
             except Exception as e:
                 logger.error(f"Chunk {i+1} failed: {e}")
-                fallback_tokens = [t.replace('##', '').replace('▁', ' ') for t in tokens if t not in ['[CLS]', '[SEP]', '[PAD]']]
-                anonymized_chunks.append("".join(fallback_tokens).strip())
+                # Fallback: keep original text for this chunk to prevent data loss
+                anonymized_chunks.append(chunk_text)
 
-        # 3. Reassemble chunks
+        # 4. Reassemble chunks
         if not anonymized_chunks:
             return text, False, "No chunks processed."
 
@@ -1134,6 +1157,8 @@ class AnonymizationEngine:
             current_chunk = anonymized_chunks[i]
             previous_result = final_result
             
+            # Smart Stitching: Find the longest overlap between the end of the previous result
+            # and the start of the current chunk to avoid duplication.
             max_overlap_search = min(len(previous_result), len(current_chunk), 200)
             overlap_len = 0
             
