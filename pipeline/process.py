@@ -812,6 +812,48 @@ def transcribe_audio_locally(audio_path, language='de'):
         return error_msg
 
 # --- Anonymization Engine Class (Custom CRF Implementation) ---
+
+def parse_transcript_into_blocks(transcript_text):
+    """
+    Parses a transcript string into a list of (speaker, text_block) tuples.
+    Consecutive lines from the same speaker are merged into one block.
+    """
+    lines = transcript_text.strip().split('\n')
+    blocks = []
+    current_speaker = None
+    current_text = []
+
+    for line in lines:
+        # Match pattern: SPEAKER_XX: text
+        match = re.match(r'^(SPEAKER_\d+):\s*(.*)$', line)
+        if match:
+            speaker = match.group(1)
+            text = match.group(2)
+            
+            if speaker == current_speaker:
+                # Continue current block
+                current_text.append(text)
+            else:
+                # New speaker: save previous block if exists
+                if current_speaker and current_text:
+                    blocks.append((current_speaker, " ".join(current_text)))
+                
+                # Start new block
+                current_speaker = speaker
+                current_text = [text]
+        else:
+            # Handle lines that don't match the pattern (e.g., empty lines or errors)
+            # If we are in a block, append it as is (or ignore)
+            if current_speaker:
+                current_text.append(line)
+            # If no speaker context, ignore or log warning
+
+    # Append the last block
+    if current_speaker and current_text:
+        blocks.append((current_speaker, " ".join(current_text)))
+
+    return blocks
+
 class AnonymizationEngine:
     """
     Encapsulates all logic related to text anonymization using the local mmbert model
@@ -1148,13 +1190,13 @@ def call_llm_rewriter(text, model_id, system_prompt=None):
 
 def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None):
     """
-    Reads raw transcripts, anonymizes them with BERT, and optionally rewrites with LLM.
+    Reads raw transcripts, anonymizes them PER SPEAKER BLOCK, and optionally rewrites with LLM.
     """
     if not TRANSCRIPTS_FOLDER.exists():
         logger.warning(f"No 'transcripts' folder found at {TRANSCRIPTS_FOLDER}. Skipping anonymization.")
         return
 
-    logger.info(f"Found 'transcripts' folder at {TRANSCRIPTS_FOLDER}. Starting anonymization process...")
+    logger.info(f"Found 'transcripts' folder at {TRANSCRIPTS_FOLDER}. Starting per-speaker anonymization...")
 
     # Determine LLM settings
     use_llm = llm_rewrite_enabled if llm_rewrite_enabled is not None else LLM_REWRITE_ENABLED
@@ -1165,6 +1207,7 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None):
         use_llm = False
 
     # Initialize Anonymization Engine (BERT)
+    # Note: We initialize ONCE outside the loop to save GPU memory
     anonymizer = AnonymizationEngine(
         method=ANONYMIZATION_METHOD,
         level=ANONYMIZATION_LEVEL,
@@ -1180,20 +1223,13 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None):
     llm_processed_count = 0
 
     for file in TRANSCRIPTS_FOLDER.iterdir():
-        # Skip directories
-        if not file.is_file():
+        if not file.is_file() or file.suffix.lower() != ".txt":
             continue
         
-        # Skip non-text files
-        if not file.suffix.lower() == ".txt":
-            continue
-        
-        # SECURITY FIX: Validate that the file path is strictly within TRANSCRIPTS_FOLDER
         if not validate_path(file, TRANSCRIPTS_FOLDER):
-            logger.error(f"Security Alert: Attempted path traversal detected for {file.name}. Skipping.")
+            logger.error(f"Security Alert: Skipping {file.name} (path traversal).")
             continue
         
-        # Skip already anonymized files
         if "_anon" in file.name:
             logger.debug(f"Skipping already anonymized file: {file.name}")
             continue
@@ -1209,57 +1245,81 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None):
                 logger.warning(f"Transcript {file.name} is empty. Skipping.")
                 continue
 
-            # Step 1: BERT Anonymization
-            anonymized_text, success, msg = anonymizer.anonymize(transcript_text)
-            
-            if not success or not anonymized_text:
-                logger.warning(f"BERT Anonymization failed for {base_name}: {msg}")
-                failed_count += 1
-                continue
+            # 1. Parse into Speaker Blocks
+            blocks = parse_transcript_into_blocks(transcript_text)
+            logger.info(f"  Found {len(blocks)} speaker blocks.")
 
-            # Save BERT result
+            anonymized_blocks = []
+            block_failed = False
+
+            for speaker, text in blocks:
+                if not text.strip():
+                    anonymized_blocks.append(f"{speaker}: ")
+                    continue
+
+                # 2. Anonymize THIS SPECIFIC BLOCK
+                # The chunking logic inside anonymize() now handles long monologues per speaker
+                anon_text, success, msg = anonymizer.anonymize(text)
+                
+                if not success or not anon_text:
+                    logger.warning(f"  BERT failed for {speaker} in {file.name}: {msg}")
+                    block_failed = True
+                    # Fallback: Keep original text for this block to avoid data loss
+                    anon_text = text 
+
+                anonymized_blocks.append(f"{speaker}: {anon_text}")
+
+            if block_failed:
+                failed_count += 1
+
+            # 3. Reassemble and Save
+            final_anonymized_text = "\n".join(anonymized_blocks)
+            
             output_filename = f"{base_name}_anon.txt"
             output_path = ANNONYM_FOLDER / output_filename
             
-            # Additional safety: Ensure output path is also within ANNONYM_FOLDER
             if not validate_path(output_path, ANNONYM_FOLDER):
-                logger.error(f"Security Alert: Output path traversal detected for {output_filename}. Skipping save.")
+                logger.error(f"Security Alert: Output path traversal detected. Skipping save.")
                 failed_count += 1
                 continue
 
             with open(output_path, "w", encoding="utf-8") as f:
-                f.write(anonymized_text)
-            logger.info(f"BERT Anonymized transcript saved to: {output_path}")
+                f.write(final_anonymized_text)
+            
+            logger.info(f"✅ Saved anonymized transcript: {output_path}")
             processed_count += 1
 
-            # Step 2: Optional LLM Rewrite
+            # 4. Optional LLM Rewrite (Run on the FULL reassembled text or per block?)
+            # Recommendation: Run LLM on the FULL text to catch cross-speaker context if needed,
+            # OR run per block if you want strict isolation. 
+            # Given your previous setup, let's run on the FULL reassembled text for consistency.
             if use_llm:
-                logger.info(f"Running LLM rewrite on {base_name} with model {target_llm_model}...")
-                llm_result, status = call_llm_rewriter(anonymized_text, target_llm_model)
+                logger.info(f"  Running LLM rewrite on full text...")
+                llm_result, status = call_llm_rewriter(final_anonymized_text, target_llm_model)
                 
                 if llm_result:
                     llm_filename = f"{base_name}_llm.txt"
                     llm_path = LLM_ANONNYM_FOLDER / llm_filename
                     
-                    # Additional safety: Ensure LLM output path is within LLM_ANONNYM_FOLDER
                     if not validate_path(llm_path, LLM_ANONNYM_FOLDER):
-                        logger.error(f"Security Alert: LLM output path traversal detected for {llm_filename}. Skipping save.")
-                        failed_count += 1
+                        logger.error(f"Security Alert: LLM output path traversal. Skipping.")
                         continue
                         
                     with open(llm_path, "w", encoding="utf-8") as f:
                         f.write(llm_result)
-                    logger.info(f"LLM Rewritten transcript saved to: {llm_path}")
+                    logger.info(f"✅ Saved LLM rewritten transcript: {llm_path}")
                     llm_processed_count += 1
                 else:
                     logger.warning(f"LLM rewrite failed for {base_name}: {status}")
 
         except Exception as e:
             logger.error(f"Error processing transcript {file.name}: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             failed_count += 1
 
     logger.info(f"Anonymization phase complete.")
-    logger.info(f"  BERT Processed: {processed_count}, Failed: {failed_count}")
+    logger.info(f"  Files Processed: {processed_count}, Failed: {failed_count}")
     if use_llm:
         logger.info(f"  LLM Rewritten: {llm_processed_count}")
 
