@@ -690,13 +690,42 @@
             }
 
             async function loadModels() {
+                console.log(">>> [DEBUG] loadModels() called <<<");
+                
                 try {
-                    // 1. Load Transcription Models (Whisper)
-                    const transResp = await fetch('/transcription_models');
-                    const transData = await transResp.json();
+                    // 1. Get the Dropdown Element FIRST
+                    const whisperSelect = document.getElementById('whisper-model-select');
+                    const llmSelect = document.getElementById('llm-model-select');
                     
-                    if (transData.whisper_models) {
-                        whisperModelSelect.innerHTML = '';
+                    console.log(">>> [DEBUG] Elements found:", {
+                        whisper: !!whisperSelect,
+                        llm: !!llmSelect
+                    });
+
+                    if (!whisperSelect) {
+                        console.error(">>> [DEBUG] ERROR: whisper-model-select NOT FOUND!");
+                        return;
+                    }
+
+                    // 2. Fetch Data
+                    const baseUrl = window.location.origin;
+                    console.log(`>>> [DEBUG] Fetching from: ${baseUrl}/transcription_models`);
+                    
+                    const transResp = await fetch(baseUrl + '/transcription_models');
+                    console.log(`>>> [DEBUG] Response Status: ${transResp.status}`);
+                    
+                    if (!transResp.ok) {
+                        throw new Error(`HTTP error! status: ${transResp.status}`);
+                    }
+                    
+                    const transData = await transResp.json();
+                    console.log(">>> [DEBUG] Received Data:", transData);
+                    
+                    // 3. Populate Dropdown
+                    if (transData.whisper_models && Array.isArray(transData.whisper_models)) {
+                        whisperSelect.innerHTML = ''; // Clear
+                        console.log(`>>> [DEBUG] Populating ${transData.whisper_models.length} options...`);
+                        
                         transData.whisper_models.forEach(([value, label]) => {
                             const option = document.createElement('option');
                             option.value = value;
@@ -704,32 +733,39 @@
                             if (value === transData.default_whisper_model) {
                                 option.selected = true;
                             }
-                            whisperModelSelect.appendChild(option);
+                            whisperSelect.appendChild(option);
                         });
+                        console.log(`>>> [DEBUG] Done! Options count: ${whisperSelect.options.length}`);
+                    } else {
+                        console.error(">>> [DEBUG] Invalid data format:", transData);
                     }
 
-                    // 2. Load LLM Models
-                    const llmResp = await fetch('/models');
-                    const llmData = await llmResp.json();
-                    
-                    if (llmData.llm_models) {
-                        llmModelSelect.innerHTML = '';
-                        Object.entries(llmData.llm_models).forEach(([key, label]) => {
-                            const option = document.createElement('option');
-                            option.value = key;
-                            option.textContent = label;
-                            if (key === 'medgemma') option.selected = true;
-                            llmModelSelect.appendChild(option);
-                        });
+                    // 4. LLM Models (Same logic)
+                    if (llmSelect) {
+                        const llmResp = await fetch(baseUrl + '/models');
+                        if (llmResp.ok) {
+                            const llmData = await llmResp.json();
+                            if (llmData.llm_models) {
+                                llmSelect.innerHTML = '';
+                                Object.entries(llmData.llm_models).forEach(([key, label]) => {
+                                    const option = document.createElement('option');
+                                    option.value = key;
+                                    option.textContent = label;
+                                    if (key === 'medgemma') option.selected = true;
+                                    llmSelect.appendChild(option);
+                                });
+                            }
+                        }
                     }
+
                 } catch (error) {
-                    console.error("Failed to load models:", error);
-                    updateStatus("Failed to load model configurations.", true);
+                    console.error(">>> [DEBUG] CRASH in loadModels:", error);
                 }
             }
 
+            // Ensure this is called
+            console.log(">>> [DEBUG] Calling loadModels()...");
             loadModels();
-            
             // --- Recording ---
             async function toggleRecording() {
                 if (isRecording) {
