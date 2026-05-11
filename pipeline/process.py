@@ -1258,9 +1258,7 @@ class AnonymizationEngine:
                 tokens = self.tokenizer.convert_ids_to_tokens(chunk_ids[0])
                 id2label = self.config["id2label"]
                 labels = [id2label[str(pid)] for pid in pred_ids]
-                
-                print ("T", tokens)
-                print ("L:", labels)
+
                 # Reconstruct text
                 label_map = self._get_labels()
                 result_tokens = []
