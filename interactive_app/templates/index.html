@@ -232,7 +232,7 @@
             display: flex;
             gap: 15px;
             align-items: center;
-            justify-content: center; /* Center items */
+            justify-content: center;
             flex-wrap: wrap;
         }
 
@@ -331,7 +331,7 @@
         }
 
         #anonymization-level-radios label {
-            margin-right: 15px; /* Add space between level options */
+            margin-right: 15px;
         }
 
         .level-selector label {
@@ -365,7 +365,7 @@
             background: #e6f3ff;
             border: 2px solid #b3d9ff;
             color: #003366;
-            display: none; /* Hidden by default */
+            display: none;
             transition: all 0.3s ease;
             box-shadow: 0 4px 8px rgba(0, 51, 102, 0.1);
         }
@@ -390,7 +390,7 @@
             height: 40px;
             animation: spin 1s linear infinite;
             margin: 20px auto;
-            display: none; /* Initially hidden */
+            display: none;
         }
 
         @keyframes spin {
@@ -427,7 +427,6 @@
             to { opacity: 1; transform: translateY(0); }
         }
         
-        /* New styles for download section */
         .download-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -444,23 +443,17 @@
 <body>
     <div class="container">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; width: 100%;">
-
-        <!-- DFKI -->
             <img src="{{ url_for('static', filename='dfki_Logo_sz.svg') }}" 
                  alt="DFKI Logo" 
                  style="max-height: 100px; width: auto; object-fit: contain;">
-
-        <!-- BIH Logo -->
-           <img src="{{ url_for('static', filename='Online_251121A_BIH_Logo_RGB_BIH_Logo_StandardClaim_ENG_BlauKorall.svg') }}" 
+            <img src="{{ url_for('static', filename='Online_251121A_BIH_Logo_RGB_BIH_Logo_StandardClaim_ENG_BlauKorall.svg') }}" 
                  alt="BIH Logo" 
                  style="max-height: 100px; width: auto; object-fit: contain;">
-        <!-- TUB -->
             <img src="{{ url_for('static', filename='tu-berlin-logo-long-red.svg') }}" 
                  alt="TUB Logo" 
                  style="max-height: 100px; width: auto; object-fit: contain;">
         </div>
 
-        <!-- VERANDA logo (Centered Below) -->
         <div style="text-align: center; margin-bottom: 30px;">
             <img src="{{ url_for('static', filename='VERANDA_LOGO.svg') }}" 
                  alt="Additional Logo" 
@@ -472,7 +465,7 @@
         <div class="loader" id="loader"></div>
         <div id="status" class="status"></div>
 
-            <div class="section">
+        <div class="section">
             <h3>Transcription Settings</h3>
             <div class="language-selector">
                 <label for="transcription-language">Transcription Language:</label>
@@ -490,7 +483,7 @@
                     <option value="ES">Spanish (ES)</option>
                     <option value="TR">Turkish (TR)</option>
                 </select>
-                </div>
+            </div>
             <div class="level-selector" style="margin-top: 15px;">
                 <label for="whisper-model-select">Whisper Model:</label>
                 <select id="whisper-model-select">
@@ -499,7 +492,7 @@
             </div>
         </div>
 
-            <div class="section">
+        <div class="section">
             <h3>Input Audio</h3>
             <div class="controls">
                 <button id="record-btn" class="button">
@@ -522,7 +515,6 @@
             </div>
         </div>
 
-        <!-- NEW BULK UPLOAD SECTION -->
         <div class="section">
             <h3>Bulk Upload (Audio/Text Files)</h3>
             <p style="color: #0066cc; margin-bottom: 15px; font-size: 0.95em;">
@@ -544,7 +536,6 @@
 
         <div class="section">
             <h3>Transcribed Text</h3>
-            <!-- REMOVED readonly attribute to allow editing -->
             <textarea id="transcribed-text" class="text-area" placeholder="Transcription will appear here..."></textarea>
             
             <div class="button-wrapper" style="display: flex; gap: 10px; justify-content: center; margin-top: 15px;">
@@ -565,6 +556,7 @@
                 <audio id="audio-player" controls class="hidden"></audio>
             </div>
         </div>
+        
         <div class="section">
             <h3>Remove Indirect Identifiers (LLM)</h3>
             <p style="color: #0066cc; margin-bottom: 15px; font-size: 0.95em;">
@@ -599,7 +591,6 @@
             <div id="llm-status" class="status" style="margin-top: 15px;"></div>
         </div>
 
-        <!-- NEW DOWNLOAD SECTION -->
         <div class="section">
             <h3>Download Results</h3>
             <p style="color: #0066cc; margin-bottom: 15px; font-size: 0.95em;">
@@ -654,7 +645,6 @@
             const llmOutputSection = document.getElementById('llm-output-section');
             const llmRewrittenText = document.getElementById('llm-rewritten-text');
 
-            // NEW Elements
             const saveEditBtn = document.getElementById('save-edit-btn');
             const bulkFileInput = document.getElementById('bulk-file-input');
             const bulkUploadLabel = document.getElementById('bulk-upload-label');
@@ -706,7 +696,7 @@
                     const transData = await transResp.json();
                     
                     if (transData.whisper_models) {
-                        whisperModelSelect.innerHTML = ''; // Clear existing
+                        whisperModelSelect.innerHTML = '';
                         transData.whisper_models.forEach(([value, label]) => {
                             const option = document.createElement('option');
                             option.value = value;
@@ -728,7 +718,7 @@
                             const option = document.createElement('option');
                             option.value = key;
                             option.textContent = label;
-                            if (key === 'medgemma') option.selected = true; // Default
+                            if (key === 'medgemma') option.selected = true;
                             llmModelSelect.appendChild(option);
                         });
                     }
@@ -738,7 +728,6 @@
                 }
             }
 
-            // Call this immediately
             loadModels();
             
             // --- Recording ---
@@ -755,17 +744,17 @@
                     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                     mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
                 
-                mediaRecorder.ondataavailable = event => {
-                    if (event.data.size > 0) {
+                    mediaRecorder.ondataavailable = event => {
+                        if (event.data.size > 0) {
                             audioChunks.push(event.data);
-                    }
-                };
+                        }
+                    };
                 
-                mediaRecorder.onstop = () => {
+                    mediaRecorder.onstop = () => {
                         audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
                         audioChunks = [];
                         updateUIForTranscription();
-                        stream.getTracks().forEach(track => track.stop()); // Release microphone
+                        stream.getTracks().forEach(track => track.stop());
                     };
 
                     audioBlob = null;
@@ -821,7 +810,7 @@
                     uploadedFile = file;
                     filenameDisplay.textContent = `Selected file: ${file.name}`;
                     updateUIForTranscription();
-            }
+                }
             }
 
             function updateUIForTranscription() {
@@ -843,8 +832,8 @@
             async function transcribe() {
                 if (!audioBlob && !uploadedFile) {
                     updateStatus("No audio to transcribe. Please record or upload an audio file.", true);
-                return;
-            }
+                    return;
+                }
 
                 showLoader(true);
                 transcribeBtn.disabled = true;
@@ -854,13 +843,12 @@
                 transcriptionLanguageSelect.disabled = true;
                 updateStatus("Transcription in progress...", false);
             
-            const formData = new FormData();
+                const formData = new FormData();
                 const fileToTranscribe = audioBlob || uploadedFile;
                 const fileName = audioBlob ? 'recording.webm' : uploadedFile.name;
                 
                 formData.append('audio', fileToTranscribe, fileName);
                 
-                // Add selected model size and language
                 const modelSize = whisperModelSelect.value;
                 formData.append('model_size', modelSize);
                 const language = transcriptionLanguageSelect.value;
@@ -869,84 +857,27 @@
                 try {
                     const endpoint = audioBlob ? '/transcribe_recording' : '/upload';
                     const response = await fetch(endpoint, {
-                    method: 'POST',
-                    body: formData
-                });
+                        method: 'POST',
+                        body: formData
+                    });
                 
-                const result = await response.json();
+                    const result = await response.json();
                 
                     if (response.ok && result.success) {
                         transcribedText.value = result.transcription;
                         anonymizeBtn.disabled = false;
                         downloadOriginalBtn.disabled = false;
                         updateStatus("Transcription successful!", false);
-                } else {
+                    } else {
                         throw new Error(result.error || "An unknown error occurred during transcription.");
-                }
-            } catch (error) {
+                    }
+                } catch (error) {
                     console.error('Transcription error:', error);
                     updateStatus(`Transcription failed: ${error.message}`, true);
-            } finally {
+                } finally {
                     showLoader(false);
-                    transcribeBtn.disabled = true; // Keep disabled until new file is loaded
+                    transcribeBtn.disabled = true;
                     recordBtn.disabled = false;
                     fileInput.disabled = false;
                     whisperModelSelect.disabled = false;
                     transcriptionLanguageSelect.disabled = false;
-                    // Reset blobs/files to prevent re-transcription
-                    audioBlob = null;
-                    uploadedFile = null;
-                }
-            }
-            
-            async function saveEdit() {
-                const text = transcribedText.value;
-                if (!text.trim()) {
-                    updateStatus("Nothing to save.", true);
-                    return;
-                }
-                
-                showLoader(true);
-                try {
-                    const response = await fetch('/save_transcription', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ text: text })
-                    });
-                    
-                    const result = await response.json();
-                    if (response.ok && result.success) {
-                        updateStatus("Transcription saved successfully!", false);
-                    } else {
-                        throw new Error(result.error || "Failed to save.");
-                    }
-                } catch (error) {
-                    updateStatus(`Save failed: ${error.message}`, true);
-                } finally {
-                    showLoader(false);
-                }
-            }
-
-            async function anonymizeText() {
-                const text = transcribedText.value;
-                if (!text.trim()) {
-                    updateStatus("No text to anonymize.", true);
-                    return;
-                }
-                
-                showLoader(true);
-                anonymizeBtn.disabled = true;
-                updateStatus("Anonymization in progress...", false);
-
-                try {
-                    const response = await fetch('/anonymize', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ 
-                            text: text 
-                        })
-                    });
-                    
-                    const result = await response.json();
-                    
-                    if
