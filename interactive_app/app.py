@@ -192,6 +192,10 @@ def generate_speech(text, voice_settings=None, language='de'):
         return None, None
 
     try:
+        text=re.sub("SPEAKER_00:", "Speaker 0:", text)
+        text=re.sub("SPEAKER_01:", "Speaker 1:", text)
+        text=re.sub("SPEAKER_02:", "Speaker 2:", text)
+        text=re.sub("SPEAKER_03:", "Speaker 3:", text)
         tag_regex = re.compile(r'(\[[A-Z_]+\])')
         text_parts = tag_regex.split(text)
         beep_sound = generate_beep()
