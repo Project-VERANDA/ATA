@@ -1264,6 +1264,7 @@ class AnonymizationEngine:
                 result_tokens = []
                 j = 0
                 while j < len(tokens):
+                    #print ("result_tokens:", result_tokens)
                     token = tokens[j]
                     label = labels[j]
                     
@@ -1293,7 +1294,7 @@ class AnonymizationEngine:
                     
                     if is_entity:
                         replacement_tag = label_map.get(entity_type, '[UNKNOWN_PII]')
-                        result_tokens.append(replacement_tag)
+                        result_tokens.append(replacement_tag) #"▁"+
                         
                         # Skip subsequent I- tags
                         if label.startswith('B-'):
@@ -1319,6 +1320,10 @@ class AnonymizationEngine:
                 chunk_result = "".join(result_tokens).replace("  ", " ").strip()
                 chunk_result = re.sub(r'\s+\[', '[', chunk_result)
                 chunk_result = re.sub(r'\]\s+', ']', chunk_result)
+
+                chunk_result = re.sub(r'(?<!\s)(\[[A-Z_]+\])', r' \1', chunk_result)
+                chunk_result = re.sub(r'(\[[A-Z_]+\])(?![\s,.;!?])', r'\1 ', chunk_result)
+                chunk_result = re.sub(r' +', ' ', chunk_result)
                 
                 anonymized_chunks.append(chunk_result)
                 logger.debug(f"Processed chunk {i+1}/{len(chunks)}")
