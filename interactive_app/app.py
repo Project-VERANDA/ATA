@@ -11,30 +11,37 @@ import shutil
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from werkzeug.utils import secure_filename
-from process import ANNONYM_FOLDER, LLM_ANONNYM_FOLDER, TRANSCRIPTS_FOLDER
 from collections import OrderedDict
 
-# --- PATH SETUP ---
+# --- Path Configuration ---
+# Determine the directory containing this script (interactive_app/)
 current_script_dir = Path(__file__).resolve().parent
-main_folder = current_script_dir.parent
 
-# 1. Add 'pipeline' to sys.path
-pipeline_path = main_folder / "pipeline"
+# Determine the project root (ATA/)
+project_root = current_script_dir.parent
+
+# Determine the path to the pipeline folder (ATA/pipeline/)
+pipeline_path = project_root / "pipeline"
+
+# Add the pipeline directory to sys.path to allow importing 'process'
 if str(pipeline_path) not in sys.path:
     sys.path.insert(0, str(pipeline_path))
 
-# 2. Add 'pipeline/model' to sys.path (for anonymizer)
-model_folder_path = pipeline_path / "model"
-if str(model_folder_path) not in sys.path:
-    sys.path.insert(0, str(model_folder_path))
+# Add the project root as well for any other potential imports
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
 
-# 3. Add 'ModelTraining' to sys.path (legacy support)
-model_training_path = main_folder / "ModelTraining"
-if str(model_training_path) not in sys.path:
-    sys.path.insert(0, str(model_training_path))
+# --- Shared Module Imports ---
+# Import shared constants and folders from process.py
+try:
+    from process import ANNONYM_FOLDER, LLM_ANONNYM_FOLDER, TRANSCRIPTS_FOLDER
+except ImportError as e:
+    logging.critical(f"Failed to import shared constants from process.py: {e}")
+    logging.critical(f"Expected path: {pipeline_path}")
+    logging.critical(f"Current sys.path: {sys.path}")
+    sys.exit(1)
 
-# --- IMPORTS ---
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "pipeline"))
+# Import shared functions from process.py
 try:
     from process import (
         transcribe_audio_locally, 
@@ -45,30 +52,35 @@ try:
         CHAT_AI_ENDPOINT,
         anonymize_text_locally
     )
-    logger = logging.getLogger(__name__)
-    logger.info("Successfully imported shared functions from process.py")
 except ImportError as e:
-    logger.critical(f"CRITICAL: Could not import from process.py: {e}")
+    logging.critical(f"Failed to import shared functions from process.py: {e}")
     sys.exit(1)
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# --- Logging Configuration ---
+logging.basicConfig(
+    level=logging.INFO, 
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
+# --- Dependency Checks ---
 try:
     import whisperx
     WHISPERX_AVAILABLE = True
+    logger.info("WhisperX is available.")
 except ImportError:
     WHISPERX_AVAILABLE = False
-    logger.error("WhisperX is not available. Exiting.")
+    logger.error("WhisperX is not installed. The application cannot run without it.")
     sys.exit("Exiting: WhisperX is a required dependency.")
 
 try:
     from gtts import gTTS
     import io
     GTTS_AVAILABLE = True
+    logger.info("Google TTS (gTTS) available.")
 except ImportError:
     GTTS_AVAILABLE = False
+    logger.warning("gTTS not available. Text-to-speech will be disabled.")
 
 try:
     from pydub import AudioSegment
@@ -76,39 +88,28 @@ try:
     PYDUB_AVAILABLE = True
 except ImportError:
     PYDUB_AVAILABLE = False
+    logger.warning("PyDub not available. Audio processing features may be limited.")
 
-# --- CONFIGURATION ---
+# --- Application Configuration ---
 BERT_ANONYMIZER_AVAILABLE = True
 DEFAULT_MODEL = 'bert-base-ner'
 TTS_AVAILABLE = GTTS_AVAILABLE
 
 import torch
 from flask import Flask, render_template, request, jsonify, send_file
-from werkzeug.utils import secure_filename
-import requests
 from dotenv import load_dotenv
 
 load_dotenv()
-
-if WHISPERX_AVAILABLE:
-    logger.info("WhisperX is available - using for transcription with speaker diarization.")
-else:
-    logger.error("WhisperX is not installed. The application cannot run without it.")
-
-if GTTS_AVAILABLE:
-    logger.info("Google TTS (gTTS) available for German text-to-speech.")
-else:
-    logger.warning("gTTS not available. German text-to-speech will be disabled.")
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 app.config['UPLOAD_FOLDER'] = 'uploads'
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
-# --- PRE-LOAD MODELS ---
+# --- Model Pre-loading ---
 try:
     load_models()
-    logger.info("Interactive App: Models pre-loaded from process.py")
+    logger.info("Interactive App: Models pre-loaded successfully.")
 except Exception as e:
     logger.error(f"Interactive App: Failed to pre-load models: {e}")
 
