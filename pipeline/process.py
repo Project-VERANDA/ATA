@@ -1014,10 +1014,10 @@ class AnonymizationEngine:
             'MISC': '[ID]'
         }
 
-    def anonymize(self, text):
+        def anonymize(self, text):
         """
-        Anonymizes text using the local mmbert model with chunking to handle long transcripts.
-        Splits text into overlapping chunks, processes them, and reassembles the result.
+        Anonymizes text using the local mmbert model with chunking.
+        Splits text into overlapping chunks based on token count.
         """
         if not self.method or not self.model or not self.tokenizer:
             return None, False, "Anonymization model not loaded."
@@ -1026,27 +1026,27 @@ class AnonymizationEngine:
 
         # Configuration
         MAX_TOKENS = 512
-        OVERLAP_TOKENS = 50  # Ensures entities spanning chunk boundaries are caught
+        OVERLAP_TOKENS = 50
         
-        # 1. Pre-tokenize to get exact token boundaries
-        # We disable truncation here to analyze the full length
+        # 1. Tokenize the full text WITHOUT truncation to get total token count
+        # We do NOT request offsets_mapping to avoid compatibility errors
         full_encoding = self.tokenizer(
             text, 
             return_tensors="pt", 
             truncation=False, 
-            return_offsets_mapping=True,
-            add_special_tokens=False 
+            add_special_tokens=False
         )
         
         input_ids = full_encoding['input_ids'][0]
-        offsets = full_encoding['offsets_mapping'][0]
         total_tokens = len(input_ids)
         
+        logger.info(f"Total tokens detected: {total_tokens}")
+
         # If text is short enough, process in one go
         if total_tokens <= MAX_TOKENS:
             chunks = [(0, total_tokens)]
         else:
-            # Create overlapping chunks
+            # Create overlapping chunks based on token indices
             chunks = []
             start = 0
             while start < total_tokens:
@@ -1055,22 +1055,20 @@ class AnonymizationEngine:
                 
                 # If not the last chunk, create overlap
                 if end < total_tokens:
-                    # Move end back to create overlap, but ensure chunk is still substantial
+                    # Move end back to create overlap
                     overlap_start = end - OVERLAP_TOKENS
                     if overlap_start <= start:
-                        # Prevent infinite loop if overlap is larger than chunk size
                         overlap_start = start + 1
-                    
                     end = overlap_start
                 
                 chunks.append((start, end))
-                start = end # Next chunk starts where this one ended (minus overlap logic handled by slicing)
+                start = end
                 
-                # Break if we are at the end
-                if end >= total_tokens:
+                # Safety break
+                if start >= total_tokens:
                     break
 
-        logger.info(f"Split text into {len(chunks)} chunks (Total tokens: {total_tokens}).")
+        logger.info(f"Split text into {len(chunks)} chunks.")
 
         # 2. Process each chunk
         anonymized_chunks = []
@@ -1109,7 +1107,7 @@ class AnonymizationEngine:
                     token = tokens[j]
                     label = labels[j]
                     
-                    # Skip special tokens if any slipped in
+                    # Skip special tokens
                     if token in ['[CLS]', '[SEP]', '[PAD]', '<pad>', '<cls>', '<sep>']:
                         j += 1
                         continue
@@ -1120,20 +1118,18 @@ class AnonymizationEngine:
                         replacement_tag = label_map.get(entity_type, '[UNKNOWN_PII]')
                         result_tokens.append(replacement_tag)
                         
-                        # Skip subsequent I- tags for this entity
+                        # Skip subsequent I- tags
                         k = j + 1
                         while k < len(labels) and labels[k].startswith('I-') and labels[k].split('-')[1] == entity_type:
                             k += 1
                         j = k
                     else:
-                        # Clean token formatting
                         clean_token = token.replace('##', '').replace('▁', ' ')
                         result_tokens.append(clean_token)
                         j += 1
                 
                 # Join and clean spacing
                 chunk_text = "".join(result_tokens).replace("  ", " ").strip()
-                # Clean up spacing around brackets
                 chunk_text = re.sub(r'\s+\[', '[', chunk_text)
                 chunk_text = re.sub(r'\]\s+', ']', chunk_text)
                 
@@ -1142,7 +1138,7 @@ class AnonymizationEngine:
 
             except Exception as e:
                 logger.error(f"Chunk {i+1} failed: {e}")
-                # Fallback: Return the original text segment for this chunk to prevent data loss
+                # Fallback: Return original text for this chunk
                 fallback_tokens = [t.replace('##', '').replace('▁', ' ') for t in tokens if t not in ['[CLS]', '[SEP]', '[PAD]']]
                 anonymized_chunks.append("".join(fallback_tokens).strip())
 
@@ -1156,8 +1152,7 @@ class AnonymizationEngine:
             current_chunk = anonymized_chunks[i]
             previous_result = final_result
             
-            # Smart Stitching: Find the longest overlap between the end of the previous result
-            # and the start of the current chunk.
+            # Smart Stitching: Find overlap
             max_overlap_search = min(len(previous_result), len(current_chunk), 200)
             overlap_len = 0
             
@@ -1167,10 +1162,8 @@ class AnonymizationEngine:
                     break
             
             if overlap_len > 0:
-                # Append only the non-overlapping part
                 final_result += current_chunk[overlap_len:]
             else:
-                # If no overlap found, just append with a space
                 final_result += " " + current_chunk
 
         logger.info(f"Anonymization complete. Final length: {len(final_result)}")
