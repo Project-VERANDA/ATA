@@ -1325,15 +1325,16 @@ def call_llm_rewriter(text, model_id, system_prompt=None):
 
 # --- Step 3: Anonymize Existing Transcripts (Active) ---
 
-def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None):
+def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert=False):
     """
     Reads raw transcripts, anonymizes them with BERT, and optionally rewrites with LLM.
     
     Args:
         llm_rewrite_enabled: If True, run LLM on anonymized text.
         llm_model_id: Specific LLM model to use.
+        skip_bert: If True, skip BERT anonymization and process existing files in ANNONYM_FOLDER.
     """
-    if not TRANSCRIPTS_FOLDER.exists():
+    if not TRANSCRIPTS_FOLDER.exists() and not skip_bert:
         logger.warning(f"No 'transcripts' folder found at {TRANSCRIPTS_FOLDER}. Skipping anonymization.")
         return
 
@@ -1348,78 +1349,99 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None):
         logger.warning("LLM rewrite requested but no API key found. Disabling LLM step.")
         use_llm = False
 
-    # Initialize Anonymization Engine (BERT)
-    anonymizer = AnonymizationEngine(
-        method=ANONYMIZATION_METHOD,
-        level=ANONYMIZATION_LEVEL,
-        model_path=MODEL_FOLDER / "mmbert_multilingual_pii_ner"
-    )
+    # Initialize Anonymization Engine (BERT) only if not skipping
+    anonymizer = None
+    if not skip_bert:
+        anonymizer = AnonymizationEngine(
+            method=ANONYMIZATION_METHOD,
+            level=ANONYMIZATION_LEVEL,
+            model_path=MODEL_FOLDER / "mmbert_multilingual_pii_ner"
+        )
 
-    if not anonymizer.method:
-        logger.error("Anonymization engine (BERT) failed to initialize. Aborting.")
-        return
+        if not anonymizer.method:
+            logger.error("Anonymization engine (BERT) failed to initialize. Aborting.")
+            return
 
     processed_count = 0
     failed_count = 0
     llm_processed_count = 0
 
-    for file in TRANSCRIPTS_FOLDER.iterdir():
-        # Skip directories
-        if not file.is_file():
-            continue
-        
-        # Skip non-text files
-        if not file.suffix.lower() == ".txt":
-            continue
-        
-        # Validate that the file path is strictly within TRANSCRIPTS_FOLDER
-        if not validate_path(file, TRANSCRIPTS_FOLDER):
+    # Determine source folder based on skip_bert flag
+    source_folder = TRANSCRIPTS_FOLDER if not skip_bert else ANNONYM_FOLDER
+    source_suffix = ".txt"
+    
+    if skip_bert:
+        logger.info("Skipping BERT anonymization. Processing existing files in 'annonym' folder for LLM rewrite.")
+        # Filter for files that haven't been processed by LLM yet (no _llm suffix)
+        files = [f for f in source_folder.iterdir() 
+                 if f.is_file() and f.suffix.lower() == source_suffix and "_llm" not in f.name]
+    else:
+        logger.info("Processing raw transcripts for BERT anonymization.")
+        files = [f for f in source_folder.iterdir() 
+                 if f.is_file() and f.suffix.lower() == source_suffix and "_anon" not in f.name]
+
+    if not files:
+        logger.info(f"No files found to process in {source_folder}.")
+        return
+
+    logger.info(f"Found {len(files)} files to process.")
+
+    for file in files:
+        # Validate that the file path is strictly within source_folder
+        if not validate_path(file, source_folder):
             logger.error(f"Security Alert: Attempted path traversal detected for {file.name}. Skipping.")
             continue
         
-        # Skip already anonymized files
-        if "_anon" in file.name:
-            logger.debug(f"Skipping already anonymized file: {file.name}")
-            continue
-
         base_name = file.stem
-        logger.info(f"Processing transcript: {file.name}")
+        # Adjust base_name if coming from anonym folder (remove _anon suffix for consistent naming)
+        if skip_bert and base_name.endswith("_anon"):
+            base_name = base_name[:-5] # Remove "_anon"
+            
+        logger.info(f"Processing file: {file.name}")
 
         try:
             with open(file, "r", encoding="utf-8") as f:
-                transcript_text = f.read()
+                text_content = f.read()
 
-            if not transcript_text.strip():
-                logger.warning(f"Transcript {file.name} is empty. Skipping.")
+            if not text_content.strip():
+                logger.warning(f"File {file.name} is empty. Skipping.")
                 continue
 
-            # Step 1: BERT Anonymization
-            anonymized_text, success, msg = anonymizer.anonymize(transcript_text)
-            
-            if not success or not anonymized_text:
-                logger.warning(f"BERT Anonymization failed for {base_name}: {msg}")
-                failed_count += 1
-                continue
+            # Step 1: BERT Anonymization (only if not skipping)
+            if not skip_bert:
+                anonymized_text, success, msg = anonymizer.anonymize(text_content)
+                
+                if not success or not anonymized_text:
+                    logger.warning(f"BERT Anonymization failed for {base_name}: {msg}")
+                    failed_count += 1
+                    continue
 
-            # Save BERT result
-            output_filename = f"{base_name}_anon.txt"
-            output_path = ANNONYM_FOLDER / output_filename
-            
-            # Additional safety: Ensure output path is also within ANNONYM_FOLDER
-            if not validate_path(output_path, ANNONYM_FOLDER):
-                logger.error(f"Security Alert: Output path traversal detected for {output_filename}. Skipping save.")
-                failed_count += 1
-                continue
+                # Save BERT result
+                output_filename = f"{base_name}_anon.txt"
+                output_path = ANNONYM_FOLDER / output_filename
+                
+                # Additional safety: Ensure output path is also within ANNONYM_FOLDER
+                if not validate_path(output_path, ANNONYM_FOLDER):
+                    logger.error(f"Security Alert: Output path traversal detected for {output_filename}. Skipping save.")
+                    failed_count += 1
+                    continue
 
-            with open(output_path, "w", encoding="utf-8") as f:
-                f.write(anonymized_text)
-            logger.info(f"BERT Anonymized transcript saved to: {output_path}")
-            processed_count += 1
+                with open(output_path, "w", encoding="utf-8") as f:
+                    f.write(anonymized_text)
+                logger.info(f"BERT Anonymized transcript saved to: {output_path}")
+                processed_count += 1
+                
+                # Use the newly created anonymized text for LLM step
+                text_for_llm = anonymized_text
+            else:
+                # If skipping BERT, use the content directly from the anonym folder
+                text_for_llm = text_content
+                logger.info(f"Using existing anonymized content from {file.name} for LLM step.")
 
             # Step 2: Optional LLM Rewrite
             if use_llm:
                 logger.info(f"Running LLM rewrite on {base_name} with model {target_llm_model}...")
-                llm_result, status = call_llm_rewriter(anonymized_text, target_llm_model)
+                llm_result, status = call_llm_rewriter(text_for_llm, target_llm_model)
                 
                 if llm_result:
                     llm_filename = f"{base_name}_llm.txt"
@@ -1439,11 +1461,12 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None):
                     logger.warning(f"LLM rewrite failed for {base_name}: {status}")
 
         except Exception as e:
-            logger.error(f"Error processing transcript {file.name}: {e}")
+            logger.error(f"Error processing file {file.name}: {e}")
             failed_count += 1
 
     logger.info(f"Anonymization phase complete.")
-    logger.info(f"  BERT Processed: {processed_count}, Failed: {failed_count}")
+    if not skip_bert:
+        logger.info(f"  BERT Processed: {processed_count}, Failed: {failed_count}")
     if use_llm:
         logger.info(f"  LLM Rewritten: {llm_processed_count}")
 
@@ -1478,8 +1501,6 @@ def anonymize_text_locally(text):
 
 # --- Main Execution ---
 
-# --- Main Execution ---
-
 if __name__ == "__main__":
     
     import argparse
@@ -1493,7 +1514,7 @@ Examples:
   python process.py --disable-transcription  # Skip audio extraction
   python process.py --disable-diarization    # Skip speaker identification
   python process.py --disable-anonymization  # Skip BERT anonymization
-  python process.py --disable-llm            # Skip LLM rewriting
+  python process.py --llm-only               # Skip BERT and process existing anonymized files with LLM
   python process.py --disable-transcription --disable-diarization  # Multiple disables
         """
     )
@@ -1507,6 +1528,10 @@ Examples:
                         help='Disable BERT-based anonymization')
     parser.add_argument('--disable-llm', action='store_true',
                         help='Disable LLM-based indirect identifier removal')
+    
+    # New flag for LLM-only mode
+    parser.add_argument('--llm-only', action='store_true',
+                        help='Skip BERT anonymization and process existing files in "annonym" folder with LLM rewrite only.')
     
     # Language Override
     parser.add_argument('--lang', type=str, default=None, 
@@ -1528,11 +1553,23 @@ Examples:
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
     
-    # Determine which steps to run (enabled by default, disabled if flag is set)
+    # Determine which steps to run
     run_transcription = not args.disable_transcription
     run_diarization = not args.disable_diarization
     run_anonymization = not args.disable_anonymization
     run_llm = not args.disable_llm
+    
+    # Handle --llm-only flag logic
+    # If --llm-only is set, we skip BERT but still run LLM
+    # This overrides --disable-anonymization if both are present (llm-only takes precedence for the specific workflow)
+    skip_bert_for_llm = args.llm_only
+    
+    # If --llm-only is used, we force run_llm to True and ensure we don't run BERT
+    if args.llm_only:
+        run_llm = True
+        # Note: We don't necessarily disable the BERT step globally, but we tell the function to skip it
+        # However, if the user explicitly said --disable-anonymization, that's fine too.
+        # The key is that process_anonymization will receive skip_bert=True
     
     # Log the execution plan
     logger.info("="*60)
@@ -1542,8 +1579,10 @@ Examples:
     logger.info(f"  Transcription & Diarization:       {'✅ ENABLED' if run_transcription else '❌ DISABLED'}")
     if run_transcription:
         logger.info(f"    └─ Speaker Diarization:          {'✅ ENABLED' if run_diarization else '❌ DISABLED'}")
-    logger.info(f"  BERT Anonymization:                {'✅ ENABLED' if run_anonymization else '❌ DISABLED'}")
+    logger.info(f"  BERT Anonymization:                {'✅ ENABLED' if run_anonymization and not skip_bert_for_llm else '❌ DISABLED (or Skipped for LLM-only)'}")
     logger.info(f"  LLM Indirect Identifier Removal:   {'✅ ENABLED' if run_llm else '❌ DISABLED'}")
+    if skip_bert_for_llm:
+        logger.info(f"    └─ Mode: LLM-only (processing existing 'annonym' folder)")
     logger.info("="*60)
     
     # Execute pipeline steps conditionally
@@ -1563,16 +1602,19 @@ Examples:
         logger.info("⏭️  Skipping transcription (--disable-transcription)")
     
     # Step 3: Anonymization (Transcript → Anonymized)
-    if run_anonymization:
+    # If --llm-only is set, we call process_anonymization with skip_bert=True
+    # This will look in ANNONYM_FOLDER instead of TRANSCRIPTS_FOLDER
+    if run_anonymization or args.llm_only:
         process_anonymization(
             llm_rewrite_enabled=run_llm,
-            llm_model_id=args.llm_model
+            llm_model_id=args.llm_model,
+            skip_bert=skip_bert_for_llm
         )
     else:
         logger.info("⏭️  Skipping anonymization (--disable-anonymization)")
         # If anonymization is disabled but LLM is enabled, warn the user
-        if run_llm:
-            logger.warning("⚠️  LLM rewrite requested but BERT anonymization is disabled. "
+        if run_llm and not args.llm_only:
+            logger.warning("⚠️  LLM rewrite requested but BERT anonymization is disabled and --llm-only not set. "
                           "LLM step will be skipped as it depends on anonymized input.")
     
     logger.info("Pipeline finished.")
