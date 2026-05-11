@@ -615,7 +615,7 @@
     </div>
         
 
-    <script>
+        <script>
         document.addEventListener('DOMContentLoaded', () => {
             // --- DOM Elements ---
             const recordBtn = document.getElementById('record-btn');
@@ -693,7 +693,6 @@
                 console.log(">>> [DEBUG] loadModels() called <<<");
                 
                 try {
-                    // 1. Get the Dropdown Element FIRST
                     const whisperSelect = document.getElementById('whisper-model-select');
                     const llmSelect = document.getElementById('llm-model-select');
                     
@@ -707,7 +706,6 @@
                         return;
                     }
 
-                    // 2. Fetch Data
                     const baseUrl = window.location.origin;
                     console.log(`>>> [DEBUG] Fetching from: ${baseUrl}/transcription_models`);
                     
@@ -721,9 +719,8 @@
                     const transData = await transResp.json();
                     console.log(">>> [DEBUG] Received Data:", transData);
                     
-                    // 3. Populate Dropdown
                     if (transData.whisper_models && Array.isArray(transData.whisper_models)) {
-                        whisperSelect.innerHTML = ''; // Clear
+                        whisperSelect.innerHTML = '';
                         console.log(`>>> [DEBUG] Populating ${transData.whisper_models.length} options...`);
                         
                         transData.whisper_models.forEach(([value, label]) => {
@@ -740,7 +737,6 @@
                         console.error(">>> [DEBUG] Invalid data format:", transData);
                     }
 
-                    // 4. LLM Models (Same logic)
                     if (llmSelect) {
                         const llmResp = await fetch(baseUrl + '/models');
                         if (llmResp.ok) {
@@ -763,9 +759,6 @@
                 }
             }
 
-            // Ensure this is called
-            console.log(">>> [DEBUG] Calling loadModels()...");
-            loadModels();
             // --- Recording ---
             async function toggleRecording() {
                 if (isRecording) {
@@ -917,3 +910,204 @@
                     fileInput.disabled = false;
                     whisperModelSelect.disabled = false;
                     transcriptionLanguageSelect.disabled = false;
+                    audioBlob = null;
+                    uploadedFile = null;
+                }
+            }
+
+            async function saveEdit() {
+                const text = transcribedText.value;
+                if (!text.trim()) {
+                    updateStatus("Nothing to save.", true);
+                    return;
+                }
+                
+                showLoader(true);
+                try {
+                    const response = await fetch('/save_transcription', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ text: text })
+                    });
+                    
+                    const result = await response.json();
+                    if (response.ok && result.success) {
+                        updateStatus("Transcription saved successfully!", false);
+                    } else {
+                        throw new Error(result.error || "Failed to save.");
+                    }
+                } catch (error) {
+                    updateStatus(`Save failed: ${error.message}`, true);
+                } finally {
+                    showLoader(false);
+                }
+            }
+
+            async function anonymizeText() {
+                const text = transcribedText.value;
+                if (!text.trim()) {
+                    updateStatus("No text to anonymize.", true);
+                    return;
+                }
+                
+                showLoader(true);
+                anonymizeBtn.disabled = true;
+                updateStatus("Anonymization in progress...", false);
+
+                try {
+                    const response = await fetch('/anonymize', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ text: text })
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (response.ok && result.success) {
+                        anonymizedText.value = result.anonymized_text;
+                        ttsContainer.classList.remove('hidden');
+                        downloadBertBtn.disabled = false;
+                        updateStatus("Anonymization successful!", false);
+                    } else {
+                        throw new Error(result.error || "Anonymization failed.");
+                    }
+                } catch (error) {
+                    console.error('Anonymization error:', error);
+                    updateStatus(`Anonymization failed: ${error.message}`, true);
+                } finally {
+                    showLoader(false);
+                    anonymizeBtn.disabled = false;
+                }
+            }
+
+            async function generateSpeech() {
+                const text = anonymizedText.value;
+                if (!text.trim()) {
+                    updateStatus("No text to generate speech from.", true);
+                    return;
+                }
+                
+                showLoader(true);
+                try {
+                    const response = await fetch('/generate_speech', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ text: text })
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (response.ok && result.success) {
+                        audioPlayer.src = result.audio_url;
+                        audioPlayer.classList.remove('hidden');
+                        downloadSpeechBtn.disabled = false;
+                        updateStatus("Speech generated successfully!", false);
+                    } else {
+                        throw new Error(result.error || "Speech generation failed.");
+                    }
+                } catch (error) {
+                    updateStatus(`Speech generation failed: ${error.message}`, true);
+                } finally {
+                    showLoader(false);
+                }
+            }
+
+            async function llmRewrite() {
+                const text = transcribedText.value;
+                if (!text.trim()) {
+                    updateStatus("No text to rewrite.", true);
+                    return;
+                }
+                
+                showLoader(true);
+                llmRewriteBtn.disabled = true;
+                try {
+                    const response = await fetch('/llm_rewrite', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ 
+                            text: text,
+                            model: llmModelSelect.value,
+                            enabled: llmEnabledCheckbox.checked
+                        })
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (response.ok && result.success) {
+                        llmOutputSection.style.display = 'block';
+                        llmRewrittenText.value = result.rewritten_text;
+                        downloadLlmBtn.disabled = false;
+                        updateStatus("LLM rewrite successful!", false);
+                    } else {
+                        throw new Error(result.error || "LLM rewrite failed.");
+                    }
+                } catch (error) {
+                    updateStatus(`LLM rewrite failed: ${error.message}`, true);
+                } finally {
+                    showLoader(false);
+                    llmRewriteBtn.disabled = false;
+                }
+            }
+
+            async function processBulk() {
+                if (bulkFileInput.files.length === 0) return;
+                
+                showLoader(true);
+                const formData = new FormData();
+                for (let file of bulkFileInput.files) {
+                    formData.append('files', file);
+                }
+                
+                try {
+                    const response = await fetch('/upload_bulk', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (response.ok && result.success) {
+                        bulkStatus.textContent = `Processed ${result.processed_count} files`;
+                        updateStatus("Bulk upload processed!", false);
+                    } else {
+                        throw new Error(result.error || "Bulk upload failed.");
+                    }
+                } catch (error) {
+                    updateStatus(`Bulk upload failed: ${error.message}`, true);
+                } finally {
+                    showLoader(false);
+                }
+            }
+
+            // --- Event Listeners ---
+            recordBtn.addEventListener('click', toggleRecording);
+            fileInput.addEventListener('change', handleFileUpload);
+            transcribeBtn.addEventListener('click', transcribe);
+            saveEditBtn.addEventListener('click', saveEdit);
+            anonymizeBtn.addEventListener('click', anonymizeText);
+            generateSpeechBtn.addEventListener('click', generateSpeech);
+            llmRewriteBtn.addEventListener('click', llmRewrite);
+            processBulkBtn.addEventListener('click', processBulk);
+            
+            bulkFileInput.addEventListener('change', () => {
+                if (bulkFileInput.files.length > 0) {
+                    bulkStatus.textContent = `${bulkFileInput.files.length} file(s) selected`;
+                    processBulkBtn.disabled = false;
+                }
+            });
+
+            downloadOriginalBtn.addEventListener('click', () => window.open('/download_text/original/transcription.txt'));
+            downloadBertBtn.addEventListener('click', () => window.open('/download_text/bert/anonymized.txt'));
+            downloadLlmBtn.addEventListener('click', () => window.open('/download_text/llm/rewritten.txt'));
+            downloadSpeechBtn.addEventListener('click', () => {
+                if (audioPlayer.src) window.open(audioPlayer.src);
+            });
+
+            // Initialize
+            console.log(">>> [DEBUG] Calling loadModels()...");
+            loadModels();
+        });
+    </script>
+</body>
+</html>
