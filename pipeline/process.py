@@ -1017,7 +1017,7 @@ class AnonymizationEngine:
     def anonymize(self, text):
         """
         Anonymizes text using the local mmbert model with chunking.
-        Includes robust error handling for label parsing.
+        Ensures input tensors are 2D (batch_size, seq_len) to prevent shape errors.
         """
         if not self.method or not self.model or not self.tokenizer:
             return None, False, "Anonymization model not loaded."
@@ -1075,16 +1075,31 @@ class AnonymizationEngine:
                     add_special_tokens=False
                 )
                 
-                chunk_ids = encoding['input_ids'][0]
-                total_tokens = len(chunk_ids)
+                # CRITICAL FIX: Ensure we have a 2D tensor (batch_size, seq_len)
+                # encoding['input_ids'] is already 2D [1, seq_len]
+                chunk_ids = encoding['input_ids'] 
+                
+                # Double check shape
+                if chunk_ids.dim() == 1:
+                    chunk_ids = chunk_ids.unsqueeze(0)
+                
+                total_tokens = chunk_ids.shape[1]
                 
                 if total_tokens == 0:
                     continue
 
-                attention_mask = torch.ones_like(chunk_ids)
+                # Create attention mask (must match shape of chunk_ids)
+                attention_mask = encoding['attention_mask'] if 'attention_mask' in encoding else torch.ones_like(chunk_ids)
+                if attention_mask.dim() == 1:
+                    attention_mask = attention_mask.unsqueeze(0)
+                
+                # Move to device
                 chunk_ids = chunk_ids.to(self.device)
                 attention_mask = attention_mask.to(self.device)
                 
+                # Verify shapes before passing to model
+                # logger.debug(f"Input shape: {chunk_ids.shape}, Mask shape: {attention_mask.shape}")
+
                 with torch.no_grad():
                     outputs = self.model(chunk_ids, attention_mask=attention_mask)
                     emissions = outputs["logits"]
@@ -1092,7 +1107,7 @@ class AnonymizationEngine:
                     predictions = self.model.decode(emissions, mask)
                 
                 pred_ids = predictions[0]
-                tokens = self.tokenizer.convert_ids_to_tokens(chunk_ids)
+                tokens = self.tokenizer.convert_ids_to_tokens(chunk_ids[0])
                 id2label = self.config["id2label"]
                 labels = [id2label[str(pid)] for pid in pred_ids]
                 
@@ -1119,7 +1134,6 @@ class AnonymizationEngine:
                             entity_type = parts[1]
                             is_entity = True
                         else:
-                            # Fallback: treat as text
                             clean_token = token.replace('##', '').replace('▁', ' ')
                             result_tokens.append(clean_token)
                             j += 1
@@ -1133,7 +1147,7 @@ class AnonymizationEngine:
                         replacement_tag = label_map.get(entity_type, '[UNKNOWN_PII]')
                         result_tokens.append(replacement_tag)
                         
-                        # Skip subsequent I- tags for this entity
+                        # Skip subsequent I- tags
                         if label.startswith('B-'):
                             k = j + 1
                             while k < len(labels):
@@ -1150,7 +1164,6 @@ class AnonymizationEngine:
                         else:
                             j += 1
                     else:
-                        # Not an entity
                         clean_token = token.replace('##', '').replace('▁', ' ')
                         result_tokens.append(clean_token)
                         j += 1
