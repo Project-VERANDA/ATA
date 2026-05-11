@@ -164,23 +164,24 @@ DEFAULT_CHAT_AI_MODEL = os.getenv('CHAT_AI_MODEL', 'gpt-oss-120b')
 LLM_REWRITE_ENABLED = True
 
 LLM_REWRITE_SYSTEM_PROMPT = (
-    "You are an expert anonymizer that carefully adapts small parts of the text to make it anonymous"
-    "Your task is to rewrite the provided text to remove any **indirect identifiers**."
-    "Indirect identifiers include: specific job titles, unique combinations of demographics, rare locations, specific dates,"
-    "unique medical conditions, or any detail that could allow someone to identify the speaker when combined with other data."
-    "Replace these specific details with generic placeholders like [INDIRECT_ID] or generalize the description. "
-    "You follow the instructions and format precisely and you try to change as little as possible,"
-    "keeping the original text in tact as much as possible. Only generalize"
-    "information and do not invent new information."
-    "Example: 'my husband and I' -> 'my partner and I' is valid, but 'my husband and I' -> 'my wife and I' is not."
-    "Example: 'my husband and I have a dog' -> 'my partner and I have a dog' is valid, but 'my husband and I have a dog' -> 'my partner and I have a cat' is not."
-    "Example: 'my husband and I' -> 'I' is also valid as it only removes information."
-    "Do not change the general meaning or flow of the conversation. "
-    "CRITICAL INSTRUCTIONS:"
-    "- Do NOT anonymize or modify speaker identification tags like SPEAKER_00, SPEAKER_01, etc. These must be preserved exactly as they appear."
-    "- Do NOT translate any text. Keep ALL text in its original language exactly as it appears."
-    "- Preserve the other tags exactly as they are. For example, [AGE], [NAME_OTHER]. These must be preserved exactly as they appear."
-    "- Preserve the original grammar, sentence structure, and language completely."
+    "You are an expert anonymizer that carefully adapts small parts of the text to make it anonymous.\n"
+    "Your task is to rewrite the provided text to remove any **indirect identifiers**.\n"
+    "Indirect identifiers include: specific job titles, unique combinations of demographics, rare locations, specific dates,\n"
+    "unique medical conditions, or any detail that could allow someone to identify the speaker when combined with other data.\n"
+    "Replace these specific details with generic placeholders like [INDIRECT_ID] or generalize the description.\n"
+    "You follow the instructions and format precisely and you try to change as little as possible,\n"
+    "keeping the original text in tact as much as possible. Only generalize information and do not invent new information.\n"
+    "Example: 'my husband and I' -> 'my partner and I' is valid, but 'my husband and I' -> 'my wife and I' is not.\n"
+    "Example: 'my husband and I have a dog' -> 'my partner and I have a dog' is valid, but 'my husband and I have a dog' -> 'my partner and I have a cat' is not.\n"
+    "Example: 'my husband and I' -> 'I' is also valid as it only removes information.\n"
+    "Do not change the general meaning or flow of the conversation.\n"
+    "CRITICAL INSTRUCTIONS:\n"
+    "- Do NOT anonymize or modify speaker identification tags like SPEAKER_00, SPEAKER_01, etc. These must be preserved exactly as they appear.\n"
+    "- Do NOT translate any text. Keep ALL text in its original language exactly as it appears.\n"
+    "- Preserve the other tags exactly as they are. For example, [AGE], [NAME_OTHER]. These must be preserved exactly as they appear.\n"
+    "- Preserve the original grammar, sentence structure, and language completely.\n"
+    "- **CRITICAL: PRESERVE ALL NEWLINES AND LINE BREAKS EXACTLY AS THEY APPEAR IN THE INPUT.**\n"
+    "- Do not merge lines into a single paragraph. If the input has multiple lines, the output MUST have the same number of lines in the same order.\n"
     "IMPORTANT: Return ONLY the anonymized text. Do not include any explanations, reasoning, or additional commentary."
 )
 
@@ -1210,7 +1211,7 @@ class AnonymizationEngine:
 def call_llm_rewriter(text, model_id, system_prompt=None):
     """
     Calls the external LLM API to rewrite text.
-    Handles specific quirks of Qwen-asr and MedGemma.
+    Ensures formatting (newlines) is preserved in the output.
     """
     import re
 
@@ -1267,51 +1268,51 @@ def call_llm_rewriter(text, model_id, system_prompt=None):
         # --- 2. Parse Specific Patterns ---
         if raw_content:
             # Pattern A: Qwen-asr style "language None<asr_text>..." or just "language None..."
-            # If it starts with "language None", strip it and look for the rest
             if raw_content.startswith("language None"):
                 # Try to find text after "language None"
-                # Case 1: <asr_text> tags exist
                 match = re.search(r'language None\s*<asr_text>(.*?)</asr_text>', raw_content, re.DOTALL | re.IGNORECASE)
                 if match:
                     rewritten_text = match.group(1).strip()
                 else:
                     # Case 2: Just raw text after "language None"
-                    # Remove the prefix and take the rest
                     rewritten_text = raw_content[len("language None"):].strip()
             
-            # Pattern B: MedGemma / Thinking blocks (<think> ... </think>)
-            elif "<think>" in raw_content:
-                # Extract content between <think> and </think>
-                match = re.search(r'<think>(.*?)</think>', raw_content, re.DOTALL | re.IGNORECASE)
+            # Pattern B: MedGemma / Thinking blocks ( ... )
+            elif "" in raw_content:
+                # Extract content between  and 
+                match = re.search(r'(.*?)', raw_content, re.DOTALL | re.IGNORECASE)
                 if match:
                     # If there is text AFTER the thinking block, take that. 
-                    # Usually the model puts the answer after the thinking.
                     after_thinking = raw_content[match.end():].strip()
                     if after_thinking:
                         rewritten_text = after_thinking
                     else:
-                        # If no text after, maybe the thinking IS the answer (unlikely for rewrite)
-                        # Or maybe the thinking block contains the answer?
-                        # Let's try to extract the last block of text if available
-                        pass
+                        # Fallback: Remove  tags entirely and keep the rest
+                        rewritten_text = re.sub(r'.*?', '', raw_content, flags=re.DOTALL | re.IGNORECASE).strip()
                 else:
-                    # Fallback: Remove <think> tags entirely and keep the rest
-                    rewritten_text = re.sub(r'<think>.*?</think>', '', raw_content, flags=re.DOTALL | re.IGNORECASE).strip()
+                    # Fallback: Remove  tags entirely and keep the rest
+                    rewritten_text = re.sub(r'.*?', '', raw_content, flags=re.DOTALL | re.IGNORECASE).strip()
 
             # Pattern C: Standard text (gpt-oss-120b)
             else:
                 rewritten_text = raw_content.strip()
 
-        # --- 3. Final Cleanup ---
+        # --- 3. Final Cleanup (Preserve Newlines) ---
         if rewritten_text:
-            # Remove any remaining tags
+            # Remove any remaining HTML/XML tags but PRESERVE newlines
             rewritten_text = re.sub(r'<[^>]+>', '', rewritten_text)
-            # Remove extra whitespace
-            rewritten_text = re.sub(r'\s+', ' ', rewritten_text).strip()
+            
+            # Normalize multiple spaces but KEEP newlines
+            # [^\S\n]+ matches any whitespace EXCEPT newlines
+            rewritten_text = re.sub(r'[^\S\n]+', ' ', rewritten_text)
             
             # Safety check: if it's just "language None" or empty, fail
             if rewritten_text.lower() in ["language none", "none", ""]:
                 raise ValueError("Extracted text is empty or invalid.")
+
+            # Warning if newlines were lost
+            if '\n' not in rewritten_text and '\n' in text:
+                logger.warning("LLM output collapsed into single line despite instructions. Input had newlines.")
 
         if not rewritten_text:
             raise ValueError("Model returned empty content or unrecognized format.")
