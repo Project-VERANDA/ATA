@@ -881,9 +881,9 @@
                 const modelSize = whisperModelSelect.value;
                 formData.append('model_size', modelSize);
                 
-                // --- FIX: Only send language if it is NOT 'auto' ---
                 const selectedLang = transcriptionLanguageSelect.value;
                 if (selectedLang !== 'auto') {
+                    const langCode = selectedLang.toLowerCase(); 
                     formData.append('language', selectedLang);
                 }
                 // If 'auto', we do NOT append 'language', so the backend defaults to None
@@ -919,7 +919,7 @@
                     uploadedFile = null;
                 }
             }
-            
+
             async function saveEdit() {
                 const text = transcribedText.value;
                 if (!text.trim()) {
@@ -1018,14 +1018,18 @@
             }
 
             async function llmRewrite() {
-                const text = transcribedText.value;
+                // CHANGE: Read from anonymized-text instead of transcribed-text
+                const text = anonymizedText.value; 
+                
                 if (!text.trim()) {
-                    updateStatus("No text to rewrite.", true);
+                    updateStatus("No anonymized text to rewrite. Please run Anonymization first.", true);
                     return;
                 }
                 
                 showLoader(true);
                 llmRewriteBtn.disabled = true;
+                updateStatus("LLM Rewriting anonymized text...", false);
+
                 try {
                     const response = await fetch('/llm_rewrite', {
                         method: 'POST',
@@ -1040,6 +1044,7 @@
                     const result = await response.json();
                     
                     if (response.ok && result.success) {
+                        // Display result in the LLM output box
                         llmOutputSection.style.display = 'block';
                         llmRewrittenText.value = result.rewritten_text;
                         downloadLlmBtn.disabled = false;
@@ -1092,6 +1097,15 @@
             saveEditBtn.addEventListener('click', saveEdit);
             anonymizeBtn.addEventListener('click', anonymizeText);
             generateSpeechBtn.addEventListener('click', generateSpeech);
+            anonymizedText.addEventListener('input', () => {
+                const hasAnonymizedText = anonymizedText.value.trim().length > 0;
+                llmRewriteBtn.disabled = !hasAnonymizedText;
+                
+                // Also enable the LLM download button if text exists
+                if (hasAnonymizedText) {
+                    downloadLlmBtn.disabled = false;
+                }
+            });
             llmRewriteBtn.addEventListener('click', llmRewrite);
             processBulkBtn.addEventListener('click', processBulk);
             
