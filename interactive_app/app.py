@@ -246,6 +246,9 @@ def get_models():
 
 @app.route('/transcription_models')
 def get_transcription_models():
+    # DEBUG: Print to server console
+    print(f"DEBUG: WHISPER_MODELS content: {list(WHISPER_MODELS.items())}")
+    
     return jsonify({
         'whisper_models': list(WHISPER_MODELS.items()),
         'default_whisper_model': 'base'
