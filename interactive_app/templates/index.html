@@ -878,12 +878,16 @@
                 
                 formData.append('audio', fileToTranscribe, fileName);
                 
-                const selectedLang = transcriptionLanguageSelect.value;
-                const languageToSend = selectedLang === 'auto' ? '' : selectedLang;
                 const modelSize = whisperModelSelect.value;
                 formData.append('model_size', modelSize);
-                formData.append('language', languageToSend);
-
+                
+                // --- FIX: Only send language if it is NOT 'auto' ---
+                const selectedLang = transcriptionLanguageSelect.value;
+                if (selectedLang !== 'auto') {
+                    formData.append('language', selectedLang);
+                }
+                // If 'auto', we do NOT append 'language', so the backend defaults to None
+                
                 try {
                     const endpoint = audioBlob ? '/transcribe_recording' : '/upload';
                     const response = await fetch(endpoint, {
@@ -915,7 +919,7 @@
                     uploadedFile = null;
                 }
             }
-
+            
             async function saveEdit() {
                 const text = transcribedText.value;
                 if (!text.trim()) {
