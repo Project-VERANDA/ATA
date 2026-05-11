@@ -9,6 +9,7 @@ import logging
 import re
 import time
 import argparse
+import json
 from datetime import datetime
 from collections import defaultdict
 from pathlib import Path
@@ -1421,16 +1422,149 @@ def call_llm_rewriter(text, model_id, system_prompt=None):
         logger.error(f"LLM Rewriter failed for model {final_model}: {e}")
         return None, str(e)
 
-# --- Step 3: Anonymize Existing Transcripts (Active) ---
+def run_adversarial_anonymization(text, model_id, iterations=3):
+    """
+    Runs a dual-agent adversarial loop:
+    1. Defender (Anonymizer): Removes PII.
+    2. Attacker (Re-identifier): Attempts to find PII or infer attributes.
+    3. Defender iterates based on Attacker's critique.
+    
+    Args:
+        text: The input transcript (already BERT-anonymized or raw).
+        model_id: The LLM model to use for both agents.
+        iterations: Number of red/blue team cycles (default 3).
+        
+    Returns:
+        tuple: (final_text, iteration_log)
+    """
+    if not CHAT_AI_API_KEY:
+        logger.error("Adversarial loop requires CHAT_AI_API_KEY.")
+        return text, []
 
-def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert=False):
+    client = OpenAI(api_key=CHAT_AI_API_KEY, base_url=CHAT_AI_ENDPOINT)
+    final_model = AVAILABLE_LLM_MODELS.get(model_id, model_id)
+
+    # --- Prompts ---
+    DEFENDER_SYSTEM_PROMPT = (
+        "You are a Privacy Defender AI. Your goal is to anonymize the provided text to prevent re-identification.\n"
+        "Rules:\n"
+        "1. Remove or generalize ALL direct identifiers (names, emails, phones, IDs, specific addresses).\n"
+        "2. Remove or generalize INDIRECT identifiers (specific job titles, unique combinations of demographics, rare locations, specific dates, unique medical conditions).\n"
+        "3. Replace removed info with generic placeholders like [NAME], [LOCATION], [DATE], [JOB_TITLE].\n"
+        "4. CRITICAL: Do NOT change the general meaning, tone, or flow of the conversation.\n"
+        "5. CRITICAL: Preserve speaker tags (SPEAKER_00, etc.) and original line breaks exactly.\n"
+        "6. Do NOT translate the text. Keep the original language.\n"
+        "7. If the text is already well-anonymized, make minimal adjustments only where the Attacker pointed out flaws.\n"
+        "Return ONLY the anonymized text."
+    )
+
+    ATTACKER_SYSTEM_PROMPT = (
+        "You are a Privacy Red Team AI. Your goal is to re-identify individuals or infer sensitive attributes from the provided text.\n"
+        "Task:\n"
+        "1. Analyze the text for any remaining Direct Identifiers (names, emails, phones).\n"
+        "2. Analyze for Indirect Identifiers (combinations of age, location, job, specific events that could uniquely identify someone).\n"
+        "3. Attempt to infer attributes not explicitly stated but implied (e.g., 'I live near the Eiffel Tower' -> inferred City: Paris).\n"
+        "4. Output a structured critique:\n"
+        "   - 'Risks Found': List specific phrases or patterns that allow re-identification.\n"
+        "   - 'Inferred Attributes': List any attributes you can guess about the speakers.\n"
+        "   - 'Recommendation': Specific instructions on how to fix these leaks (e.g., 'Generalize the street name to [STREET]').\n"
+        "5. If the text is perfectly anonymous, state 'No risks found.'\n"
+        "Return ONLY the critique in the format described."
+    )
+
+    iteration_log = []
+    current_text = text
+
+    logger.info(f"Starting Adversarial Loop: {iterations} iterations with model {final_model}")
+
+    for i in range(1, iterations + 1):
+        logger.info(f"--- Iteration {i}/{iterations} ---")
+        
+        # --- Step A: Defender (Anonymize) ---
+        # On the first iteration, we anonymize the raw text. 
+        # On subsequent iterations, we anonymize based on the previous critique.
+        defender_messages = [
+            {"role": "system", "content": DEFENDER_SYSTEM_PROMPT},
+            {"role": "user", "content": f"Please anonymize the following text:\n\n{text if i == 1 else current_text}"}
+        ]
+        
+        # If not the first iteration, append the attacker's critique to the user prompt
+        if i > 1:
+            last_critique = iteration_log[-1]["attacker_output"]
+            defender_messages[1]["content"] += f"\n\nCRITICAL FEEDBACK FROM PREVIOUS ROUND:\n{last_critique}\n\nAddress these specific points."
+
+        try:
+            defender_response = client.chat.completions.create(
+                model=final_model,
+                messages=defender_messages,
+                temperature=0.3,
+                max_tokens=16384
+            )
+            anonymized_text = defender_response.choices[0].message.content.strip()
+            
+            # Clean up potential formatting artifacts
+            anonymized_text = re.sub(r'<[^>]+>', '', anonymized_text)
+            anonymized_text = re.sub(r'\s+', ' ', anonymized_text).strip() # Caution: preserve newlines? 
+            # Better preservation:
+            anonymized_text = re.sub(r'[^\S\n]+', ' ', anonymized_text)
+
+            logger.info(f"Defender completed iteration {i}. Length: {len(anonymized_text)}")
+
+        except Exception as e:
+            logger.error(f"Defender failed in iteration {i}: {e}")
+            break
+
+        # --- Step B: Attacker (Critique) ---
+        attacker_messages = [
+            {"role": "system", "content": ATTACKER_SYSTEM_PROMPT},
+            {"role": "user", "content": f"Analyze this text for re-identification risks:\n\n{anonymized_text}"}
+        ]
+
+        try:
+            attacker_response = client.chat.completions.create(
+                model=final_model,
+                messages=attacker_messages,
+                temperature=0.5, # Slightly higher temp for creative attack vectors
+                max_tokens=4096
+            )
+            critique = attacker_response.choices[0].message.content.strip()
+            critique = re.sub(r'<[^>]+>', '', critique)
+
+            logger.info(f"Attacker completed iteration {i}. Risks found: {'Yes' if 'Risk' in critique or 'Found' in critique else 'None'}")
+
+        except Exception as e:
+            logger.error(f"Attacker failed in iteration {i}: {e}")
+            critique = "Error generating critique."
+
+        # --- Log State ---
+        iteration_log.append({
+            "iteration": i,
+            "defender_output": anonymized_text,
+            "attacker_output": critique
+        })
+
+        # Update current text for next round
+        current_text = anonymized_text
+
+        # Early exit if Attacker finds nothing
+        if "No risks found" in critique.lower() and i < iterations:
+            logger.info("Attacker found no risks. Stopping early.")
+            break
+
+    return current_text, iteration_log
+
+# --- Step 3: Anonymize Existing Transcripts ---
+
+def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert=False, adversarial_mode=False):
     """
     Reads raw transcripts, anonymizes them with BERT, and optionally rewrites with LLM.
+    Supports a new 'adversarial_mode' which runs a 3-iteration Red Team vs. Blue Team loop.
     
     Args:
         llm_rewrite_enabled: If True, run LLM on anonymized text.
         llm_model_id: Specific LLM model to use.
         skip_bert: If True, skip BERT anonymization and process existing files in ANNONYM_FOLDER.
+        adversarial_mode: If True, run the 3-iteration Defender/Attacker loop instead of single-pass LLM.
     """
     if not TRANSCRIPTS_FOLDER.exists() and not skip_bert:
         logger.warning(f"No 'transcripts' folder found at {TRANSCRIPTS_FOLDER}. Skipping anonymization.")
@@ -1446,6 +1580,7 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
     if use_llm and not CHAT_AI_API_KEY:
         logger.warning("LLM rewrite requested but no API key found. Disabling LLM step.")
         use_llm = False
+        adversarial_mode = False # Cannot run adversarial without API
 
     # Initialize Anonymization Engine (BERT) only if not skipping
     anonymizer = None
@@ -1471,9 +1606,15 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
     
     if skip_bert:
         logger.info("Skipping BERT anonymization. Processing existing files in 'annonym' folder for LLM rewrite.")
-        # Filter for files that haven't been processed by LLM yet (no _llm suffix)
-        files = [f for f in source_folder.iterdir() 
-                 if f.is_file() and f.suffix.lower() == source_suffix and "_llm" not in f.name]
+        # Filter for files that haven't been processed by LLM yet
+        # Exclude: _llm.txt, _adversarial_*.txt
+        files = []
+        for f in source_folder.iterdir():
+            if f.is_file() and f.suffix.lower() == source_suffix:
+                name = f.name
+                if "_llm" in name or "_adversarial_" in name:
+                    continue
+                files.append(f)
     else:
         logger.info("Processing raw transcripts for BERT anonymization.")
         files = [f for f in source_folder.iterdir() 
@@ -1484,6 +1625,8 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
         return {"success": processed_count, "failed": failed_count, "llm_success": llm_processed_count, "llm_failed": llm_failed_count}
 
     logger.info(f"Found {len(files)} files to process.")
+    if adversarial_mode:
+        logger.info("⚠️  ADVERSARIAL MODE ENABLED: Running 3-iteration Red/Blue team loop.")
 
     for file in files:
         # Validate that the file path is strictly within source_folder
@@ -1537,38 +1680,86 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
                 text_for_llm = text_content
                 logger.info(f"Using existing anonymized content from {file.name} for LLM step.")
 
-            # Step 2: Optional LLM Rewrite
+            # Step 2: Optional LLM Rewrite (Standard or Adversarial)
             if use_llm:
-                logger.info(f"Running LLM rewrite on {base_name} with model {target_llm_model}...")
-                llm_result, status = call_llm_rewriter(text_for_llm, target_llm_model)
-                
-                if llm_result:
-                    llm_filename = f"{base_name}_llm.txt"
-                    llm_path = LLM_ANONNYM_FOLDER / llm_filename
+                if adversarial_mode:
+                    logger.info(f"Running ADVERSARIAL LOOP (3 iterations) on {base_name} with model {target_llm_model}...")
                     
-                    # Additional safety: Ensure LLM output path is within LLM_ANONNYM_FOLDER
-                    if not validate_path(llm_path, LLM_ANONNYM_FOLDER):
-                        logger.error(f"Security Alert: LLM output path traversal detected for {llm_filename}. Skipping.")
-                        llm_failed_count += 1
-                        continue
+                    # Call the new adversarial function
+                    final_text, iteration_log = run_adversarial_anonymization(
+                        text_for_llm, 
+                        target_llm_model, 
+                        iterations=3
+                    )
+                    
+                    if final_text:
+                        # Generate timestamp for unique filenames
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                         
-                    with open(llm_path, "w", encoding="utf-8") as f:
-                        f.write(llm_result)
-                    logger.info(f"LLM Rewritten transcript saved to: {llm_path}")
-                    llm_processed_count += 1
+                        # Save the final anonymized result with timestamp
+                        llm_filename = f"{base_name}_adversarial_{timestamp}.txt"
+                        llm_path = LLM_ANONNYM_FOLDER / llm_filename
+                        
+                        # Additional safety: Ensure LLM output path is within LLM_ANONNYM_FOLDER
+                        if not validate_path(llm_path, LLM_ANONNYM_FOLDER):
+                            logger.error(f"Security Alert: LLM output path traversal detected for {llm_filename}. Skipping.")
+                            llm_failed_count += 1
+                            continue
+                            
+                        with open(llm_path, "w", encoding="utf-8") as f:
+                            f.write(final_text)
+                        
+                        # Save the iteration log for audit purposes with matching timestamp
+                        log_filename = f"{base_name}_adversarial_{timestamp}_log.json"
+                        log_path = LLM_ANONNYM_FOLDER / log_filename
+                        with open(log_path, "w", encoding="utf-8") as f:
+                            json.dump(iteration_log, f, indent=2, ensure_ascii=False)
+                            
+                        logger.info(f"Adversarial anonymization saved to: {llm_path}")
+                        logger.info(f"Audit log saved to: {log_path}")
+                        llm_processed_count += 1
+                    else:
+                        logger.warning(f"Adversarial loop failed for {base_name}")
+                        llm_failed_count += 1
+
                 else:
-                    logger.warning(f"LLM rewrite failed for {base_name}: {status}")
-                    llm_failed_count += 1
+                    # Standard single-pass LLM rewrite
+                    logger.info(f"Running standard LLM rewrite on {base_name} with model {target_llm_model}...")
+                    llm_result, status = call_llm_rewriter(text_for_llm, target_llm_model)
+                    
+                    if llm_result:
+                        # Also add timestamp to standard LLM output to prevent overwrites
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        llm_filename = f"{base_name}_llm_{timestamp}.txt"
+                        llm_path = LLM_ANONNYM_FOLDER / llm_filename
+                        
+                        # Additional safety: Ensure LLM output path is within LLM_ANONNYM_FOLDER
+                        if not validate_path(llm_path, LLM_ANONNYM_FOLDER):
+                            logger.error(f"Security Alert: LLM output path traversal detected for {llm_filename}. Skipping.")
+                            llm_failed_count += 1
+                            continue
+                            
+                        with open(llm_path, "w", encoding="utf-8") as f:
+                            f.write(llm_result)
+                        logger.info(f"LLM Rewritten transcript saved to: {llm_path}")
+                        llm_processed_count += 1
+                    else:
+                        logger.warning(f"LLM rewrite failed for {base_name}: {status}")
+                        llm_failed_count += 1
 
         except Exception as e:
             logger.error(f"Error processing file {file.name}: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             failed_count += 1
 
     logger.info(f"Anonymization phase complete.")
     if not skip_bert:
         logger.info(f"  BERT Processed: {processed_count}, Failed: {failed_count}")
     if use_llm:
-        logger.info(f"  LLM Rewritten: {llm_processed_count}, Failed: {llm_failed_count}")
+        logger.info(f"  LLM Rewritten (Standard): {llm_processed_count if not adversarial_mode else 'N/A'}, Failed: {llm_failed_count if not adversarial_mode else 'N/A'}")
+        if adversarial_mode:
+            logger.info(f"  LLM Adversarial Processed: {llm_processed_count}, Failed: {llm_failed_count}")
 
     # Return stats for the SessionLogger
     return {
@@ -1655,6 +1846,10 @@ Examples:
     parser.add_argument('--verbose', action='store_true',
                         help='Enable debug-level logging')
     
+    # Adversial Anonymizer
+    parser.add_argument('--adversarial', action='store_true',
+                    help='Enable dual-agent adversarial anonymization (3 iterations: Anonymize -> Attack -> Refine)')
+    
     args = parser.parse_args()
     
     # Configure logging verbosity
@@ -1666,6 +1861,8 @@ Examples:
     run_diarization = not args.disable_diarization
     run_anonymization = not args.disable_anonymization
     run_llm = not args.disable_llm
+    is_adversarial = args.adversarial
+
     
     # Handle --llm-only flag logic
     # If --llm-only is set, we skip BERT but still run LLM
@@ -1716,7 +1913,8 @@ Examples:
         process_anonymization(
             llm_rewrite_enabled=run_llm,
             llm_model_id=args.llm_model,
-            skip_bert=skip_bert_for_llm
+            skip_bert=skip_bert_for_llm,
+            adversarial_mode=is_adversarial  # Pass the new flag
         )
     else:
         logger.info("⏭️  Skipping anonymization (--disable-anonymization)")
