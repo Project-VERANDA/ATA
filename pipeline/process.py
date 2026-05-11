@@ -405,7 +405,13 @@ def process_videos():
     if processed_count == 0:
         logger.info("No new files processed.")
 
-def process_audios():
+def process_audios(enable_diarization=True):
+    """
+    Process audio files with optional diarization control.
+    
+    Args:
+        enable_diarization: If False, skip speaker diarization and use generic labels.
+    """
     # Parse command line args
     args = parse_args()
     force_language = args.lang
@@ -420,7 +426,14 @@ def process_audios():
         logger.info(f"Language forced to: {SUPPORTED_LANGUAGES[force_language]} ({whisper_code})")
     else:
         logger.info("Language set to Auto-Detect.")
-
+    
+    # Log diarization status
+    if not enable_diarization:
+        logger.info("⚠️  Speaker diarization DISABLED. Using generic speaker labels.")
+        diarize_model = None
+    else:
+        logger.info("✅ Speaker diarization ENABLED.")
+    
     # --- 1. LOAD MODELS ONCE ---
     # Load WhisperX Model (Direct Path)
     try:
@@ -440,23 +453,26 @@ def process_audios():
         logger.critical(f"Failed to load WhisperX model: {e}")
         return
 
-    # Load Diarization Pipeline (Direct Path)
-    try:
-        logger.info(f"Loading Diarization Pipeline directly from: {DIARIZATION_MODEL_PATH}...")
-        from pyannote.audio import Pipeline
-        
+    # Load Diarization Pipeline (Only if enabled)
+    if enable_diarization:
         try:
-            diarize_pipeline = Pipeline.from_pretrained(str(DIARIZATION_MODEL_PATH))
-        except TypeError:
-            logger.warning("Standard load failed. Trying fallback with use_auth_token=None...")
-            diarize_pipeline = Pipeline.from_pretrained(str(DIARIZATION_MODEL_PATH), use_auth_token=None)
-        
-        diarize_model = diarize_pipeline
-        logger.info("Diarization Pipeline loaded successfully (Direct Path).")
-        
-    except Exception as e:
-        logger.critical(f"Failed to load Diarization Pipeline: {e}")
-        logger.critical("Diarization will be skipped. Using generic speaker labels.")
+            logger.info(f"Loading Diarization Pipeline directly from: {DIARIZATION_MODEL_PATH}...")
+            from pyannote.audio import Pipeline
+            
+            try:
+                diarize_pipeline = Pipeline.from_pretrained(str(DIARIZATION_MODEL_PATH))
+            except TypeError:
+                logger.warning("Standard load failed. Trying fallback with use_auth_token=None...")
+                diarize_pipeline = Pipeline.from_pretrained(str(DIARIZATION_MODEL_PATH), use_auth_token=None)
+            
+            diarize_model = diarize_pipeline
+            logger.info("Diarization Pipeline loaded successfully (Direct Path).")
+            
+        except Exception as e:
+            logger.critical(f"Failed to load Diarization Pipeline: {e}")
+            logger.critical("Diarization will be skipped. Using generic speaker labels.")
+            diarize_model = None
+    else:
         diarize_model = None
 
     # --- 2. PROCESS FILES ONE BY ONE ---
@@ -486,7 +502,7 @@ def process_audios():
                 "batch_size": BATCH_SIZE,
                 "verbose": False,
                 "print_progress": False,
-                "task": "transcribe" # Force transcription, not translation
+                "task": "transcribe"
             }
             
             if whisper_code:
@@ -508,8 +524,8 @@ def process_audios():
             else:
                 logger.warning(f"No language detected for {file.name}.")
 
-            # --- STEP C: Diarize ---
-            if diarize_model:
+            # --- STEP C: Diarize (Conditional) ---
+            if enable_diarization and diarize_model:
                 try:
                     logger.info(f"  -> Running local diarization...")
                     diarize_output = diarize_model(str(file))
@@ -537,6 +553,7 @@ def process_audios():
                     for i, seg in enumerate(result["segments"]):
                         seg["speaker"] = f"SPEAKER_{i%2:02d}"
             else:
+                logger.info(f"  -> Skipping diarization (disabled or model unavailable).")
                 for i, seg in enumerate(result["segments"]):
                     seg["speaker"] = f"SPEAKER_{i%2:02d}"
 
@@ -1190,24 +1207,28 @@ def call_llm_rewriter(text, model_id, system_prompt=None):
 
 def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None):
     """
-    Reads raw transcripts, anonymizes them PER SPEAKER BLOCK, and optionally rewrites with LLM.
+    Reads raw transcripts, anonymizes them with BERT, and optionally rewrites with LLM.
+    
+    Args:
+        llm_rewrite_enabled: If True, run LLM on anonymized text.
+        llm_model_id: Specific LLM model to use.
     """
     if not TRANSCRIPTS_FOLDER.exists():
         logger.warning(f"No 'transcripts' folder found at {TRANSCRIPTS_FOLDER}. Skipping anonymization.")
         return
 
-    logger.info(f"Found 'transcripts' folder at {TRANSCRIPTS_FOLDER}. Starting per-speaker anonymization...")
+    logger.info(f"Found 'transcripts' folder at {TRANSCRIPTS_FOLDER}. Starting anonymization process...")
 
     # Determine LLM settings
     use_llm = llm_rewrite_enabled if llm_rewrite_enabled is not None else LLM_REWRITE_ENABLED
     target_llm_model = llm_model_id if llm_model_id else DEFAULT_CHAT_AI_MODEL
 
+    # Check if LLM can run (requires API key)
     if use_llm and not CHAT_AI_API_KEY:
         logger.warning("LLM rewrite requested but no API key found. Disabling LLM step.")
         use_llm = False
 
     # Initialize Anonymization Engine (BERT)
-    # Note: We initialize ONCE outside the loop to save GPU memory
     anonymizer = AnonymizationEngine(
         method=ANONYMIZATION_METHOD,
         level=ANONYMIZATION_LEVEL,
@@ -1223,13 +1244,20 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None):
     llm_processed_count = 0
 
     for file in TRANSCRIPTS_FOLDER.iterdir():
-        if not file.is_file() or file.suffix.lower() != ".txt":
+        # Skip directories
+        if not file.is_file():
             continue
         
+        # Skip non-text files
+        if not file.suffix.lower() == ".txt":
+            continue
+        
+        # Validate that the file path is strictly within TRANSCRIPTS_FOLDER
         if not validate_path(file, TRANSCRIPTS_FOLDER):
-            logger.error(f"Security Alert: Skipping {file.name} (path traversal).")
+            logger.error(f"Security Alert: Attempted path traversal detected for {file.name}. Skipping.")
             continue
         
+        # Skip already anonymized files
         if "_anon" in file.name:
             logger.debug(f"Skipping already anonymized file: {file.name}")
             continue
@@ -1245,81 +1273,57 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None):
                 logger.warning(f"Transcript {file.name} is empty. Skipping.")
                 continue
 
-            # 1. Parse into Speaker Blocks
-            blocks = parse_transcript_into_blocks(transcript_text)
-            logger.info(f"  Found {len(blocks)} speaker blocks.")
-
-            anonymized_blocks = []
-            block_failed = False
-
-            for speaker, text in blocks:
-                if not text.strip():
-                    anonymized_blocks.append(f"{speaker}: ")
-                    continue
-
-                # 2. Anonymize THIS SPECIFIC BLOCK
-                # The chunking logic inside anonymize() now handles long monologues per speaker
-                anon_text, success, msg = anonymizer.anonymize(text)
-                
-                if not success or not anon_text:
-                    logger.warning(f"  BERT failed for {speaker} in {file.name}: {msg}")
-                    block_failed = True
-                    # Fallback: Keep original text for this block to avoid data loss
-                    anon_text = text 
-
-                anonymized_blocks.append(f"{speaker}: {anon_text}")
-
-            if block_failed:
-                failed_count += 1
-
-            # 3. Reassemble and Save
-            final_anonymized_text = "\n".join(anonymized_blocks)
+            # Step 1: BERT Anonymization
+            anonymized_text, success, msg = anonymizer.anonymize(transcript_text)
             
+            if not success or not anonymized_text:
+                logger.warning(f"BERT Anonymization failed for {base_name}: {msg}")
+                failed_count += 1
+                continue
+
+            # Save BERT result
             output_filename = f"{base_name}_anon.txt"
             output_path = ANNONYM_FOLDER / output_filename
             
+            # Additional safety: Ensure output path is also within ANNONYM_FOLDER
             if not validate_path(output_path, ANNONYM_FOLDER):
-                logger.error(f"Security Alert: Output path traversal detected. Skipping save.")
+                logger.error(f"Security Alert: Output path traversal detected for {output_filename}. Skipping save.")
                 failed_count += 1
                 continue
 
             with open(output_path, "w", encoding="utf-8") as f:
-                f.write(final_anonymized_text)
-            
-            logger.info(f"✅ Saved anonymized transcript: {output_path}")
+                f.write(anonymized_text)
+            logger.info(f"BERT Anonymized transcript saved to: {output_path}")
             processed_count += 1
 
-            # 4. Optional LLM Rewrite (Run on the FULL reassembled text or per block?)
-            # Recommendation: Run LLM on the FULL text to catch cross-speaker context if needed,
-            # OR run per block if you want strict isolation. 
-            # Given your previous setup, let's run on the FULL reassembled text for consistency.
+            # Step 2: Optional LLM Rewrite
             if use_llm:
-                logger.info(f"  Running LLM rewrite on full text...")
-                llm_result, status = call_llm_rewriter(final_anonymized_text, target_llm_model)
+                logger.info(f"Running LLM rewrite on {base_name} with model {target_llm_model}...")
+                llm_result, status = call_llm_rewriter(anonymized_text, target_llm_model)
                 
                 if llm_result:
                     llm_filename = f"{base_name}_llm.txt"
                     llm_path = LLM_ANONNYM_FOLDER / llm_filename
                     
+                    # Additional safety: Ensure LLM output path is within LLM_ANONNYM_FOLDER
                     if not validate_path(llm_path, LLM_ANONNYM_FOLDER):
-                        logger.error(f"Security Alert: LLM output path traversal. Skipping.")
+                        logger.error(f"Security Alert: LLM output path traversal detected for {llm_filename}. Skipping.")
+                        failed_count += 1
                         continue
                         
                     with open(llm_path, "w", encoding="utf-8") as f:
                         f.write(llm_result)
-                    logger.info(f"✅ Saved LLM rewritten transcript: {llm_path}")
+                    logger.info(f"LLM Rewritten transcript saved to: {llm_path}")
                     llm_processed_count += 1
                 else:
                     logger.warning(f"LLM rewrite failed for {base_name}: {status}")
 
         except Exception as e:
             logger.error(f"Error processing transcript {file.name}: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
             failed_count += 1
 
     logger.info(f"Anonymization phase complete.")
-    logger.info(f"  Files Processed: {processed_count}, Failed: {failed_count}")
+    logger.info(f"  BERT Processed: {processed_count}, Failed: {failed_count}")
     if use_llm:
         logger.info(f"  LLM Rewritten: {llm_processed_count}")
 
@@ -1354,22 +1358,101 @@ def anonymize_text_locally(text):
 
 # --- Main Execution ---
 
+# --- Main Execution ---
+
 if __name__ == "__main__":
     
     import argparse
     
-    parser = argparse.ArgumentParser(description="Run the Anonymization Pipeline")
-    parser.add_argument('--enable-llm', action='store_true', help='Enable LLM indirect identifier removal')
-    parser.add_argument('--llm-model', type=str, default=None, help='Specific LLM model key (e.g., medgemma) to use')
+    parser = argparse.ArgumentParser(
+        description="Audio Anonymization Pipeline with Granular Step Control",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python process.py                          # Run all steps (default)
+  python process.py --disable-transcription  # Skip audio extraction
+  python process.py --disable-diarization    # Skip speaker identification
+  python process.py --disable-anonymization  # Skip BERT anonymization
+  python process.py --disable-llm            # Skip LLM rewriting
+  python process.py --disable-transcription --disable-diarization  # Multiple disables
+        """
+    )
+    
+    # Step Control Arguments (enabled by default)
+    parser.add_argument('--disable-transcription', action='store_true',
+                        help='Disable audio extraction from videos (skip process_videos)')
+    parser.add_argument('--disable-diarization', action='store_true',
+                        help='Disable speaker diarization during transcription')
+    parser.add_argument('--disable-anonymization', action='store_true',
+                        help='Disable BERT-based anonymization')
+    parser.add_argument('--disable-llm', action='store_true',
+                        help='Disable LLM-based indirect identifier removal')
+    
+    # Language Override
+    parser.add_argument('--lang', type=str, default=None, 
+                        choices=list(SUPPORTED_LANGUAGES.keys()),
+                        help=f"Force language (e.g., DE, EN, SP, ES). Default: Auto-detect.")
+    
+    # LLM Model Selection
+    parser.add_argument('--llm-model', type=str, default=None, 
+                        choices=list(AVAILABLE_LLM_MODELS.keys()),
+                        help=f"Specific LLM model to use for rewriting.")
+    
+    # Verbosity
+    parser.add_argument('--verbose', action='store_true',
+                        help='Enable debug-level logging')
+    
     args = parser.parse_args()
     
+    # Configure logging verbosity
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+    
+    # Determine which steps to run (enabled by default, disabled if flag is set)
+    run_transcription = not args.disable_transcription
+    run_diarization = not args.disable_diarization
+    run_anonymization = not args.disable_anonymization
+    run_llm = not args.disable_llm
+    
+    # Log the execution plan
+    logger.info("="*60)
+    logger.info("PIPELINE EXECUTION PLAN")
+    logger.info("="*60)
+    logger.info(f"  Audio Extraction (Videos→WAV):     {'✅ ENABLED' if run_transcription else '❌ DISABLED'}")
+    logger.info(f"  Transcription & Diarization:       {'✅ ENABLED' if run_transcription else '❌ DISABLED'}")
+    if run_transcription:
+        logger.info(f"    └─ Speaker Diarization:          {'✅ ENABLED' if run_diarization else '❌ DISABLED'}")
+    logger.info(f"  BERT Anonymization:                {'✅ ENABLED' if run_anonymization else '❌ DISABLED'}")
+    logger.info(f"  LLM Indirect Identifier Removal:   {'✅ ENABLED' if run_llm else '❌ DISABLED'}")
+    logger.info("="*60)
+    
+    # Execute pipeline steps conditionally
     logger.info("Starting Audio Anonymizer full pipeline...")
     
-    process_videos()
-    process_audios()
-    process_anonymization(
-        llm_rewrite_enabled=args.enable_llm,
-        llm_model_id=args.llm_model
-    )
+    # Step 1: Audio Extraction (Videos → WAV)
+    if run_transcription:
+        process_videos()
+    else:
+        logger.info("⏭️  Skipping audio extraction (--disable-transcription)")
+    
+    # Step 2: Transcription & Diarization (WAV → Transcript)
+    if run_transcription:
+        # Pass diarization flag to process_audios
+        process_audios(enable_diarization=run_diarization)
+    else:
+        logger.info("⏭️  Skipping transcription (--disable-transcription)")
+    
+    # Step 3: Anonymization (Transcript → Anonymized)
+    if run_anonymization:
+        process_anonymization(
+            llm_rewrite_enabled=run_llm,
+            llm_model_id=args.llm_model
+        )
+    else:
+        logger.info("⏭️  Skipping anonymization (--disable-anonymization)")
+        # If anonymization is disabled but LLM is enabled, warn the user
+        if run_llm:
+            logger.warning("⚠️  LLM rewrite requested but BERT anonymization is disabled. "
+                          "LLM step will be skipped as it depends on anonymized input.")
     
     logger.info("Pipeline finished.")
