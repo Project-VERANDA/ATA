@@ -1211,7 +1211,7 @@ class AnonymizationEngine:
 def call_llm_rewriter(text, model_id, system_prompt=None):
     """
     Calls the external LLM API to rewrite text.
-    Ensures formatting (newlines) is preserved in the output.
+    Uses a high max_tokens limit (16384) to handle long transcripts.
     """
     import re
 
@@ -1237,14 +1237,14 @@ def call_llm_rewriter(text, model_id, system_prompt=None):
             {"role": "user", "content": text}
         ]
 
-        logger.info(f"Calling LLM model: {final_model}")
+        logger.info(f"Calling LLM model: {final_model} with max_tokens=16384")
         
         chat_completion = client.chat.completions.create(
             messages=messages,
             model=final_model,
             stream=False,
             temperature=0.3,
-            max_tokens=4096
+            max_tokens=16384  # Increased from 4096 to handle full transcripts
         )
 
         rewritten_text = None
@@ -1269,28 +1269,22 @@ def call_llm_rewriter(text, model_id, system_prompt=None):
         if raw_content:
             # Pattern A: Qwen-asr style "language None<asr_text>..." or just "language None..."
             if raw_content.startswith("language None"):
-                # Try to find text after "language None"
                 match = re.search(r'language None\s*<asr_text>(.*?)</asr_text>', raw_content, re.DOTALL | re.IGNORECASE)
                 if match:
                     rewritten_text = match.group(1).strip()
                 else:
-                    # Case 2: Just raw text after "language None"
                     rewritten_text = raw_content[len("language None"):].strip()
             
             # Pattern B: MedGemma / Thinking blocks ( ... )
             elif "" in raw_content:
-                # Extract content between  and 
                 match = re.search(r'(.*?)', raw_content, re.DOTALL | re.IGNORECASE)
                 if match:
-                    # If there is text AFTER the thinking block, take that. 
                     after_thinking = raw_content[match.end():].strip()
                     if after_thinking:
                         rewritten_text = after_thinking
                     else:
-                        # Fallback: Remove  tags entirely and keep the rest
                         rewritten_text = re.sub(r'.*?', '', raw_content, flags=re.DOTALL | re.IGNORECASE).strip()
                 else:
-                    # Fallback: Remove  tags entirely and keep the rest
                     rewritten_text = re.sub(r'.*?', '', raw_content, flags=re.DOTALL | re.IGNORECASE).strip()
 
             # Pattern C: Standard text (gpt-oss-120b)
@@ -1303,16 +1297,15 @@ def call_llm_rewriter(text, model_id, system_prompt=None):
             rewritten_text = re.sub(r'<[^>]+>', '', rewritten_text)
             
             # Normalize multiple spaces but KEEP newlines
-            # [^\S\n]+ matches any whitespace EXCEPT newlines
             rewritten_text = re.sub(r'[^\S\n]+', ' ', rewritten_text)
             
-            # Safety check: if it's just "language None" or empty, fail
+            # Safety check
             if rewritten_text.lower() in ["language none", "none", ""]:
                 raise ValueError("Extracted text is empty or invalid.")
 
             # Warning if newlines were lost
             if '\n' not in rewritten_text and '\n' in text:
-                logger.warning("LLM output collapsed into single line despite instructions. Input had newlines.")
+                logger.warning("LLM output collapsed into single line despite instructions.")
 
         if not rewritten_text:
             raise ValueError("Model returned empty content or unrecognized format.")
