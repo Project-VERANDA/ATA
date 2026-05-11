@@ -34,7 +34,7 @@ if str(model_training_path) not in sys.path:
     sys.path.insert(0, str(model_training_path))
 
 # --- IMPORTS ---
-#sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "pipeline"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "pipeline"))
 try:
     from process import (
         transcribe_audio_locally, 
@@ -533,14 +533,7 @@ def save_transcription():
         data = request.get_json()
         if not data or 'text' not in data:
             return jsonify({'error': 'No text provided'}), 400
-        
-        # In a real production app, you'd store this in a session or DB keyed by a unique ID
-        # For this demo, we'll store it in a global dict (not thread-safe for high concurrency, but works for local dev)
-        # Ideally, generate a unique ID for the session and store there.
-        # Here we assume the user is working on the "current" active text.
-        
-        # Since Flask sessions are per-user, let's use a simple in-memory cache for the active edit
-        # Note: In a multi-user environment, use Redis or a DB.
+    
         if not hasattr(app, 'active_edits'):
             app.active_edits = {}
         
@@ -654,9 +647,6 @@ def download_speech_route(filename):
     except Exception as e:
         logger.error(f"Error downloading speech: {e}")
         return jsonify({'error': str(e)}), 500
-
-# Note: You may need to adjust the existing /download_speech route to use this new logic 
-# or rename the old one to avoid conflicts.
 
 if __name__ == '__main__':
     use_https = os.getenv('USE_HTTPS', 'true').lower() == 'true'
