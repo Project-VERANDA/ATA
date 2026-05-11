@@ -9,12 +9,115 @@ import logging
 import re
 import time
 import argparse
+from datetime import datetime
 from collections import defaultdict
 from pathlib import Path
 from pydub import AudioSegment
 from openai import OpenAI
 from dotenv import load_dotenv
 load_dotenv()
+
+# --- Session Logger ---
+
+class SessionLogger:
+    """
+    Manages the generation of a summary log file for every script execution.
+    """
+    def __init__(self, base_path):
+        self.base_path = base_path
+        self.log_dir = base_path / "logs"
+        self.session_id = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        self.log_file_path = self.log_dir / f"session_{self.session_id}.txt"
+        
+        # Ensure logs directory exists
+        self.log_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Initialize session data
+        self.start_time = datetime.now()
+        self.settings = {}
+        self.stats = {
+            "videos_processed": 0,
+            "audios_processed": 0,
+            "transcripts_generated": 0,
+            "anonymizations_success": 0,
+            "anonymizations_failed": 0,
+            "llm_rewrites_success": 0,
+            "llm_rewrites_failed": 0,
+            "errors": []
+        }
+        
+        # Initialize the log file with header
+        self._write_header()
+
+    def _write_header(self):
+        """Writes the initial header to the log file."""
+        with open(self.log_file_path, "w", encoding="utf-8") as f:
+            f.write("=" * 60 + "\n")
+            f.write("AUDIO ANONYMIZATION PIPELINE - SESSION LOG\n")
+            f.write("=" * 60 + "\n")
+            f.write(f"Session ID: {self.session_id}\n")
+            f.write(f"Start Time: {self.start_time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"Script Path: {Path(__file__).resolve()}\n")
+            f.write("-" * 60 + "\n")
+            f.write("SETTINGS:\n")
+            f.write("-" * 60 + "\n")
+
+    def log_settings(self, settings_dict):
+        """Logs the configuration settings used for this run."""
+        self.settings = settings_dict
+        with open(self.log_file_path, "a", encoding="utf-8") as f:
+            for key, value in settings_dict.items():
+                f.write(f"  {key}: {value}\n")
+            f.write("\n")
+
+    def log_stats_update(self, **kwargs):
+        """Updates the stats dictionary and writes a brief update to the log."""
+        for key, value in kwargs.items():
+            if key in self.stats:
+                self.stats[key] = value
+        
+        # Optional: Write a brief progress update if needed
+        # For now, we just accumulate stats for the final report
+
+    def log_error(self, error_msg):
+        """Logs an error message."""
+        self.stats["errors"].append(error_msg)
+        with open(self.log_file_path, "a", encoding="utf-8") as f:
+            f.write(f"[ERROR] {error_msg}\n")
+
+    def finish(self):
+        """Finalizes the log file with end time, duration, and summary."""
+        end_time = datetime.now()
+        duration = end_time - self.start_time
+        
+        with open(self.log_file_path, "a", encoding="utf-8") as f:
+            f.write("-" * 60 + "\n")
+            f.write("EXECUTION SUMMARY:\n")
+            f.write("-" * 60 + "\n")
+            f.write(f"End Time: {end_time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"Total Duration: {duration}\n")
+            f.write(f"Duration (Seconds): {duration.total_seconds():.2f}\n")
+            f.write("\n")
+            f.write("FILES PROCESSED:\n")
+            f.write(f"  Videos Extracted: {self.stats['videos_processed']}\n")
+            f.write(f"  Audios Transcribed: {self.stats['audios_processed']}\n")
+            f.write(f"  Transcripts Generated: {self.stats['transcripts_generated']}\n")
+            f.write(f"  Anonymizations Success: {self.stats['anonymizations_success']}\n")
+            f.write(f"  Anonymizations Failed: {self.stats['anonymizations_failed']}\n")
+            f.write(f"  LLM Rewrites Success: {self.stats['llm_rewrites_success']}\n")
+            f.write(f"  LLM Rewrites Failed: {self.stats['llm_rewrites_failed']}\n")
+            
+            if self.stats["errors"]:
+                f.write("\nERRORS ENCOUNTERED:\n")
+                for err in self.stats["errors"]:
+                    f.write(f"  - {err}\n")
+            
+            f.write("\n" + "=" * 60 + "\n")
+            f.write("SESSION COMPLETE\n")
+            f.write("=" * 60 + "\n")
+
+        logger.info(f"Session log saved to: {self.log_file_path}")
+        return self.log_file_path
 
 
 # --- Configuration & Security ---
@@ -405,6 +508,7 @@ def process_videos():
 
     if processed_count == 0:
         logger.info("No new files processed.")
+    return processed_count
 
 def process_audios(enable_diarization=True):
     """
@@ -592,6 +696,7 @@ def process_audios(enable_diarization=True):
     if 'diarize_model' in locals(): del diarize_model
     cleanup_gpu_resources()
     logger.info("Stream processing finished.")
+    return total_files
 
 # Global variables to hold loaded models
 _loaded_whisper_model = None
@@ -1329,7 +1434,7 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
     """
     if not TRANSCRIPTS_FOLDER.exists() and not skip_bert:
         logger.warning(f"No 'transcripts' folder found at {TRANSCRIPTS_FOLDER}. Skipping anonymization.")
-        return
+        return {"success": 0, "failed": 0, "llm_success": 0, "llm_failed": 0}
 
     logger.info(f"Found 'transcripts' folder at {TRANSCRIPTS_FOLDER}. Starting anonymization process...")
 
@@ -1353,11 +1458,12 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
 
         if not anonymizer.method:
             logger.error("Anonymization engine (BERT) failed to initialize. Aborting.")
-            return
+            return {"success": 0, "failed": 0, "llm_success": 0, "llm_failed": 0}
 
     processed_count = 0
     failed_count = 0
     llm_processed_count = 0
+    llm_failed_count = 0 
 
     # Determine source folder based on skip_bert flag
     source_folder = TRANSCRIPTS_FOLDER if not skip_bert else ANNONYM_FOLDER
@@ -1375,7 +1481,7 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
 
     if not files:
         logger.info(f"No files found to process in {source_folder}.")
-        return
+        return {"success": processed_count, "failed": failed_count, "llm_success": llm_processed_count, "llm_failed": llm_failed_count}
 
     logger.info(f"Found {len(files)} files to process.")
 
@@ -1400,7 +1506,7 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
                 logger.warning(f"File {file.name} is empty. Skipping.")
                 continue
 
-            # Step 1: BERT Anonymization (only if not skipping)
+            # Step 1: BERT Anonymization
             if not skip_bert:
                 anonymized_text, success, msg = anonymizer.anonymize(text_content)
                 
@@ -1443,7 +1549,7 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
                     # Additional safety: Ensure LLM output path is within LLM_ANONNYM_FOLDER
                     if not validate_path(llm_path, LLM_ANONNYM_FOLDER):
                         logger.error(f"Security Alert: LLM output path traversal detected for {llm_filename}. Skipping.")
-                        failed_count += 1
+                        llm_failed_count += 1
                         continue
                         
                     with open(llm_path, "w", encoding="utf-8") as f:
@@ -1452,6 +1558,7 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
                     llm_processed_count += 1
                 else:
                     logger.warning(f"LLM rewrite failed for {base_name}: {status}")
+                    llm_failed_count += 1
 
         except Exception as e:
             logger.error(f"Error processing file {file.name}: {e}")
@@ -1461,7 +1568,15 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
     if not skip_bert:
         logger.info(f"  BERT Processed: {processed_count}, Failed: {failed_count}")
     if use_llm:
-        logger.info(f"  LLM Rewritten: {llm_processed_count}")
+        logger.info(f"  LLM Rewritten: {llm_processed_count}, Failed: {llm_failed_count}")
+
+    # Return stats for the SessionLogger
+    return {
+        "success": processed_count,
+        "failed": failed_count,
+        "llm_success": llm_processed_count,
+        "llm_failed": llm_failed_count
+    }
 
 def anonymize_text_locally(text):
     """
