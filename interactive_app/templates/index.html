@@ -884,7 +884,7 @@
                 const selectedLang = transcriptionLanguageSelect.value;
                 if (selectedLang !== 'auto') {
                     const langCode = selectedLang.toLowerCase(); 
-                    formData.append('language', selectedLang);
+                    formData.append('language', langCode);
                 }
                 // If 'auto', we do NOT append 'language', so the backend defaults to None
                 
@@ -970,6 +970,7 @@
                     
                     if (response.ok && result.success) {
                         anonymizedText.value = result.anonymized_text;
+                        anonymizedText.dispatchEvent(new Event('input'));
                         ttsContainer.classList.remove('hidden');
                         downloadBertBtn.disabled = false;
                         updateStatus("Anonymization successful!", false);
