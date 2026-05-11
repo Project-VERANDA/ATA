@@ -699,6 +699,48 @@
                 loader.style.display = show ? 'block' : 'none';
             }
 
+            async function loadModels() {
+                try {
+                    // 1. Load Transcription Models (Whisper)
+                    const transResp = await fetch('/transcription_models');
+                    const transData = await transResp.json();
+                    
+                    if (transData.whisper_models) {
+                        whisperModelSelect.innerHTML = ''; // Clear existing
+                        transData.whisper_models.forEach(([value, label]) => {
+                            const option = document.createElement('option');
+                            option.value = value;
+                            option.textContent = label;
+                            if (value === transData.default_whisper_model) {
+                                option.selected = true;
+                            }
+                            whisperModelSelect.appendChild(option);
+                        });
+                    }
+
+                    // 2. Load LLM Models
+                    const llmResp = await fetch('/models');
+                    const llmData = await llmResp.json();
+                    
+                    if (llmData.llm_models) {
+                        llmModelSelect.innerHTML = '';
+                        Object.entries(llmData.llm_models).forEach(([key, label]) => {
+                            const option = document.createElement('option');
+                            option.value = key;
+                            option.textContent = label;
+                            if (key === 'medgemma') option.selected = true; // Default
+                            llmModelSelect.appendChild(option);
+                        });
+                    }
+                } catch (error) {
+                    console.error("Failed to load models:", error);
+                    updateStatus("Failed to load model configurations.", true);
+                }
+            }
+
+            // Call this immediately
+            loadModels();
+            
             // --- Recording ---
             async function toggleRecording() {
                 if (isRecording) {
