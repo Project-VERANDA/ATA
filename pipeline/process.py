@@ -1259,12 +1259,13 @@ class AnonymizationEngine:
                 id2label = self.config["id2label"]
                 labels = [id2label[str(pid)] for pid in pred_ids]
                 
+                print ("T", tokens)
+                print ("L:", labels)
                 # Reconstruct text
                 label_map = self._get_labels()
                 result_tokens = []
                 j = 0
                 while j < len(tokens):
-                    #print ("result_tokens:", result_tokens)
                     token = tokens[j]
                     label = labels[j]
                     
@@ -1324,6 +1325,7 @@ class AnonymizationEngine:
                 chunk_result = re.sub(r'(?<!\s)(\[[A-Z_]+\])', r' \1', chunk_result)
                 chunk_result = re.sub(r'(\[[A-Z_]+\])(?![\s,.;!?])', r'\1 ', chunk_result)
                 chunk_result = re.sub(r' +', ' ', chunk_result)
+                chunk_result = re.sub(r'\n[ \t]+', '\n', chunk_result)
                 
                 anonymized_chunks.append(chunk_result)
                 logger.debug(f"Processed chunk {i+1}/{len(chunks)}")
