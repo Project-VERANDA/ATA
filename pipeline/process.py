@@ -1017,8 +1017,7 @@ class AnonymizationEngine:
     def anonymize(self, text):
         """
         Anonymizes text using the local mmbert model with chunking.
-        Splits text into character-based chunks to avoid exceeding model context limits,
-        processes each chunk, and reassembles the result.
+        Handles labels with or without B-/I- prefixes.
         """
         if not self.method or not self.model or not self.tokenizer:
             return None, False, "Anonymization model not loaded."
@@ -1026,7 +1025,6 @@ class AnonymizationEngine:
         logger.info(f"Running anonymization via mmbert (CRF) with chunking...")
 
         # 1. Determine Model Limits
-        # Attempt to read max context length from config, default to 512 if unavailable
         max_model_len = 512
         if hasattr(self.config, 'max_position_embeddings'):
             val = self.config.max_position_embeddings
@@ -1035,21 +1033,17 @@ class AnonymizationEngine:
             elif isinstance(val, dict) and 'max_position_embeddings' in val:
                 max_model_len = val['max_position_embeddings']
         
-        # Safety cap to prevent exceeding model limits
         if not isinstance(max_model_len, int) or max_model_len < 512:
             max_model_len = 512
             
         logger.info(f"Detected model max context length: {max_model_len}")
 
         # Configuration for chunking
-        # Estimate characters per token (avg ~4.5) to split text safely before tokenization
         EST_CHARS_PER_TOKEN = 4.5
         CHUNK_SIZE_TOKENS = max_model_len - 50
         MAX_CHUNK_CHARS = int(CHUNK_SIZE_TOKENS * EST_CHARS_PER_TOKEN)
-        OVERLAP_CHARS = int(OVERLAP_TOKENS * EST_CHARS_PER_TOKEN) if 'OVERLAP_TOKENS' in globals() else 200
         
         # 2. Split text into character-based chunks
-        # This prevents the "sequence too long" error by never feeding the full text to the tokenizer at once
         if len(text) <= MAX_CHUNK_CHARS:
             chunks = [(0, len(text))]
         else:
@@ -1057,13 +1051,10 @@ class AnonymizationEngine:
             start = 0
             while start < len(text):
                 end = min(start + MAX_CHUNK_CHARS, len(text))
-                
-                # Try to break at a space to avoid cutting words in the middle
                 if end < len(text):
                     space_idx = text.rfind(' ', start, end)
                     if space_idx > start:
                         end = space_idx + 1
-                
                 chunks.append((start, end))
                 start = end
 
@@ -1075,7 +1066,6 @@ class AnonymizationEngine:
         for i, (start_idx, end_idx) in enumerate(chunks):
             chunk_text = text[start_idx:end_idx]
             
-            # Tokenize this specific chunk
             try:
                 encoding = self.tokenizer(
                     chunk_text,
@@ -1091,10 +1081,7 @@ class AnonymizationEngine:
                 if total_tokens == 0:
                     continue
 
-                # Create attention mask
                 attention_mask = torch.ones_like(chunk_ids)
-                
-                # Move to device
                 chunk_ids = chunk_ids.to(self.device)
                 attention_mask = attention_mask.to(self.device)
                 
@@ -1117,20 +1104,38 @@ class AnonymizationEngine:
                     token = tokens[j]
                     label = labels[j]
                     
+                    # Skip special tokens
                     if token in ['[CLS]', '[SEP]', '[PAD]', '<pad>', '<cls>', '<sep>']:
                         j += 1
                         continue
                     
+                    # Handle labels with B- or I- prefix
                     if label.startswith('B-') or label.startswith('I-'):
-                        entity_type = label.split('-')[1]
+                        entity_type = label.split('-', 1)[1] # Split only on first hyphen
                         replacement_tag = label_map.get(entity_type, '[UNKNOWN_PII]')
                         result_tokens.append(replacement_tag)
                         
+                        # Skip subsequent I- tags for this entity
                         k = j + 1
-                        while k < len(labels) and labels[k].startswith('I-') and labels[k].split('-')[1] == entity_type:
+                        while k < len(labels) and labels[k].startswith('I-') and labels[k].split('-', 1)[1] == entity_type:
                             k += 1
                         j = k
+                    
+                    # Handle labels WITHOUT prefix (e.g., "PERSON", "O")
+                    elif label in label_map:
+                        # Treat as a valid entity
+                        replacement_tag = label_map[label]
+                        result_tokens.append(replacement_tag)
+                        j += 1
+                    
+                    # Handle "O" (Outside) or unknown labels
+                    elif label == 'O' or label == 'O':
+                        clean_token = token.replace('##', '').replace('▁', ' ')
+                        result_tokens.append(clean_token)
+                        j += 1
+                    
                     else:
+                        # Unknown label format: treat as normal text
                         clean_token = token.replace('##', '').replace('▁', ' ')
                         result_tokens.append(clean_token)
                         j += 1
@@ -1144,7 +1149,6 @@ class AnonymizationEngine:
 
             except Exception as e:
                 logger.error(f"Chunk {i+1} failed: {e}")
-                # Fallback: keep original text for this chunk to prevent data loss
                 anonymized_chunks.append(chunk_text)
 
         # 4. Reassemble chunks
@@ -1157,8 +1161,6 @@ class AnonymizationEngine:
             current_chunk = anonymized_chunks[i]
             previous_result = final_result
             
-            # Smart Stitching: Find the longest overlap between the end of the previous result
-            # and the start of the current chunk to avoid duplication.
             max_overlap_search = min(len(previous_result), len(current_chunk), 200)
             overlap_len = 0
             
