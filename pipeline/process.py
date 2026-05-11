@@ -1017,7 +1017,7 @@ class AnonymizationEngine:
     def anonymize(self, text):
         """
         Anonymizes text using the local mmbert model with chunking.
-        Handles labels with or without B-/I- prefixes.
+        Includes robust error handling for label parsing.
         """
         if not self.method or not self.model or not self.tokenizer:
             return None, False, "Anonymization model not loaded."
@@ -1109,33 +1109,48 @@ class AnonymizationEngine:
                         j += 1
                         continue
                     
-                    # Handle labels with B- or I- prefix
+                    # Safe label parsing
+                    entity_type = None
+                    is_entity = False
+                    
                     if label.startswith('B-') or label.startswith('I-'):
-                        entity_type = label.split('-', 1)[1] # Split only on first hyphen
+                        parts = label.split('-', 1)
+                        if len(parts) == 2:
+                            entity_type = parts[1]
+                            is_entity = True
+                        else:
+                            # Fallback: treat as text
+                            clean_token = token.replace('##', '').replace('▁', ' ')
+                            result_tokens.append(clean_token)
+                            j += 1
+                            continue
+                    
+                    elif label in label_map:
+                        entity_type = label
+                        is_entity = True
+                    
+                    if is_entity:
                         replacement_tag = label_map.get(entity_type, '[UNKNOWN_PII]')
                         result_tokens.append(replacement_tag)
                         
                         # Skip subsequent I- tags for this entity
-                        k = j + 1
-                        while k < len(labels) and labels[k].startswith('I-') and labels[k].split('-', 1)[1] == entity_type:
-                            k += 1
-                        j = k
-                    
-                    # Handle labels WITHOUT prefix (e.g., "PERSON", "O")
-                    elif label in label_map:
-                        # Treat as a valid entity
-                        replacement_tag = label_map[label]
-                        result_tokens.append(replacement_tag)
-                        j += 1
-                    
-                    # Handle "O" (Outside) or unknown labels
-                    elif label == 'O' or label == 'O':
-                        clean_token = token.replace('##', '').replace('▁', ' ')
-                        result_tokens.append(clean_token)
-                        j += 1
-                    
+                        if label.startswith('B-'):
+                            k = j + 1
+                            while k < len(labels):
+                                next_label = labels[k]
+                                if next_label.startswith('I-'):
+                                    next_parts = next_label.split('-', 1)
+                                    if len(next_parts) == 2 and next_parts[1] == entity_type:
+                                        k += 1
+                                    else:
+                                        break
+                                else:
+                                    break
+                            j = k
+                        else:
+                            j += 1
                     else:
-                        # Unknown label format: treat as normal text
+                        # Not an entity
                         clean_token = token.replace('##', '').replace('▁', ' ')
                         result_tokens.append(clean_token)
                         j += 1
@@ -1149,6 +1164,8 @@ class AnonymizationEngine:
 
             except Exception as e:
                 logger.error(f"Chunk {i+1} failed: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
                 anonymized_chunks.append(chunk_text)
 
         # 4. Reassemble chunks
