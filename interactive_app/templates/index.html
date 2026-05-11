@@ -878,10 +878,11 @@
                 
                 formData.append('audio', fileToTranscribe, fileName);
                 
+                const selectedLang = transcriptionLanguageSelect.value;
+                const languageToSend = selectedLang === 'auto' ? '' : selectedLang;
                 const modelSize = whisperModelSelect.value;
                 formData.append('model_size', modelSize);
-                const language = transcriptionLanguageSelect.value;
-                formData.append('language', language);
+                formData.append('language', languageToSend);
 
                 try {
                     const endpoint = audioBlob ? '/transcribe_recording' : '/upload';
