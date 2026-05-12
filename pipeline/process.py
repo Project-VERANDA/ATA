@@ -1326,7 +1326,7 @@ class AnonymizationEngine:
 def call_llm_rewriter(text, model_id, system_prompt=None):
     """
     Calls the external LLM API to rewrite text.
-    Uses a high max_tokens limit (16384) to handle long transcripts.
+    Handles various output formats including thinking blocks and markdown.
     """
     import re
 
@@ -1377,12 +1377,11 @@ def call_llm_rewriter(text, model_id, system_prompt=None):
             elif hasattr(msg, 'text') and msg.text:
                 raw_content = str(msg.text)
             else:
-                # Fallback: convert whole message to string
                 raw_content = str(msg)
 
         # --- 2. Parse Specific Patterns ---
         if raw_content:
-            # Pattern A: Qwen-asr style "language None<asr_text>..." or just "language None..."
+            # Pattern A: Qwen-asr style "language None<asr_text>..."
             if raw_content.startswith("language None"):
                 match = re.search(r'language None\s*<asr_text>(.*?)</asr_text>', raw_content, re.DOTALL | re.IGNORECASE)
                 if match:
@@ -1390,28 +1389,47 @@ def call_llm_rewriter(text, model_id, system_prompt=None):
                 else:
                     rewritten_text = raw_content[len("language None"):].strip()
             
-            # Pattern B: MedGemma / Thinking blocks ( ... )
-            elif "<think>" in raw_content:
-                match = re.search(r'<think>(.*?)</think>', raw_content, re.DOTALL | re.IGNORECASE)
+            # Pattern B: MedGemma / Thinking blocks (XML tags <thought>...</thought>)
+            elif "<thought>" in raw_content.lower():
+                # Find the content after the closing </thought> tag
+                match = re.search(r'</thought>\s*(.*)', raw_content, re.DOTALL | re.IGNORECASE)
                 if match:
-                    after_thinking = raw_content[match.end():].strip()
-                    if after_thinking:
-                        rewritten_text = after_thinking
-                    else:
-                        rewritten_text = re.sub(r'<think>.*?</think>', '', raw_content, flags=re.DOTALL | re.IGNORECASE).strip()
+                    rewritten_text = match.group(1).strip()
                 else:
-                    rewritten_text = re.sub(r'<think>.*?</think>', '', raw_content, flags=re.DOTALL | re.IGNORECASE).strip()
-            
-            # Pattern C: Standard text (gpt-oss-120b) or others
+                    # Fallback: remove the opening tag and everything before the first newline after it
+                    rewritten_text = re.sub(r'^.*?<thought>.*?</thought>\s*', '', raw_content, flags=re.DOTALL | re.IGNORECASE).strip()
+
+            # Pattern C: MedGemma / Thinking blocks (Plain text "thought\n...")
+            # This handles the case where the model outputs "thought" as plain text followed by a newline
+            elif raw_content.lower().startswith("thought"):
+                # Split by the first newline after "thought"
+                lines = raw_content.split('\n')
+                # Find the index where the actual content starts (usually after the thought block)
+                # Heuristic: Look for the first line that starts with "SPEAKER" or is not part of the thought explanation
+                start_index = 0
+                for i, line in enumerate(lines):
+                    stripped = line.strip()
+                    if stripped.startswith("SPEAKER_") or (stripped and not stripped.lower().startswith(("the user", "let's", "now", "check", "break down", "rewrite"))):
+                        # If we find a speaker tag or a line that looks like the start of the response
+                        # We assume the thought block ended before this
+                        start_index = i
+                        break
+                
+                # Reconstruct from the found start index
+                rewritten_text = '\n'.join(lines[start_index:]).strip()
+                
+                # If the heuristic failed and we still have "thought" at the start, force strip it
+                if rewritten_text.lower().startswith("thought"):
+                     rewritten_text = re.sub(r'^thought\s*\n.*?\n', '', rewritten_text, flags=re.DOTALL).strip()
+
+            # Pattern D: Standard text (gpt-oss-120b) or others
             else:
                 rewritten_text = raw_content.strip()
 
         # --- 3. Final Cleanup (Preserve Newlines & Strip Markdown) ---
         if rewritten_text:
-            # 1. Remove Markdown Code Blocks (```text ... ``` or ``` ... ```)
-            # This regex matches opening ``` with optional language tag, captures content, and matches closing ```
+            # 1. Remove Markdown Code Blocks
             rewritten_text = re.sub(r'^```\w*\s*|\s*```$', '', rewritten_text, flags=re.MULTILINE)
-            # Also handle inline or mid-text code blocks if they exist
             rewritten_text = re.sub(r'```[\s\S]*?```', '', rewritten_text)
             
             # 2. Remove any remaining HTML/XML tags but PRESERVE newlines
@@ -1420,7 +1438,7 @@ def call_llm_rewriter(text, model_id, system_prompt=None):
             # 3. Normalize multiple spaces but KEEP newlines
             rewritten_text = re.sub(r'[^\S\n]+', ' ', rewritten_text)
             
-            # 4. Remove any leading/trailing whitespace that might be leftover from block removal
+            # 4. Remove any leading/trailing whitespace
             rewritten_text = rewritten_text.strip()
 
             # Safety check
