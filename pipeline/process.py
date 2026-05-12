@@ -1326,7 +1326,7 @@ class AnonymizationEngine:
 def call_llm_rewriter(text, model_id, system_prompt=None):
     """
     Calls the external LLM API to rewrite text.
-    Handles various output formats including thinking blocks and markdown.
+    Robustly strips thinking blocks, markdown, and explanatory text to return ONLY the transcript.
     """
     import re
 
@@ -1389,74 +1389,11 @@ def call_llm_rewriter(text, model_id, system_prompt=None):
                 else:
                     rewritten_text = raw_content[len("language None"):].strip()
             
-            # Pattern B: MedGemma / Thinking blocks (XML tags <thought>...</thought>)
+            # Pattern B: XML Thinking Blocks (<thought>...</thought>)
             elif "<thought>" in raw_content.lower():
-                # Find the content after the closing </thought> tag
+                # Remove everything up to and including the closing tag
                 match = re.search(r'</thought>\s*(.*)', raw_content, re.DOTALL | re.IGNORECASE)
-                if match:
-                    rewritten_text = match.group(1).strip()
-                else:
-                    # Fallback: remove the opening tag and everything before the first newline after it
-                    rewritten_text = re.sub(r'^.*?<thought>.*?</thought>\s*', '', raw_content, flags=re.DOTALL | re.IGNORECASE).strip()
-
-            # Pattern C: MedGemma / Thinking blocks (Plain text "thought\n...")
-            # This handles the case where the model outputs "thought" as plain text followed by a newline
-            elif raw_content.lower().startswith("thought"):
-                # Split by the first newline after "thought"
-                lines = raw_content.split('\n')
-                # Find the index where the actual content starts (usually after the thought block)
-                # Heuristic: Look for the first line that starts with "SPEAKER" or is not part of the thought explanation
-                start_index = 0
-                for i, line in enumerate(lines):
-                    stripped = line.strip()
-                    if stripped.startswith("SPEAKER_") or (stripped and not stripped.lower().startswith(("the user", "let's", "now", "check", "break down", "rewrite"))):
-                        # If we find a speaker tag or a line that looks like the start of the response
-                        # We assume the thought block ended before this
-                        start_index = i
-                        break
-                
-                # Reconstruct from the found start index
-                rewritten_text = '\n'.join(lines[start_index:]).strip()
-                
-                # If the heuristic failed and we still have "thought" at the start, force strip it
-                if rewritten_text.lower().startswith("thought"):
-                     rewritten_text = re.sub(r'^thought\s*\n.*?\n', '', rewritten_text, flags=re.DOTALL).strip()
-
-            # Pattern D: Standard text (gpt-oss-120b) or others
-            else:
-                rewritten_text = raw_content.strip()
-
-        # --- 3. Final Cleanup (Preserve Newlines & Strip Markdown) ---
-        if rewritten_text:
-            # 1. Remove Markdown Code Blocks
-            rewritten_text = re.sub(r'^```\w*\s*|\s*```$', '', rewritten_text, flags=re.MULTILINE)
-            rewritten_text = re.sub(r'```[\s\S]*?```', '', rewritten_text)
-            
-            # 2. Remove any remaining HTML/XML tags but PRESERVE newlines
-            rewritten_text = re.sub(r'<[^>]+>', '', rewritten_text)
-            
-            # 3. Normalize multiple spaces but KEEP newlines
-            rewritten_text = re.sub(r'[^\S\n]+', ' ', rewritten_text)
-            
-            # 4. Remove any leading/trailing whitespace
-            rewritten_text = rewritten_text.strip()
-
-            # Safety check
-            if rewritten_text.lower() in ["language none", "none", ""]:
-                raise ValueError("Extracted text is empty or invalid.")
-
-            # Warning if newlines were lost
-            if '\n' not in rewritten_text and '\n' in text:
-                logger.warning("LLM output collapsed into single line despite instructions.")
-
-        if not rewritten_text:
-            raise ValueError("Model returned empty content or unrecognized format.")
-
-        return rewritten_text, "Success"
-
-    except Exception as e:
-        logger.error(f"LLM Rewriter failed for model {final_model}: {e}")
-        return None, str(e)
+                if
 
 def run_adversarial_anonymization(text, model_id, iterations=3):
     """
