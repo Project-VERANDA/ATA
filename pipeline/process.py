@@ -1019,128 +1019,119 @@ def parse_transcript_into_blocks(transcript_text):
 
     return blocks
 
+def predict_dialogue_flert(sentences_tokens, model, tokenizer, id_to_tag_map, device="cpu", context_window=2):
+    """
+    Predicts NER labels for a sequence of sentences using a FLERT-style context window.
+    
+    Args:
+        sentences_tokens (list[list[str]]): List of sentences, where each sentence is a list of word tokens (strings).
+        model: The loaded ModernBertCRF model instance.
+        tokenizer: The associated tokenizer.
+        id_to_tag_map (dict): Mapping from model prediction ID (int/str) to the final anonymization tag (str).
+        device (str): 'cuda' or 'cpu'.
+        context_window (int): Number of sentences to include before and after the target.
+        
+    Returns:
+        list[list[str]]: A list of label lists, one per sentence. Each inner list contains the 
+                         anonymization tags (or empty string) for the corresponding words.
+    """
+    sep = tokenizer.sep_token
+    all_predictions = []
+
+    for i, target_tokens in enumerate(sentences_tokens):
+        # 1. Construct Context Window
+        left = sentences_tokens[max(0, i - context_window):i]
+        right = sentences_tokens[i + 1:i + 1 + context_window]
+
+        flat_tokens = []
+        
+        # Add Left Context
+        for s in left:
+            flat_tokens.extend(s)
+        if left:
+            flat_tokens.append(sep)
+
+        # Record Target Boundaries
+        tgt_start = len(flat_tokens)
+        flat_tokens.extend(target_tokens)
+        tgt_end = len(flat_tokens)
+
+        # Add Right Context
+        if right:
+            flat_tokens.append(sep)
+        for s in right:
+            flat_tokens.extend(s)
+
+        # 2. Tokenize for Model Input
+        # is_split_into_words=True tells the tokenizer that flat_tokens are already words
+        enc = tokenizer(
+            flat_tokens, 
+            is_split_into_words=True,
+            return_tensors="pt", 
+            truncation=False
+        ).to(device)
+        
+        word_ids = enc.word_ids(batch_index=0)
+
+        # 3. Run Inference
+        with torch.no_grad():
+            outputs = model(**enc)
+            emissions = outputs["logits"]
+            mask = enc["attention_mask"].bool()
+            # Decode CRF predictions
+            preds = model.decode(emissions, mask)[0]
+
+        # 4. Extract Predictions for Target Sentence Only
+        target_labels = []
+        seen_word_indices = set()
+        
+        for idx, wid in enumerate(word_ids):
+            # Skip special tokens (None) or duplicates
+            if wid is None or wid in seen_word_indices:
+                continue
+            
+            # Check if current token belongs to the target sentence
+            if tgt_start <= wid < tgt_end:
+                pred_id = preds[idx]
+                
+                # Map Prediction ID -> Anonymization Tag
+                # Ensure key is string if the map uses string keys
+                key = str(pred_id)
+                tag = id_to_tag_map.get(key, "")
+                
+                target_labels.append(tag)
+                seen_word_indices.add(wid)
+        
+        all_predictions.append(target_labels)
+
+    return all_predictions
+
 class AnonymizationEngine:
     """
-    Encapsulates all logic related to text anonymization using the local mmbert model
-    with its custom ModernBertCRF architecture.
+    Encapsulates logic for text anonymization using the local mmbert model with FLERT context.
+    Ensures label integrity by mapping model outputs dynamically without altering internal weights.
     """
     
     def __init__(self, method="local_mmbert", level="standard", model_path=None):
         self.method = method
         self.level = level
-        # Point to the folder containing crf_config.json and pytorch_model.bin
         self.model_path = model_path or (MODEL_FOLDER / "mmbert_multilingual_pii_ner")
         self.model = None
         self.tokenizer = None
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.config = None
+        self.label_mapping = {} # Will store {model_id: anonymization_tag}
         
         if ANONYMIZATION_ENABLED:
-            logger.info(f"AnonymizationEngine initialized: Method={self.method}, Level={self.level}, Path={self.model_path}")
+            logger.info(f"AnonymizationEngine initialized: Method={self.method}, Level={self.level}")
             self._load_model()
 
-    def _load_model(self):
-        """Loads the mmbert model with custom CRF architecture."""
-        if not self.model_path.exists():
-            logger.error(f"Model path not found: {self.model_path}")
-            self.method = None
-            return
-
-        try:
-            from transformers import AutoModel, AutoTokenizer
-            from torchcrf import CRF
-            import torch.nn as nn
-            import json
-            
-            # 1. Load CRF Config
-            crf_config_path = self.model_path / "crf_config.json"
-            if not crf_config_path.exists():
-                logger.error(f"crf_config.json not found at {crf_config_path}")
-                self.method = None
-                return
-            
-            with open(crf_config_path, "r") as f:
-                self.config = json.load(f)
-            
-            logger.info(f"Loaded CRF config: base_model={self.config.get('base_model_name')}, num_labels={self.config.get('num_labels')}")
-
-            # 2. Define the Custom Model Class
-            class ModernBertCRF(nn.Module):
-                def __init__(self, base_model_name, num_labels, id2label, label2id):
-                    super().__init__()
-                    self.num_labels = num_labels
-                    self.id2label = id2label
-                    self.label2id = label2id
-                    # Load the base transformer (e.g., bert-base-multilingual-cased)
-                    self.transformer = AutoModel.from_pretrained(base_model_name, local_files_only=True)
-                    hidden_size = self.transformer.config.hidden_size
-                    self.classifier = nn.Linear(hidden_size, num_labels)
-                    self.dropout = nn.Dropout(0.1)
-                    self.crf = CRF(num_labels, batch_first=True)
-
-                def forward(self, input_ids, attention_mask, labels=None, **kwargs):
-                    # Remove token_type_ids if present (common issue with some tokenizers)
-                    kwargs.pop("token_type_ids", None)
-                    outputs = self.transformer(input_ids=input_ids, attention_mask=attention_mask)
-                    sequence_output = self.dropout(outputs.last_hidden_state)
-                    emissions = self.classifier(sequence_output)
-                    if labels is not None:
-                        mask = attention_mask.bool()
-                        labels_for_crf = labels.clone()
-                        labels_for_crf[labels_for_crf == -100] = 0
-                        loss = -self.crf(emissions, labels_for_crf, mask=mask, reduction='mean')
-                        return {"loss": loss, "logits": emissions}
-                    else:
-                        return {"logits": emissions}
-
-                def decode(self, emissions, mask):
-                    return self.crf.decode(emissions, mask=mask)
-
-            # 3. Instantiate the Model
-            logger.info(f"Instantiating ModernBertCRF model...")
-            
-            # Use local base model path instead of hub repo name
-            local_base_model_path = MODEL_FOLDER / "mmBERT-base-local"
-            if not local_base_model_path.exists():
-                logger.error(f"Local base model not found at {local_base_model_path}. Please download it first.")
-                self.method = None
-                return
-            
-            logger.info(f"Using local base model: {local_base_model_path}")
-            
-            self.model = ModernBertCRF(
-                base_model_name=str(local_base_model_path),  # Changed to local path
-                num_labels=self.config["num_labels"],
-                id2label=self.config["id2label"],
-                label2id=self.config["label2id"]
-            )
-            # 4. Load Weights
-            model_weights_path = self.model_path / "pytorch_model.bin"
-            logger.info(f"Loading weights from {model_weights_path}...")
-            state_dict = torch.load(model_weights_path, map_location=self.device)
-            self.model.load_state_dict(state_dict)
-            
-            self.model.to(self.device)
-            self.model.eval()
-            
-            # 5. Load Tokenizer
-            logger.info("Loading tokenizer...")
-            self.tokenizer = AutoTokenizer.from_pretrained(str(self.model_path))
-            
-            logger.info("mmbert model with CRF loaded successfully.")
-
-        except ImportError as e:
-            logger.error(f"Missing dependency (likely torchcrf). Install with: pip install torchcrf. Error: {e}")
-            self.method = None
-        except Exception as e:
-            import traceback
-            logger.error(f"Failed to load mmbert model: {e}")
-            logger.error(f"Full Traceback:\n{traceback.format_exc()}")
-            self.method = None
-
-    def _get_labels(self):
-        """Maps the model's output labels to our anonymization tags."""
-        return {
+    def _build_safe_label_mapping(self):
+        """
+        Constructs a dynamic mapping from the model's original training labels to anonymization tags.
+        This preserves the model's training integrity while allowing custom output formats.
+        """
+        target_tags = {
             'PERSON': '[NAME_OTHER]',
             'PERSON_EMAIL': '[CONTACT_EMAIL]',
             'PERSON_SOCIAL_RELATION': '[NAME_RELATIVE]',
@@ -1159,206 +1150,173 @@ class AnonymizationEngine:
             'PROFESSION': '[PROFESSION]',
             'PRODUCT': '[ID]',
             'QUANTITY': '[ID]',
-            'MISC': '[ID]'
+            'MISC': '[ID]',
+            'O': ''
         }
+        
+        mapping = {}
+        # Iterate over the model's original ID -> Label Name mapping
+        for label_id, label_name in self.original_id2label.items():
+            # Normalize label name (remove BIO prefixes if present in training set)
+            clean_label = label_name.replace("B-", "").replace("I-", "")
+            
+            if clean_label in target_tags:
+                mapping[str(label_id)] = target_tags[clean_label]
+            else:
+                # Fallback for unknown labels: Map to generic ID or log warning
+                logger.warning(f"Model label '{label_name}' (ID: {label_id}) not in target set. Mapping to [UNKNOWN_PII].")
+                mapping[str(label_id)] = "[UNKNOWN_PII]"
+                
+        return mapping
+
+    def _load_model(self):
+        """Loads the mmbert model and initializes the safe label mapping."""
+        if not self.model_path.exists():
+            logger.error(f"Model path not found: {self.model_path}")
+            self.method = None
+            return
+
+        try:
+            from transformers import AutoModel, AutoTokenizer
+            from torchcrf import CRF
+            import torch.nn as nn
+            import json
+            
+            # 1. Load Config
+            crf_config_path = self.model_path / "crf_config.json"
+            if not crf_config_path.exists():
+                logger.error(f"crf_config.json not found at {crf_config_path}")
+                self.method = None
+                return
+            
+            with open(crf_config_path, "r") as f:
+                self.config = json.load(f)
+            
+            # Store original label mappings
+            self.original_id2label = self.config.get("id2label", {})
+            self.original_label2id = self.config.get("label2id", {})
+            
+            logger.info(f"Loaded {len(self.original_id2label)} original model labels.")
+
+            # 2. Define Model Architecture
+            class ModernBertCRF(nn.Module):
+                def __init__(self, base_model_name, num_labels, id2label, label2id):
+                    super().__init__()
+                    self.num_labels = num_labels
+                    self.id2label = id2label
+                    self.label2id = label2id
+                    self.transformer = AutoModel.from_pretrained(base_model_name, local_files_only=True)
+                    hidden_size = self.transformer.config.hidden_size
+                    self.classifier = nn.Linear(hidden_size, num_labels)
+                    self.dropout = nn.Dropout(0.1)
+                    self.crf = CRF(num_labels, batch_first=True)
+
+                def forward(self, input_ids, attention_mask, labels=None, **kwargs):
+                    kwargs.pop("token_type_ids", None)
+                    outputs = self.transformer(input_ids=input_ids, attention_mask=attention_mask)
+                    sequence_output = self.dropout(outputs.last_hidden_state)
+                    emissions = self.classifier(sequence_output)
+                    if labels is not None:
+                        mask = attention_mask.bool()
+                        labels_for_crf = labels.clone()
+                        labels_for_crf[labels_for_crf == -100] = 0
+                        loss = -self.crf(emissions, labels_for_crf, mask=mask, reduction='mean')
+                        return {"loss": loss, "logits": emissions}
+                    else:
+                        return {"logits": emissions}
+
+                def decode(self, emissions, mask):
+                    return self.crf.decode(emissions, mask=mask)
+
+            # 3. Instantiate Model
+            local_base_model_path = MODEL_FOLDER / "mmBERT-base-local"
+            if not local_base_model_path.exists():
+                logger.error(f"Local base model not found at {local_base_model_path}.")
+                self.method = None
+                return
+            
+            self.model = ModernBertCRF(
+                base_model_name=str(local_base_model_path),
+                num_labels=self.config["num_labels"],
+                id2label=self.original_id2label,
+                label2id=self.original_label2id
+            )
+            
+            model_weights_path = self.model_path / "pytorch_model.bin"
+            state_dict = torch.load(model_weights_path, map_location=self.device)
+            self.model.load_state_dict(state_dict)
+            self.model.to(self.device)
+            self.model.eval()
+            
+            self.tokenizer = AutoTokenizer.from_pretrained(str(self.model_path))
+            
+            # 4. Build Dynamic Mapping
+            self.label_mapping = self._build_safe_label_mapping()
+            logger.info("Model loaded and safe label mapping initialized.")
+
+        except Exception as e:
+            import traceback
+            logger.error(f"Failed to load mmbert model: {e}")
+            logger.error(traceback.format_exc())
+            self.method = None
 
     def anonymize(self, text):
         """
-        Anonymizes text using the local mmbert model with chunking.
-        Ensures input tensors are 2D (batch_size, seq_len) to prevent shape errors.
+        Anonymizes text using the FLERT context window approach.
+        Splits text into sentences, predicts with context, and reconstructs.
         """
         if not self.method or not self.model or not self.tokenizer:
             return None, False, "Anonymization model not loaded."
 
-        logger.info(f"Running anonymization via mmbert (CRF) with chunking...")
+        logger.info("Running anonymization with FLERT context window...")
 
-        # 1. Determine Model Limits
-        max_model_len = 512
-        if hasattr(self.config, 'max_position_embeddings'):
-            val = self.config.max_position_embeddings
-            if isinstance(val, int):
-                max_model_len = val
-            elif isinstance(val, dict) and 'max_position_embeddings' in val:
-                max_model_len = val['max_position_embeddings']
+        # 1. Sentence Splitting
+        # Simple regex split for robustness across languages
+        sentences = re.split(r'(?<=[.!?])\s+', text)
+        sentences = [s.strip() for s in sentences if s.strip()]
         
-        if not isinstance(max_model_len, int) or max_model_len < 512:
-            max_model_len = 512
-            
-        logger.info(f"Detected model max context length: {max_model_len}")
+        if not sentences:
+            return text, False, "No sentences detected."
 
-        # Configuration for chunking
-        EST_CHARS_PER_TOKEN = 4.5
-        CHUNK_SIZE_TOKENS = max_model_len - 50
-        MAX_CHUNK_CHARS = int(CHUNK_SIZE_TOKENS * EST_CHARS_PER_TOKEN)
-        
-        # 2. Split text into character-based chunks
-        if len(text) <= MAX_CHUNK_CHARS:
-            chunks = [(0, len(text))]
-        else:
-            chunks = []
-            start = 0
-            while start < len(text):
-                end = min(start + MAX_CHUNK_CHARS, len(text))
-                if end < len(text):
-                    space_idx = text.rfind(' ', start, end)
-                    if space_idx > start:
-                        end = space_idx + 1
-                chunks.append((start, end))
-                start = end
+        # 2. Tokenize Sentences (Word-level)
+        # We split by whitespace to create the "word tokens" list expected by FLERT
+        tokenized_sentences = [sent.split() for sent in sentences]
 
-        logger.info(f"Split text into {len(chunks)} character-based chunks.")
+        # 3. Run FLERT Prediction
+        try:
+            sentence_labels = predict_dialogue_flert(
+                sentences_tokens=tokenized_sentences,
+                model=self.model,
+                tokenizer=self.tokenizer,
+                id_to_tag_map=self.label_mapping,
+                device=self.device,
+                context_window=2
+            )
+        except Exception as e:
+            logger.error(f"FLERT prediction failed: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return text, False, str(e)
 
-        # 3. Process each chunk
+        # 4. Reconstruct Text
         anonymized_chunks = []
-        
-        for i, (start_idx, end_idx) in enumerate(chunks):
-            chunk_text = text[start_idx:end_idx]
+        for i, words in enumerate(tokenized_sentences):
+            labels = sentence_labels[i]
+            reconstructed_words = []
             
-            try:
-                encoding = self.tokenizer(
-                    chunk_text,
-                    return_tensors="pt",
-                    truncation=True,
-                    max_length=max_model_len,
-                    add_special_tokens=False
-                )
+            for w_idx, word in enumerate(words):
+                # Get label for this word position
+                tag = labels[w_idx] if w_idx < len(labels) else ""
                 
-                # CRITICAL FIX: Ensure we have a 2D tensor (batch_size, seq_len)
-                # encoding['input_ids'] is already 2D [1, seq_len]
-                chunk_ids = encoding['input_ids'] 
-                
-                # Double check shape
-                if chunk_ids.dim() == 1:
-                    chunk_ids = chunk_ids.unsqueeze(0)
-                
-                total_tokens = chunk_ids.shape[1]
-                
-                if total_tokens == 0:
-                    continue
-
-                # Create attention mask (must match shape of chunk_ids)
-                attention_mask = encoding['attention_mask'] if 'attention_mask' in encoding else torch.ones_like(chunk_ids)
-                if attention_mask.dim() == 1:
-                    attention_mask = attention_mask.unsqueeze(0)
-                
-                # Move to device
-                chunk_ids = chunk_ids.to(self.device)
-                attention_mask = attention_mask.to(self.device)
-                
-                # Verify shapes before passing to model
-                # logger.debug(f"Input shape: {chunk_ids.shape}, Mask shape: {attention_mask.shape}")
-
-                with torch.no_grad():
-                    outputs = self.model(chunk_ids, attention_mask=attention_mask)
-                    emissions = outputs["logits"]
-                    mask = attention_mask.bool()
-                    predictions = self.model.decode(emissions, mask)
-                
-                pred_ids = predictions[0]
-                tokens = self.tokenizer.convert_ids_to_tokens(chunk_ids[0])
-                id2label = self.config["id2label"]
-                labels = [id2label[str(pid)] for pid in pred_ids]
-
-                # Reconstruct text
-                label_map = self._get_labels()
-                result_tokens = []
-                j = 0
-                while j < len(tokens):
-                    token = tokens[j]
-                    label = labels[j]
-                    
-                    # Skip special tokens
-                    if token in ['[CLS]', '[SEP]', '[PAD]', '<pad>', '<cls>', '<sep>']:
-                        j += 1
-                        continue
-                    
-                    # Safe label parsing
-                    entity_type = None
-                    is_entity = False
-                    
-                    if label.startswith('B-') or label.startswith('I-'):
-                        parts = label.split('-', 1)
-                        if len(parts) == 2:
-                            entity_type = parts[1]
-                            is_entity = True
-                        else:
-                            clean_token = token.replace('##', '').replace('▁', ' ')
-                            result_tokens.append(clean_token)
-                            j += 1
-                            continue
-                    
-                    elif label in label_map:
-                        entity_type = label
-                        is_entity = True
-                    
-                    if is_entity:
-                        replacement_tag = label_map.get(entity_type, '[UNKNOWN_PII]')
-                        result_tokens.append(replacement_tag) #"▁"+
-                        
-                        # Skip subsequent I- tags
-                        if label.startswith('B-'):
-                            k = j + 1
-                            while k < len(labels):
-                                next_label = labels[k]
-                                if next_label.startswith('I-'):
-                                    next_parts = next_label.split('-', 1)
-                                    if len(next_parts) == 2 and next_parts[1] == entity_type:
-                                        k += 1
-                                    else:
-                                        break
-                                else:
-                                    break
-                            j = k
-                        else:
-                            j += 1
-                    else:
-                        clean_token = token.replace('##', '').replace('▁', ' ')
-                        result_tokens.append(clean_token)
-                        j += 1
-                
-                chunk_result = "".join(result_tokens).replace("  ", " ").strip()
-                chunk_result = re.sub(r'\s+\[', '[', chunk_result)
-                chunk_result = re.sub(r'\]\s+', ']', chunk_result)
-
-                chunk_result = re.sub(r'(?<!\s)(\[[A-Z_]+\])', r' \1', chunk_result)
-                chunk_result = re.sub(r'(\[[A-Z_]+\])(?![\s,.;!?])', r'\1 ', chunk_result)
-                chunk_result = re.sub(r' +', ' ', chunk_result)
-                chunk_result = re.sub(r'\n[ \t]+', '\n', chunk_result)
-                
-                anonymized_chunks.append(chunk_result)
-                logger.debug(f"Processed chunk {i+1}/{len(chunks)}")
-
-            except Exception as e:
-                logger.error(f"Chunk {i+1} failed: {e}")
-                import traceback
-                logger.error(traceback.format_exc())
-                anonymized_chunks.append(chunk_text)
-
-        # 4. Reassemble chunks
-        if not anonymized_chunks:
-            return text, False, "No chunks processed."
-
-        final_result = anonymized_chunks[0]
-        
-        for i in range(1, len(anonymized_chunks)):
-            current_chunk = anonymized_chunks[i]
-            previous_result = final_result
+                if tag:
+                    reconstructed_words.append(tag)
+                else:
+                    reconstructed_words.append(word)
             
-            max_overlap_search = min(len(previous_result), len(current_chunk), 200)
-            overlap_len = 0
-            
-            for length in range(max_overlap_search, 0, -1):
-                if previous_result.endswith(current_chunk[:length]):
-                    overlap_len = length
-                    break
-            
-            if overlap_len > 0:
-                final_result += current_chunk[overlap_len:]
-            else:
-                final_result += " " + current_chunk
+            anonymized_chunks.append(" ".join(reconstructed_words))
 
-        logger.info(f"Anonymization complete. Final length: {len(final_result)}")
-        return final_result, True, "Success"
+        final_text = " ".join(anonymized_chunks)
+        return final_text, True, "Success"
 
 def call_llm_rewriter(text, model_id, system_prompt=None):
     """
