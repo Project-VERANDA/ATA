@@ -1326,7 +1326,7 @@ class AnonymizationEngine:
 def call_llm_rewriter(text, model_id, system_prompt=None):
     """
     Calls the external LLM API to rewrite text.
-    Robustly strips thinking blocks, markdown, and explanatory text to return ONLY the transcript.
+    Robustly strips thinking blocks by finding the first 'clean' SPEAKER line.
     """
     import re
 
@@ -1391,34 +1391,39 @@ def call_llm_rewriter(text, model_id, system_prompt=None):
             
             # Pattern B: XML Thinking Blocks (<thought>...</thought>)
             elif "<thought>" in raw_content.lower():
-                # Remove everything up to and including the closing tag
                 match = re.search(r'</thought>\s*(.*)', raw_content, re.DOTALL | re.IGNORECASE)
                 if match:
                     rewritten_text = match.group(1).strip()
                 else:
                     rewritten_text = re.sub(r'^.*?<thought>.*?</thought>\s*', '', raw_content, flags=re.DOTALL | re.IGNORECASE).strip()
 
-            # Pattern C: Generic Thinking/Reasoning Blocks
-            # Strategy: Find the FIRST line that looks like the actual transcript (starts with SPEAKER_ or [TAG])
-            # and discard everything before it. This works even if the text doesn't start with "thought".
+            # Pattern C: Generic Reasoning Blocks (The main fix)
+            # Strategy: Find the FIRST line that starts with SPEAKER_ but is NOT part of a list (e.g., "1. SPEAKER_")
+            # and is NOT bolded (e.g., "**SPEAKER_").
             else:
-                # Regex to find the start of the transcript
-                # Matches a line starting with SPEAKER_XX: or a line containing a tag like [NAME_OTHER]
-                # We use re.MULTILINE so ^ matches the start of any line
-                transcript_start_pattern = r'(?:^|\n)(SPEAKER_\d+:.*|[^\n]*\[[A-Z_]+\][^\n]*)'
+                # Regex explanation:
+                # (?:^|\n) : Start of string or newline
+                # (?!\s*[0-9]+\.\s|\s*[-*]\s|\s*\*\*) : Negative lookahead to exclude lines starting with numbers, bullets, or bold stars
+                # (\s*SPEAKER_\d+:.*) : Capture the SPEAKER line (allowing leading whitespace)
+                transcript_start_pattern = r'(?:^|\n)(?!\s*[0-9]+\.\s|\s*[-*]\s|\s*\*\*)(\s*SPEAKER_\d+:.*)'
                 
                 match = re.search(transcript_start_pattern, raw_content, re.MULTILINE | re.IGNORECASE)
                 
                 if match:
-                    # Extract from the match start (which includes the newline if present)
-                    # We strip leading whitespace/newlines to get clean text
+                    # Extract from the match start
                     rewritten_text = raw_content[match.start():].strip()
                 else:
-                    # Fallback: If no speaker tag found, try to find the last paragraph
-                    # Split by double newline (paragraph break) and take the last one
+                    # Fallback 1: If no clean SPEAKER line found, try to find the last paragraph
+                    # (Often the model puts the result in the last paragraph)
                     paragraphs = re.split(r'\n\s*\n', raw_content)
                     if paragraphs:
-                        rewritten_text = paragraphs[-1].strip()
+                        # Check if the last paragraph contains SPEAKER lines
+                        last_para = paragraphs[-1]
+                        if 'SPEAKER_' in last_para:
+                            rewritten_text = last_para.strip()
+                        else:
+                            # Fallback 2: Just take the last paragraph anyway
+                            rewritten_text = last_para.strip()
                     else:
                         rewritten_text = raw_content.strip()
 
