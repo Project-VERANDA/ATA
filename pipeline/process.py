@@ -1410,6 +1410,49 @@ def call_llm_rewriter(text, model_id, system_prompt=None):
                 match = re.search(transcript_start_pattern, raw_content, re.MULTILINE | re.IGNORECASE)
                 
                 if match:
+                    # Extract from the match start (which includes the newline if present)
+                    # We strip leading whitespace/newlines to get clean text
+                    rewritten_text = raw_content[match.start():].strip()
+                else:
+                    # Fallback: If no speaker tag found, try to find the last paragraph
+                    # Split by double newline (paragraph break) and take the last one
+                    paragraphs = re.split(r'\n\s*\n', raw_content)
+                    if paragraphs:
+                        rewritten_text = paragraphs[-1].strip()
+                    else:
+                        rewritten_text = raw_content.strip()
+
+        # --- 3. Final Cleanup (Preserve Newlines & Strip Markdown) ---
+        if rewritten_text:
+            # 1. Remove Markdown Code Blocks
+            rewritten_text = re.sub(r'^```\w*\s*|\s*```$', '', rewritten_text, flags=re.MULTILINE)
+            rewritten_text = re.sub(r'```[\s\S]*?```', '', rewritten_text)
+            
+            # 2. Remove any remaining HTML/XML tags but PRESERVE newlines
+            rewritten_text = re.sub(r'<[^>]+>', '', rewritten_text)
+            
+            # 3. Normalize multiple spaces but KEEP newlines
+            rewritten_text = re.sub(r'[^\S\n]+', ' ', rewritten_text)
+            
+            # 4. Remove any leading/trailing whitespace
+            rewritten_text = rewritten_text.strip()
+
+            # Safety check
+            if rewritten_text.lower() in ["language none", "none", ""]:
+                raise ValueError("Extracted text is empty or invalid.")
+
+            # Warning if newlines were lost
+            if '\n' not in rewritten_text and '\n' in text:
+                logger.warning("LLM output collapsed into single line despite instructions.")
+
+        if not rewritten_text:
+            raise ValueError("Model returned empty content or unrecognized format.")
+
+        return rewritten_text, "Success"
+
+    except Exception as e:
+        logger.error(f"LLM Rewriter failed for model {final_model}: {e}")
+        return None, str(e)
 
 def run_adversarial_anonymization(text, model_id, iterations=3):
     """
