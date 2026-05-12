@@ -1262,30 +1262,33 @@ class AnonymizationEngine:
 
     def anonymize(self, text):
         """
-        Anonymizes text using the FLERT context window approach.
-        Splits text into sentences, predicts with context, and reconstructs.
+        Anonymizes text using the FLERT context window approach while preserving
+        original line breaks and speaker structure.
+        
+        Processes the input line-by-line to maintain formatting, applying FLERT
+        context windows across the sequence of lines.
         """
         if not self.method or not self.model or not self.tokenizer:
             return None, False, "Anonymization model not loaded."
 
-        logger.info("Running anonymization with FLERT context window...")
+        logger.info("Running anonymization with FLERT context window (line-preserving)...")
 
-        # 1. Sentence Splitting
-        # Simple regex split for robustness across languages
-        sentences = re.split(r'(?<=[.!?])\s+', text)
-        sentences = [s.strip() for s in sentences if s.strip()]
+        # 1. Split into Lines (Preserve Structure)
+        # Split by newline but keep empty lines to maintain structure
+        lines = text.split('\n')
+        lines = [line for line in lines if line.strip()] # Filter empty lines for processing
         
-        if not sentences:
-            return text, False, "No sentences detected."
+        if not lines:
+            return text, False, "No lines detected."
 
-        # 2. Tokenize Sentences (Word-level)
-        # We split by whitespace to create the "word tokens" list expected by FLERT
-        tokenized_sentences = [sent.split() for sent in sentences]
+        # 2. Tokenize Lines (Word-level)
+        # Each line becomes a "sentence" for the FLERT context window
+        tokenized_lines = [line.split() for line in lines]
 
         # 3. Run FLERT Prediction
         try:
-            sentence_labels = predict_dialogue_flert(
-                sentences_tokens=tokenized_sentences,
+            line_labels = predict_dialogue_flert(
+                sentences_tokens=tokenized_lines,
                 model=self.model,
                 tokenizer=self.tokenizer,
                 id_to_tag_map=self.label_mapping,
@@ -1298,10 +1301,10 @@ class AnonymizationEngine:
             logger.error(traceback.format_exc())
             return text, False, str(e)
 
-        # 4. Reconstruct Text
-        anonymized_chunks = []
-        for i, words in enumerate(tokenized_sentences):
-            labels = sentence_labels[i]
+        # 4. Reconstruct Text (Preserve Line Breaks)
+        anonymized_lines = []
+        for i, words in enumerate(tokenized_lines):
+            labels = line_labels[i]
             reconstructed_words = []
             
             for w_idx, word in enumerate(words):
@@ -1313,9 +1316,11 @@ class AnonymizationEngine:
                 else:
                     reconstructed_words.append(word)
             
-            anonymized_chunks.append(" ".join(reconstructed_words))
+            # Join words back into a line
+            anonymized_lines.append(" ".join(reconstructed_words))
 
-        final_text = " ".join(anonymized_chunks)
+        # Join lines back with newline characters to preserve original structure
+        final_text = "\n".join(anonymized_lines)
         return final_text, True, "Success"
 
 def call_llm_rewriter(text, model_id, system_prompt=None):
@@ -1887,7 +1892,7 @@ Examples:
     logger.info(f"  Audio Extraction (Videos→WAV):     {'✅ ENABLED' if run_transcription else '❌ DISABLED'}")
     logger.info(f"  Transcription & Diarization:       {'✅ ENABLED' if run_transcription else '❌ DISABLED'}")
     if run_transcription:
-        logger.info(f"    └─ Speaker Diarization:          {'✅ ENABLED' if run_diarization else '❌ DISABLED'}")
+        logger.info(f"    └─ Speaker Diarization:      {'✅ ENABLED' if run_diarization else '❌ DISABLED'}")
     logger.info(f"  BERT Anonymization:                {'✅ ENABLED' if run_anonymization and not skip_bert_for_llm else '❌ DISABLED (or Skipped for LLM-only)'}")
     logger.info(f"  LLM Indirect Identifier Removal:   {'✅ ENABLED' if run_llm else '❌ DISABLED'}")
     if skip_bert_for_llm:
