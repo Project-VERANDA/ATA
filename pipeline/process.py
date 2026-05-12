@@ -1359,7 +1359,7 @@ def call_llm_rewriter(text, model_id, system_prompt=None):
             model=final_model,
             stream=False,
             temperature=0.3,
-            max_tokens=16384  # Increased from 4096 to handle full transcripts
+            max_tokens=16384
         )
 
         rewritten_text = None
@@ -1391,29 +1391,38 @@ def call_llm_rewriter(text, model_id, system_prompt=None):
                     rewritten_text = raw_content[len("language None"):].strip()
             
             # Pattern B: MedGemma / Thinking blocks ( ... )
-            elif "" in raw_content:
-                match = re.search(r'(.*?)', raw_content, re.DOTALL | re.IGNORECASE)
+            elif "<think>" in raw_content:
+                match = re.search(r'<think>(.*?)</think>', raw_content, re.DOTALL | re.IGNORECASE)
                 if match:
                     after_thinking = raw_content[match.end():].strip()
                     if after_thinking:
                         rewritten_text = after_thinking
                     else:
-                        rewritten_text = re.sub(r'.*?', '', raw_content, flags=re.DOTALL | re.IGNORECASE).strip()
+                        rewritten_text = re.sub(r'<think>.*?</think>', '', raw_content, flags=re.DOTALL | re.IGNORECASE).strip()
                 else:
-                    rewritten_text = re.sub(r'.*?', '', raw_content, flags=re.DOTALL | re.IGNORECASE).strip()
-
-            # Pattern C: Standard text (gpt-oss-120b)
+                    rewritten_text = re.sub(r'<think>.*?</think>', '', raw_content, flags=re.DOTALL | re.IGNORECASE).strip()
+            
+            # Pattern C: Standard text (gpt-oss-120b) or others
             else:
                 rewritten_text = raw_content.strip()
 
-        # --- 3. Final Cleanup (Preserve Newlines) ---
+        # --- 3. Final Cleanup (Preserve Newlines & Strip Markdown) ---
         if rewritten_text:
-            # Remove any remaining HTML/XML tags but PRESERVE newlines
+            # 1. Remove Markdown Code Blocks (```text ... ``` or ``` ... ```)
+            # This regex matches opening ``` with optional language tag, captures content, and matches closing ```
+            rewritten_text = re.sub(r'^```\w*\s*|\s*```$', '', rewritten_text, flags=re.MULTILINE)
+            # Also handle inline or mid-text code blocks if they exist
+            rewritten_text = re.sub(r'```[\s\S]*?```', '', rewritten_text)
+            
+            # 2. Remove any remaining HTML/XML tags but PRESERVE newlines
             rewritten_text = re.sub(r'<[^>]+>', '', rewritten_text)
             
-            # Normalize multiple spaces but KEEP newlines
+            # 3. Normalize multiple spaces but KEEP newlines
             rewritten_text = re.sub(r'[^\S\n]+', ' ', rewritten_text)
             
+            # 4. Remove any leading/trailing whitespace that might be leftover from block removal
+            rewritten_text = rewritten_text.strip()
+
             # Safety check
             if rewritten_text.lower() in ["language none", "none", ""]:
                 raise ValueError("Extracted text is empty or invalid.")
@@ -1892,7 +1901,7 @@ Examples:
     logger.info(f"  Audio Extraction (Videos→WAV):     {'✅ ENABLED' if run_transcription else '❌ DISABLED'}")
     logger.info(f"  Transcription & Diarization:       {'✅ ENABLED' if run_transcription else '❌ DISABLED'}")
     if run_transcription:
-        logger.info(f"    └─ Speaker Diarization:      {'✅ ENABLED' if run_diarization else '❌ DISABLED'}")
+        logger.info(f"    └─ Speaker Diarization:        {'✅ ENABLED' if run_diarization else '❌ DISABLED'}")
     logger.info(f"  BERT Anonymization:                {'✅ ENABLED' if run_anonymization and not skip_bert_for_llm else '❌ DISABLED (or Skipped for LLM-only)'}")
     logger.info(f"  LLM Indirect Identifier Removal:   {'✅ ENABLED' if run_llm else '❌ DISABLED'}")
     if skip_bert_for_llm:

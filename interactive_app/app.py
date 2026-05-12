@@ -412,23 +412,6 @@ def generate_speech_route():
         logger.error(f"Error generating speech: {str(e)}")
         return jsonify({'error': f'Error generating speech: {str(e)}'}), 500
 
-@app.route('/download_speech/<filename>')
-def download_speech(filename):
-    try:
-        if not filename.startswith('speech_output_') or '..' in filename:
-            return jsonify({'error': 'Invalid filename'}), 400
-        
-        file_path = os.path.join(os.path.abspath(app.config['UPLOAD_FOLDER']), filename)
-        
-        if not os.path.exists(file_path):
-            logger.error(f"File not found: {file_path}")
-            return jsonify({'error': 'File not found'}), 404
-            
-        return send_file(file_path, as_attachment=True)
-    except Exception as e:
-        logger.error(f"Error downloading speech file: {str(e)}")
-        return jsonify({'error': f'Error downloading speech file: {str(e)}'}), 500
-
 @app.route('/available_voices')
 def get_available_voices():
     try:
