@@ -1393,7 +1393,68 @@ def call_llm_rewriter(text, model_id, system_prompt=None):
             elif "<thought>" in raw_content.lower():
                 # Remove everything up to and including the closing tag
                 match = re.search(r'</thought>\s*(.*)', raw_content, re.DOTALL | re.IGNORECASE)
-                if
+                if match:
+                    rewritten_text = match.group(1).strip()
+                else:
+                    rewritten_text = re.sub(r'^.*?<thought>.*?</thought>\s*', '', raw_content, flags=re.DOTALL | re.IGNORECASE).strip()
+
+            # Pattern C: Plain Text Thinking Blocks (starts with "thought" or contains "Let's break down")
+            # Strategy: Find the FIRST line that looks like the actual transcript (starts with SPEAKER_ or [TAG])
+            # and discard everything before it.
+            elif raw_content.lower().startswith("thought") or "let's break down" in raw_content.lower():
+                # Regex to find the start of the transcript
+                # Matches a line starting with SPEAKER_XX: or [TAG]
+                transcript_start_pattern = r'(?:^|\n)(SPEAKER_\d+:.*|[^\n]*\[[A-Z_]+\][^\n]*)'
+                
+                match = re.search(transcript_start_pattern, raw_content, re.MULTILINE | re.IGNORECASE)
+                
+                if match:
+                    # Extract from the match start
+                    rewritten_text = raw_content[match.start():].strip()
+                else:
+                    # Fallback: If no speaker tag found, try to find the last paragraph
+                    # Split by double newline (paragraph break) and take the last one
+                    paragraphs = re.split(r'\n\s*\n', raw_content)
+                    if paragraphs:
+                        rewritten_text = paragraphs[-1].strip()
+                    else:
+                        rewritten_text = raw_content.strip()
+
+            # Pattern D: Standard text
+            else:
+                rewritten_text = raw_content.strip()
+
+        # --- 3. Final Cleanup (Preserve Newlines & Strip Markdown) ---
+        if rewritten_text:
+            # 1. Remove Markdown Code Blocks
+            rewritten_text = re.sub(r'^```\w*\s*|\s*```$', '', rewritten_text, flags=re.MULTILINE)
+            rewritten_text = re.sub(r'```[\s\S]*?```', '', rewritten_text)
+            
+            # 2. Remove any remaining HTML/XML tags but PRESERVE newlines
+            rewritten_text = re.sub(r'<[^>]+>', '', rewritten_text)
+            
+            # 3. Normalize multiple spaces but KEEP newlines
+            rewritten_text = re.sub(r'[^\S\n]+', ' ', rewritten_text)
+            
+            # 4. Remove any leading/trailing whitespace
+            rewritten_text = rewritten_text.strip()
+
+            # Safety check
+            if rewritten_text.lower() in ["language none", "none", ""]:
+                raise ValueError("Extracted text is empty or invalid.")
+
+            # Warning if newlines were lost
+            if '\n' not in rewritten_text and '\n' in text:
+                logger.warning("LLM output collapsed into single line despite instructions.")
+
+        if not rewritten_text:
+            raise ValueError("Model returned empty content or unrecognized format.")
+
+        return rewritten_text, "Success"
+
+    except Exception as e:
+        logger.error(f"LLM Rewriter failed for model {final_model}: {e}")
+        return None, str(e)
 
 def run_adversarial_anonymization(text, model_id, iterations=3):
     """
