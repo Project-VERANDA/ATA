@@ -302,6 +302,17 @@ ANONYMIZATION_ENABLED = True
 ANONYMIZATION_LEVEL = "standard"  # Options: 'basic', 'standard', 'strict'
 ANONYMIZATION_METHOD = "local_mmbert"  # Options: 'local_bert', 'local_spacy', 'local_ensemble', 'remote_chat_ai'
 
+# Available Tags for Selection/Deselection
+# These correspond to the PII entities the model can detect.
+AVAILABLE_TAGS = [
+    "PERSON", "PERSON_EMAIL", "PERSON_SOCIAL_RELATION",
+    "ORG", 
+    "LOC_CITY", "LOC_COUNTRY", "LOC_STREET", "LOC_ZIP", "LOC_HOUSENUMBER", "LOC_OTHER",
+    "DATETIME", "DATETIME_AGE",
+    "CODE", "CODE_PHONE", "CODE_URL",
+    "PROFESSION", "PRODUCT", "QUANTITY", "MISC"
+]
+
 # Remote Chat AI API Configuration
 CHAT_AI_API_KEY = os.getenv('CHAT_AI_API_KEY', '')
 CHAT_AI_ENDPOINT = os.getenv('CHAT_AI_ENDPOINT', 'https://llm.cloud.cci.charite.de/v1')
@@ -1139,27 +1150,32 @@ class AnonymizationEngine:
     Ensures label integrity by mapping model outputs dynamically without altering internal weights.
     """
     
-    def __init__(self, method="local_mmbert", level="standard", model_path=None):
+    def __init__(self, method="local_mmbert", level="standard", model_path=None, 
+                 include_tags=None, exclude_tags=None):
         self.method = method
         self.level = level
         self.model_path = model_path or (MODEL_FOLDER / "mmbert_multilingual_pii_ner")
+        self.include_tags = include_tags
+        self.exclude_tags = exclude_tags
         self.model = None
         self.tokenizer = None
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.config = None
-        self.label_mapping = {} # Will store {model_id: anonymization_tag}
+        self.label_mapping = {} 
         
         if ANONYMIZATION_ENABLED:
             logger.info(f"AnonymizationEngine initialized: Method={self.method}, Level={self.level}")
+            logger.info(f"Tag Filters - Include: {include_tags}, Exclude: {exclude_tags}")
             self._load_model()
 
     def _build_safe_label_mapping(self):
         """
         Constructs a dynamic mapping from the model's original training labels to anonymization tags.
-        This preserves the model's training integrity while allowing custom output formats.
+        Filters tags based on --include-tags and --exclude-tags arguments.
         """
-        target_tags = {
-            'PERSON': '[NAME_OTHER]',
+        # Define all standard tags
+        all_target_tags = {
+            'PERSON': '[PERSON]',
             'PERSON_EMAIL': '[CONTACT_EMAIL]',
             'PERSON_SOCIAL_RELATION': '[NAME_RELATIVE]',
             'ORG': '[LOCATION_ORGANISATION]',
@@ -1180,19 +1196,33 @@ class AnonymizationEngine:
             'MISC': '[ID]',
             'O': ''
         }
+
+        # Determine active tags
+        active_tags = set(all_target_tags.keys())
+
+        if self.include_tags:
+            # If include list is provided, restrict to only those
+            include_set = set(t.upper() for t in self.include_tags)
+            active_tags = active_tags.intersection(include_set)
+            logger.info(f"Restricting anonymization to specific tags: {active_tags}")
         
+        if self.exclude_tags:
+            # Remove excluded tags
+            exclude_set = set(t.upper() for t in self.exclude_tags)
+            active_tags = active_tags.difference(exclude_set)
+            logger.info(f"Excluding tags: {exclude_set}")
+
+        # Build the final mapping
         mapping = {}
-        # Iterate over the model's original ID -> Label Name mapping
         for label_id, label_name in self.original_id2label.items():
-            # Normalize label name (remove BIO prefixes if present in training set)
             clean_label = label_name.replace("B-", "").replace("I-", "")
             
-            if clean_label in target_tags:
-                mapping[str(label_id)] = target_tags[clean_label]
+            if clean_label in active_tags:
+                mapping[str(label_id)] = all_target_tags[clean_label]
             else:
-                # Fallback for unknown labels: Map to generic ID or log warning
-                logger.warning(f"Model label '{label_name}' (ID: {label_id}) not in target set. Mapping to [UNKNOWN_PII].")
-                mapping[str(label_id)] = "[UNKNOWN_PII]"
+                # If a tag is filtered out, map it to empty string (keep original text)
+                # Or map to a specific "ignored" tag if you prefer, but empty string preserves text.
+                mapping[str(label_id)] = ""
                 
         return mapping
 
@@ -1619,7 +1649,8 @@ def run_adversarial_anonymization(text, model_id, iterations=3):
 
 # --- Step 3: Anonymize Existing Transcripts ---
 
-def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert=False, adversarial_mode=False):
+def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert=False, adversarial_mode=False,
+                          include_tags=None, exclude_tags=None):
     """
     Reads raw transcripts, anonymizes them with BERT, and optionally rewrites with LLM.
     Supports a new 'adversarial_mode' which runs a 3-iteration Red Team vs. Blue Team loop.
@@ -1652,7 +1683,9 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
         anonymizer = AnonymizationEngine(
             method=ANONYMIZATION_METHOD,
             level=ANONYMIZATION_LEVEL,
-            model_path=MODEL_FOLDER / "mmbert_multilingual_pii_ner"
+            model_path=MODEL_FOLDER / "mmbert_multilingual_pii_ner",
+            include_tags=include_tags,
+            exclude_tags=exclude_tags
         )
 
         if not anonymizer.method:
@@ -1912,7 +1945,29 @@ Examples:
     
     # Adversial Anonymizer
     parser.add_argument('--adversarial', action='store_true',
-                    help='Enable dual-agent adversarial anonymization (3 iterations: Anonymize -> Attack -> Refine)')
+                        help='Enable dual-agent adversarial anonymization (3 iterations: Anonymize -> Attack -> Refine)')
+
+    # Personal Identifier Tag selection
+    # Define the list of available tags once for consistency
+    AVAILABLE_TAGS = [
+        "PERSON", "PERSON_EMAIL", "PERSON_SOCIAL_RELATION",
+        "ORG", 
+        "LOC_CITY", "LOC_COUNTRY", "LOC_STREET", "LOC_ZIP", "LOC_HOUSENUMBER", "LOC_OTHER",
+        "DATETIME", "DATETIME_AGE",
+        "CODE", "CODE_PHONE", "CODE_URL",
+        "PROFESSION", "PRODUCT", "QUANTITY", "MISC"
+    ]
+    
+    parser.add_argument('--include-tags', type=str, nargs='+', default=None,
+                        help=f"Select specific tags to anonymize. "
+                             f"Available tags: {', '.join(AVAILABLE_TAGS)}. "
+                             f"If omitted, all tags are enabled. "
+                             f"Example: --include-tags PERSON ORG LOC_CITY")
+    
+    parser.add_argument('--exclude-tags', type=str, nargs='+', default=None,
+                        help=f"Select specific tags to IGNORE (do not anonymize). "
+                             f"Available tags: {', '.join(AVAILABLE_TAGS)}. "
+                             f"Example: --exclude-tags PROFESSION QUANTITY")
     
     args = parser.parse_args()
     
@@ -1970,6 +2025,9 @@ Examples:
     else:
         logger.info("⏭️  Skipping transcription (--disable-transcription)")
     
+    include_tags = args.include_tags
+    exclude_tags = args.exclude_tags
+    
     # Step 3: Anonymization (Transcript → Anonymized)
     # If --llm-only is set, we call process_anonymization with skip_bert=True
     # This will look in ANNONYM_FOLDER instead of TRANSCRIPTS_FOLDER
@@ -1978,7 +2036,9 @@ Examples:
             llm_rewrite_enabled=run_llm,
             llm_model_id=args.llm_model,
             skip_bert=skip_bert_for_llm,
-            adversarial_mode=is_adversarial  # Pass the new flag
+            adversarial_mode=is_adversarial,
+            include_tags=include_tags,
+            exclude_tags=exclude_tags
         )
     else:
         logger.info("⏭️  Skipping anonymization (--disable-anonymization)")
