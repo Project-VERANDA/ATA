@@ -1372,11 +1372,11 @@ class AnonymizationEngine:
             logger.info(f"AnonymizationEngine initialized: Method={self.method}, Level={self.level}")
             self._load_model()
 
-        def _build_safe_label_mapping(self):
-            """
-            Constructs a dynamic mapping from model labels to anonymization tags.
-            FIXED: Ensures robust fallback for unknown IDs.
-            """
+    def _build_safe_label_mapping(self):
+        """
+        Constructs a dynamic mapping from model labels to anonymization tags.
+        FIXED: Ensures robust fallback for unknown IDs.
+        """
         all_target_tags = {
             'PERSON': '[PERSON]',
             'PERSON_EMAIL': '[CONTACT_EMAIL]',
@@ -1426,13 +1426,6 @@ class AnonymizationEngine:
                 # If not active, map to empty string (keep original word)
                 mapping[str(label_id)] = ""
                 
-        # CRITICAL SAFETY: Ensure "O" (Outside) is always mapped to empty string
-        # Even if the model config doesn't explicitly list "O" as a label ID
-        if "0" not in mapping and "O" not in mapping: 
-             # Some configs use 0 for O, others use string "O"
-             # We trust the loop above, but if the model uses a specific ID for O, it's covered.
-             pass
-
         logger.info(f"Built label mapping with {len(mapping)} entries.")
         return mapping
 
