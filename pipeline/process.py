@@ -1064,9 +1064,13 @@ def parse_transcript_into_blocks(transcript_text):
 
     return blocks
 
-def predict_dialogue_flert(sentences_tokens, model, tokenizer, id_to_tag_map, device="cpu", context_window=2):
+## FLERT removed: Model requires sentence-level input, not context windows. This may be adapted in the future if it can be reworked. 
+# In the meantime, we keep it here until we know it is definitely abandoned by the anonymization model developers or until it is adapted.
+
+
+""" def predict_dialogue_flert(sentences_tokens, model, tokenizer, id_to_tag_map, device="cpu", context_window=2):
     """
-    Predicts NER labels for a sequence of sentences using a FLERT-style context window.
+"""     Predicts NER labels for a sequence of sentences using a FLERT-style context window.
     
     Args:
         sentences_tokens (list[list[str]]): List of sentences, where each sentence is a list of word tokens (strings).
@@ -1078,7 +1082,7 @@ def predict_dialogue_flert(sentences_tokens, model, tokenizer, id_to_tag_map, de
         
     Returns:
         list[list[str]]: A list of label lists, one per sentence. Each inner list contains the 
-                         anonymization tags (or empty string) for the corresponding words.
+                         anonymization tags (or empty string) for the corresponding words. """
     """
     sep = tokenizer.sep_token
     all_predictions = []
@@ -1149,12 +1153,200 @@ def predict_dialogue_flert(sentences_tokens, model, tokenizer, id_to_tag_map, de
         
         all_predictions.append(target_labels)
 
+    return all_predictions """
+
+import spacy
+import re
+
+# --- Global SpaCy NLP Objects (Lazy Loaded) ---
+_nlp_multilingual = None
+
+def get_nlp_pipeline(lang_code=None):
+    """
+    Loads or retrieves the SpaCy pipeline for sentence splitting.
+    Uses 'xx' (multilingual) blank model by default, or specific lang if provided.
+    """
+    global _nlp_multilingual
+    
+    # Determine language code for spaCy
+    # Map your codes to spacy codes if necessary, otherwise use 'xx' for generic
+    spacy_lang = 'xx' # Default to multilingual blank
+    
+    # Optional: Map specific codes if you have downloaded them
+    # if lang_code == 'DE': spacy_lang = 'de'
+    # elif lang_code == 'EN': spacy_lang = 'en'
+    
+    if spacy_lang == 'xx':
+        if _nlp_multilingual is None:
+            try:
+                _nlp_multilingual = spacy.blank("xx")
+                _nlp_multilingual.add_pipe("sentencizer")
+                logger.info("Loaded SpaCy multilingual sentencizer.")
+            except Exception as e:
+                logger.error(f"Failed to load SpaCy 'xx' model: {e}. Falling back to regex splitting.")
+                return None
+        return _nlp_multilingual
+    else:
+        # Logic for specific language models if implemented
+        return None
+
+def split_dialogue_into_sentences(text, nlp_pipeline=None):
+    """
+    Splits dialogue text into a list of sentences (each a list of tokens).
+    Handles SPEAKER_XX: prefixes and splits multi-sentence turns.
+    
+    Args:
+        text: Raw transcript string.
+        nlp_pipeline: Optional pre-loaded spaCy pipeline.
+        
+    Returns:
+        list of tuples: [(speaker_id, [token1, token2, ...]), ...]
+    """
+    if nlp_pipeline is None:
+        nlp_pipeline = get_nlp_pipeline()
+    
+    sentences_with_speakers = []
+    
+    # If no pipeline, fallback to simple regex split (less accurate)
+    if nlp_pipeline is None:
+        logger.warning("SpaCy not available. Using naive sentence splitting.")
+        lines = text.strip().split('\n')
+        for line in lines:
+            match = re.match(r"^(SPEAKER_\d+)\s*:\s*(.*)", line.strip())
+            if match:
+                speaker = match.group(1)
+                content = match.group(2)
+                # Naive split on period/exclamation/question
+                raw_sents = re.split(r'(?<=[.!?])\s+', content)
+                for sent in raw_sents:
+                    tokens = sent.split()
+                    if tokens:
+                        sentences_with_speakers.append((speaker, tokens))
+        return sentences_with_speakers
+
+    lines = text.strip().split('\n')
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+            
+        match = re.match(r"^(SPEAKER_\d+)\s*:\s*(.*)", line)
+        if not match:
+            continue
+            
+        speaker = match.group(1)
+        content = match.group(2)
+        
+        if not content:
+            continue
+            
+        # Process with SpaCy
+        doc = nlp_pipeline(content)
+        
+        for sent in doc.sents:
+            # Extract tokens, filtering out spaces
+            tokens = [tok.text for tok in sent if not tok.is_space]
+            if tokens:
+                sentences_with_speakers.append((speaker, tokens))
+                
+    return sentences_with_speakers
+
+def reconstruct_text_from_predictions(original_sentences, predictions, speaker_map):
+    """
+    Reconstructs the text from predictions, ensuring original structure is preserved.
+    
+    Args:
+        original_sentences: List of (speaker, tokens) tuples from split_dialogue_into_sentences.
+        predictions: List of label lists corresponding to each sentence.
+        speaker_map: Dict mapping original speaker IDs to their current labels (if changed).
+        
+    Returns:
+        Reconstructed text string.
+    """
+    reconstructed_lines = []
+    
+    # We need to group sentences back into lines by speaker to match original format
+    # But since the model splits sentences, we might have multiple sentences per speaker turn.
+    # The safest approach is to reconstruct line-by-line based on the original input structure.
+    
+    # However, the input to this function is a flat list of sentences.
+    # To preserve the "SPEAKER: Sentence 1. Sentence 2." format, we need to know which sentences belonged to which original line.
+    # Since we lost the original line grouping in split_dialogue_into_sentences, we will output one line per sentence.
+    # OR, we can try to merge consecutive sentences from the same speaker if they were originally one line.
+    
+    # Simpler approach for now: Output one line per predicted sentence.
+    # This is safer than trying to guess original line breaks.
+    
+    for i, (speaker, tokens) in enumerate(original_sentences):
+        labels = predictions[i]
+        reconstructed_words = []
+        
+        for w_idx, word in enumerate(tokens):
+            if w_idx < len(labels):
+                tag = labels[w_idx]
+                if tag and tag != "O":
+                    reconstructed_words.append(tag)
+                else:
+                    reconstructed_words.append(word)
+            else:
+                reconstructed_words.append(word)
+        
+        # Join words
+        line_text = " ".join(reconstructed_words)
+        reconstructed_lines.append(f"{speaker}: {line_text}")
+        
+    return "\n".join(reconstructed_lines)
+
+def predict_sentences(sentences_tokens, model, tokenizer, id_to_tag_map, device="cpu"):
+    """
+    Predicts NER labels for a list of sentences (tokens).
+    Matches the official inference example from the model card.
+    """
+    all_predictions = []
+    
+    for tokens in sentences_tokens:
+        # Tokenize
+        enc = tokenizer(
+            tokens, 
+            is_split_into_words=True,
+            return_tensors="pt", 
+            truncation=True, 
+            max_length=512
+        ).to(device)
+        
+        word_ids = enc.word_ids(batch_index=0)
+        
+        # Inference
+        with torch.no_grad():
+            outputs = model(**enc)
+            emissions = outputs["logits"]
+            mask = enc["attention_mask"].bool()
+            preds = model.decode(emissions, mask)[0]
+        
+        # Map predictions to tokens
+        word_labels = ["O"] * len(tokens)
+        seen = set()
+        
+        for idx, wid in enumerate(word_ids):
+            if wid is None or wid in seen:
+                continue
+            seen.add(wid)
+            
+            # Map prediction ID to tag
+            pred_id = preds[idx]
+            # Ensure key is string if map uses strings
+            key = str(pred_id)
+            tag = id_to_tag_map.get(key, "O")
+            
+            word_labels[wid] = tag
+        
+        all_predictions.append(word_labels)
+        
     return all_predictions
 
 class AnonymizationEngine:
     """
-    Encapsulates logic for text anonymization using the local mmbert model with FLERT context.
-    Ensures label integrity by mapping model outputs dynamically without altering internal weights.
+    Updated AnonymizationEngine using sentence-level splitting as per model card.
     """
     
     def __init__(self, method="local_mmbert", level="standard", model_path=None, 
@@ -1172,15 +1364,12 @@ class AnonymizationEngine:
         
         if ANONYMIZATION_ENABLED:
             logger.info(f"AnonymizationEngine initialized: Method={self.method}, Level={self.level}")
-            logger.info(f"Tag Filters - Include: {include_tags}, Exclude: {exclude_tags}")
             self._load_model()
 
     def _build_safe_label_mapping(self):
         """
-        Constructs a dynamic mapping from the model's original training labels to anonymization tags.
-        Filters tags based on --include-tags and --exclude-tags arguments.
+        Constructs a dynamic mapping from model labels to anonymization tags.
         """
-        # Define all standard tags
         all_target_tags = {
             'PERSON': '[PERSON]',
             'PERSON_EMAIL': '[CONTACT_EMAIL]',
@@ -1204,22 +1393,18 @@ class AnonymizationEngine:
             'O': ''
         }
 
-        # Determine active tags
         active_tags = set(all_target_tags.keys())
 
         if self.include_tags:
-            # If include list is provided, restrict to only those
             include_set = set(t.upper() for t in self.include_tags)
             active_tags = active_tags.intersection(include_set)
             logger.info(f"Restricting anonymization to specific tags: {active_tags}")
         
         if self.exclude_tags:
-            # Remove excluded tags
             exclude_set = set(t.upper() for t in self.exclude_tags)
             active_tags = active_tags.difference(exclude_set)
             logger.info(f"Excluding tags: {exclude_set}")
 
-        # Build the final mapping
         mapping = {}
         for label_id, label_name in self.original_id2label.items():
             clean_label = label_name.replace("B-", "").replace("I-", "")
@@ -1227,14 +1412,12 @@ class AnonymizationEngine:
             if clean_label in active_tags:
                 mapping[str(label_id)] = all_target_tags[clean_label]
             else:
-                # If a tag is filtered out, map it to empty string (keep original text)
-                # Or map to a specific "ignored" tag if you prefer, but empty string preserves text.
                 mapping[str(label_id)] = ""
                 
         return mapping
 
     def _load_model(self):
-        """Loads the mmbert model and initializes the safe label mapping."""
+        """Loads the mmbert model with strict config validation."""
         if not self.model_path.exists():
             logger.error(f"Model path not found: {self.model_path}")
             self.method = None
@@ -1256,19 +1439,26 @@ class AnonymizationEngine:
             with open(crf_config_path, "r") as f:
                 self.config = json.load(f)
             
-            # Store original label mappings
+            # Validate required keys
+            required_keys = ["base_model_name", "num_labels", "id2label", "label2id"]
+            if not all(k in self.config for k in required_keys):
+                logger.error(f"Missing required keys in crf_config.json: {required_keys}")
+                self.method = None
+                return
+
             self.original_id2label = self.config.get("id2label", {})
             self.original_label2id = self.config.get("label2id", {})
             
             logger.info(f"Loaded {len(self.original_id2label)} original model labels.")
 
-            # 2. Define Model Architecture
+            # 2. Define Model Architecture (Same as before)
             class ModernBertCRF(nn.Module):
                 def __init__(self, base_model_name, num_labels, id2label, label2id):
                     super().__init__()
                     self.num_labels = num_labels
                     self.id2label = id2label
                     self.label2id = label2id
+                    # Load base model from local path or HF name
                     self.transformer = AutoModel.from_pretrained(base_model_name, local_files_only=True)
                     hidden_size = self.transformer.config.hidden_size
                     self.classifier = nn.Linear(hidden_size, num_labels)
@@ -1293,26 +1483,27 @@ class AnonymizationEngine:
                     return self.crf.decode(emissions, mask=mask)
 
             # 3. Instantiate Model
-            local_base_model_path = MODEL_FOLDER / "mmBERT-base-local"
+            # Use the base_model_name from config
+            local_base_model_path = MODEL_FOLDER / self.config["base_model_name"]
             if not local_base_model_path.exists():
-                logger.error(f"Local base model not found at {local_base_model_path}.")
-                self.method = None
-                return
+                # Fallback: try to load from HF name if local path fails
+                logger.warning(f"Local base model not found at {local_base_model_path}. Trying HF name: {self.config['base_model_name']}")
+                local_base_model_path = self.config["base_model_name"] # Pass name to AutoModel
             
             self.model = ModernBertCRF(
-                base_model_name=str(local_base_model_path),
+                base_model_name=local_base_model_path,
                 num_labels=self.config["num_labels"],
                 id2label=self.original_id2label,
                 label2id=self.original_label2id
             )
             
             model_weights_path = self.model_path / "pytorch_model.bin"
-            state_dict = torch.load(model_weights_path, map_location=self.device)
+            state_dict = torch.load(model_weights_path, map_location=self.device, weights_only=True)
             self.model.load_state_dict(state_dict)
             self.model.to(self.device)
             self.model.eval()
             
-            self.tokenizer = AutoTokenizer.from_pretrained(str(self.model_path))
+            self.tokenizer = AutoTokenizer.from_pretrained(str(self.model_path), local_files_only=True)
             
             # 4. Build Dynamic Mapping
             self.label_mapping = self._build_safe_label_mapping()
@@ -1326,66 +1517,43 @@ class AnonymizationEngine:
 
     def anonymize(self, text):
         """
-        Anonymizes text using the FLERT context window approach while preserving
-        original line breaks and speaker structure.
-        
-        Processes the input line-by-line to maintain formatting, applying FLERT
-        context windows across the sequence of lines.
+        Anonymizes text using sentence-level splitting as per model card.
         """
         if not self.method or not self.model or not self.tokenizer:
             return None, False, "Anonymization model not loaded."
 
-        logger.info("Running anonymization with FLERT context window (line-preserving)...")
+        logger.info("Running anonymization with sentence-level splitting (SpaCy)...")
 
-        # 1. Split into Lines (Preserve Structure)
-        # Split by newline but keep empty lines to maintain structure
-        lines = text.split('\n')
-        lines = [line for line in lines if line.strip()] # Filter empty lines for processing
+        # 1. Split into Sentences
+        # Returns list of (speaker, tokens)
+        sentences_data = split_dialogue_into_sentences(text)
         
-        if not lines:
-            return text, False, "No lines detected."
+        if not sentences_data:
+            return text, False, "No sentences detected."
 
-        # 2. Tokenize Lines (Word-level)
-        # Each line becomes a "sentence" for the FLERT context window
-        tokenized_lines = [line.split() for line in lines]
-
-        # 3. Run FLERT Prediction
+        # Extract just the token lists for prediction
+        sentences_tokens = [tokens for _, tokens in sentences_data]
+        
+        # 2. Run Inference
         try:
-            line_labels = predict_dialogue_flert(
-                sentences_tokens=tokenized_lines,
+            predictions = predict_sentences(
+                sentences_tokens=sentences_tokens,
                 model=self.model,
                 tokenizer=self.tokenizer,
                 id_to_tag_map=self.label_mapping,
-                device=self.device,
-                context_window=2
+                device=self.device
             )
         except Exception as e:
-            logger.error(f"FLERT prediction failed: {e}")
+            logger.error(f"Inference failed: {e}")
             import traceback
             logger.error(traceback.format_exc())
             return text, False, str(e)
 
-        # 4. Reconstruct Text (Preserve Line Breaks)
-        anonymized_lines = []
-        for i, words in enumerate(tokenized_lines):
-            labels = line_labels[i]
-            reconstructed_words = []
-            
-            for w_idx, word in enumerate(words):
-                # Get label for this word position
-                tag = labels[w_idx] if w_idx < len(labels) else ""
-                
-                if tag:
-                    reconstructed_words.append(tag)
-                else:
-                    reconstructed_words.append(word)
-            
-            # Join words back into a line
-            anonymized_lines.append(" ".join(reconstructed_words))
-
-        # Join lines back with newline characters to preserve original structure
-        final_text = "\n".join(anonymized_lines)
-        return final_text, True, "Success"
+        # 3. Reconstruct Text
+        # We need to pass the original (speaker, tokens) and the predictions
+        reconstructed_text = reconstruct_text_from_predictions(sentences_data, predictions, {})
+        
+        return reconstructed_text, True, "Success"
 
 def call_llm_rewriter(text, model_id, system_prompt=None):
     """
