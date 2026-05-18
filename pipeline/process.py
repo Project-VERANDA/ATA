@@ -1373,10 +1373,10 @@ class AnonymizationEngine:
             self._load_model()
 
         def _build_safe_label_mapping(self):
-        """
-        Constructs a dynamic mapping from model labels to anonymization tags.
-        FIXED: Ensures robust fallback for unknown IDs.
-        """
+            """
+            Constructs a dynamic mapping from model labels to anonymization tags.
+            FIXED: Ensures robust fallback for unknown IDs.
+            """
         all_target_tags = {
             'PERSON': '[PERSON]',
             'PERSON_EMAIL': '[CONTACT_EMAIL]',
