@@ -161,18 +161,6 @@ logger = logging.getLogger(__name__)
 
 logger.info(f"DEBUG: API Key loaded? {'YES' if os.getenv('CHAT_AI_API_KEY') else 'NO'}")
 
-if cuda_available:
-    logger.info(f"✅ CUDA is AVAILABLE!")
-    logger.info(f"   Number of GPUs detected: {device_count}")
-    for i in range(device_count):
-        logger.info(f"   GPU {i}: {torch.cuda.get_device_name(i)}")
-    logger.info(f"   Current Device: cuda:{torch.cuda.current_device()}")
-else:
-    logger.warning("❌ CUDA is NOT available. Falling back to CPU.")
-    logger.warning("   This will cause significantly slower processing speeds.")
-    logger.warning("   Check if NVIDIA drivers are installed or if a GPU instance is attached.")
-logger.info("="*40)
-
 # Path Definitions
 SCRIPT_DIR = Path(__file__).resolve().parent
 BASE_PATH = SCRIPT_DIR
@@ -1917,9 +1905,9 @@ def anonymize_text_locally(text):
 # --- Main Execution ---
 
 if __name__ == "__main__":
-    
     import argparse
-    
+
+    # 1. Set up the Argument Parser FIRST
     parser = argparse.ArgumentParser(
         description="Audio Anonymization Pipeline with Granular Step Control",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -1935,7 +1923,7 @@ Examples:
         """
     )
     
-    # Step Control Arguments (enabled by default)
+    # 2. Define all arguments
     parser.add_argument('--disable-transcription', action='store_true',
                         help='Disable audio extraction from videos (skip process_videos)')
     parser.add_argument('--disable-diarization', action='store_true',
@@ -1945,39 +1933,23 @@ Examples:
     parser.add_argument('--disable-llm', action='store_true',
                     help='Disable LLM-based indirect identifier removal (Run BERT anonymization only)')
     
-    # New flag for LLM-only mode
     parser.add_argument('--llm-only', action='store_true',
                         help='Skip BERT anonymization and process existing files in "annonym" folder with LLM rewrite only.')
     
-    # Language Override
     parser.add_argument('--lang', type=str, default=None, 
                         choices=list(SUPPORTED_LANGUAGES.keys()),
                         help=f"Force language (e.g., DE, EN, SP, ES). Default: Auto-detect.")
     
-    # LLM Model Selection
     parser.add_argument('--llm-model', type=str, default=None, 
                         choices=list(AVAILABLE_LLM_MODELS.keys()),
                         help=f"Specific LLM model to use for rewriting.")
     
-    # Verbosity
     parser.add_argument('--verbose', action='store_true',
                         help='Enable debug-level logging')
     
-    # Adversial Anonymizer
     parser.add_argument('--adversarial', action='store_true',
                         help='Enable dual-agent adversarial anonymization (3 iterations: Anonymize -> Attack -> Refine)')
 
-    # Personal Identifier Tag selection
-    # Define the list of available tags once for consistency
-    AVAILABLE_TAGS = [
-        "PERSON", "PERSON_EMAIL", "PERSON_SOCIAL_RELATION",
-        "ORG", 
-        "LOC_CITY", "LOC_COUNTRY", "LOC_STREET", "LOC_ZIP", "LOC_HOUSENUMBER", "LOC_OTHER",
-        "DATETIME", "DATETIME_AGE",
-        "CODE", "CODE_PHONE", "CODE_URL",
-        "PROFESSION", "PRODUCT", "QUANTITY", "MISC"
-    ]
-    
     parser.add_argument('--include-tags', type=str, nargs='+', default=None,
                         help=f"Select specific tags to anonymize. "
                              f"Available tags: {', '.join(AVAILABLE_TAGS)}. "
@@ -1989,31 +1961,28 @@ Examples:
                              f"Available tags: {', '.join(AVAILABLE_TAGS)}. "
                              f"Example: --exclude-tags PROFESSION QUANTITY")
     
+    # 3. PARSE ARGUMENTS NOW (This handles --help correctly)
     args = parser.parse_args()
     
-    # Configure logging verbosity
+    # 4. NOW it is safe to check args.verbose
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
+
+    # 5. NOW it is safe to check GPU resources (after --help would have exited)
+    check_gpu_resources() 
     
-    # Determine which steps to run
+    # 6. Determine which steps to run
     run_transcription = not args.disable_transcription
     run_diarization = not args.disable_diarization
     run_anonymization = not args.disable_anonymization
     run_llm = not args.disable_llm
     is_adversarial = args.adversarial
 
-    
     # Handle --llm-only flag logic
-    # If --llm-only is set, we skip BERT but still run LLM
-    # This overrides --disable-anonymization if both are present (llm-only takes precedence for the specific workflow)
     skip_bert_for_llm = args.llm_only
     
-    # If --llm-only is used, we force run_llm to True and ensure we don't run BERT
     if args.llm_only:
         run_llm = True
-        # Note: We don't necessarily disable the BERT step globally, but we tell the function to skip it
-        # However, if the user explicitly said --disable-anonymization, that's fine too.
-        # The key is that process_anonymization will receive skip_bert=True
     
     # Log the execution plan
     logger.info("="*60)
@@ -2040,7 +2009,6 @@ Examples:
     
     # Step 2: Transcription & Diarization (WAV → Transcript)
     if run_transcription:
-        # Pass diarization flag to process_audios
         process_audios(enable_diarization=run_diarization)
     else:
         logger.info("⏭️  Skipping transcription (--disable-transcription)")
@@ -2049,8 +2017,6 @@ Examples:
     exclude_tags = args.exclude_tags
     
     # Step 3: Anonymization (Transcript → Anonymized)
-    # If --llm-only is set, we call process_anonymization with skip_bert=True
-    # This will look in ANNONYM_FOLDER instead of TRANSCRIPTS_FOLDER
     if run_anonymization or args.llm_only:
         process_anonymization(
             llm_rewrite_enabled=run_llm,
@@ -2062,7 +2028,6 @@ Examples:
         )
     else:
         logger.info("⏭️  Skipping anonymization (--disable-anonymization)")
-        # If anonymization is disabled but LLM is enabled, warn the user
         if run_llm and not args.llm_only:
             logger.warning("⚠️  LLM rewrite requested but BERT anonymization is disabled and --llm-only not set. "
                           "LLM step will be skipped as it depends on anonymized input.")
