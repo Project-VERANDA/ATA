@@ -3,51 +3,41 @@
 # Exit immediately if a command exits with a non-zero status
 set -e
 
-# --- 1. MAIN FOLDER LOGIC (CORRECTED) ---
+# --- 1. MAIN FOLDER LOGIC ---
 CURRENT_DIR="$(pwd)"
 SCRIPT_NAME="$(basename "$0")"
 MAIN_DIR_NAME="ATA"
 
-# Check if we are already inside a folder named 'MAIN'
 if [ "$(basename "$CURRENT_DIR")" == "$MAIN_DIR_NAME" ]; then
-    echo "✅ Already inside '$MAIN_DIR_NAME' folder. Proceeding with installation..."
-    # No action needed, we are in the right place
+    echo "✅ Already inside '$MAIN_DIR_NAME' folder. Proceeding..."
 else
     echo "📂 Not inside '$MAIN_DIR_NAME'. Checking for project files..."
     
-    # Check if we are in the root of the Git clone (look for 'pipeline' or 'README.md')
     if [ -d "pipeline" ] || [ -f "README.md" ]; then
         echo "✅ Detected project root. Creating '$MAIN_DIR_NAME' and moving files..."
-        
-        # Create the MAIN folder
         mkdir -p "$MAIN_DIR_NAME"
         
-        # Move EVERYTHING (including the script) into MAIN, EXCEPT the MAIN folder itself if it existed
-        # We use a loop to move files/folders individually to avoid moving the current dir
         for item in *; do
             if [ "$item" != "$MAIN_DIR_NAME" ]; then
                 mv "$item" "$MAIN_DIR_NAME/"
             fi
         done
         
-        # Change into the new MAIN folder
         cd "$MAIN_DIR_NAME"
         CURRENT_DIR="$(pwd)"
         echo "✅ Moved all files into '$MAIN_DIR_NAME'. New location: $CURRENT_DIR"
     else
-        echo "❌ Error: Not inside '$MAIN_DIR_NAME' and no project files (pipeline/README.md) found."
+        echo "❌ Error: Not inside '$MAIN_DIR_NAME' and no project files found."
         echo "   Please run this script from the root of the cloned ATA repository."
         exit 1
     fi
 fi
 
-# Ensure we are in the correct directory for the rest of the script
 cd "$CURRENT_DIR"
 
-echo "=== ATA Speech Anonymizer Installer (Smart Check Version) ==="
+echo "=== ATA Speech Anonymizer Installer ==="
 echo "Working Directory: $(pwd)"
-echo "Structure: $(pwd)/pipeline, $(pwd)/interactive_app, etc."
-echo "This script will check for existing dependencies and skip installation if found."
+echo "This script checks for existing dependencies and skips installation if found."
 echo ""
 
 # 2. Check if Conda is installed
@@ -152,7 +142,7 @@ if ! check_conda_installed "libsndfile"; then
     conda install -c conda-forge libsndfile -y
 fi
 
-# --- HELPER FUNCTION: Normalize package name (handle - vs _) ---
+# --- HELPER FUNCTION: Normalize package name ---
 normalize_pkg_name() {
     echo "$1" | tr '-' '_'
 }
@@ -162,11 +152,9 @@ check_pip_installed_robust() {
     local pkg=$1
     local norm_pkg=$(normalize_pkg_name "$pkg")
     
-    # Try exact name first
     if pip show "$pkg" &> /dev/null; then
         return 0
     fi
-    # Try normalized name (hyphen vs underscore)
     if pip show "$norm_pkg" &> /dev/null; then
         return 0
     fi
@@ -178,13 +166,9 @@ check_git_installed() {
     local url=$1
     local pkg_name=$2
     
-    # Check if the package is installed
     if ! check_pip_installed_robust "$pkg_name"; then
         return 1
     fi
-    
-    # Optional: Check if it's the correct version/source (advanced)
-    # For now, if it's installed, we assume it's fine unless you need a specific commit
     return 0
 }
 
@@ -226,15 +210,15 @@ for pkg in "${STANDARD_PKGS[@]}"; do
     fi
 done
 
-# 3. Spacy model check (unchanged)
-if python -m spacy check de_core_news_sm &> /dev/null; then
-    echo "✅ spaCy German model (de_core_news_sm) is already installed."
+# 3. Spacy Model Check (Multilingual 'xx' required for sentence splitting)
+if python -m spacy check xx &> /dev/null; then
+    echo "✅ spaCy multilingual model (xx) is already installed."
 else
-    echo "Installing spaCy German model..."
-    python -m spacy download de_core_news_sm
+    echo "Installing spaCy multilingual model (xx)..."
+    python -m spacy download xx
 fi
 
-# 4. Torchcodec check (unchanged)
+# 4. Torchcodec check
 echo "Checking torchcodec..."
 if pip show torchcodec &> /dev/null; then
     CURRENT_VERSION=$(pip show torchcodec | grep Version | awk '{print $2}')
@@ -257,10 +241,8 @@ if python -c "from torchcrf import CRF" 2>/dev/null; then
 else
     echo "Installing CRF library (pytorch-crf)..."
     pip uninstall torchcrf -y 2>/dev/null || true
-    # Install the working package 'pytorch-crf' which exposes 'torchcrf' module
     pip install pytorch-crf --no-cache-dir
     
-    # Verify
     if python -c "from torchcrf import CRF" 2>/dev/null; then
         echo "✅ CRF library installed successfully."
     else
@@ -295,14 +277,13 @@ else
     echo "Skipping Web Interface installation."
 fi
 
-# 8. Hugging Face Token (Fixed Logic)
+# 8. Hugging Face Token
 echo ""
 echo "-------------------------------------------------"
 echo "The Pyannote Diarization model is gated on Hugging Face."
 echo "Get your token here: https://huggingface.co/settings/tokens"
 echo ""
 
-# Check if already logged in
 if hf whoami > /dev/null 2>&1; then
     echo "✅ You are already logged in to Hugging Face."
     HF_TOKEN=""
@@ -315,17 +296,14 @@ else
         echo "   To fix later: Run 'hf auth login' manually."
     else
         echo "Logging in to Hugging Face..."
-        # Run login and capture output
         LOGIN_OUTPUT=$(hf auth login --token "$HF_TOKEN" 2>&1)
         LOGIN_STATUS=$?
         
         echo "$LOGIN_OUTPUT"
         
-        # Check if login was successful based on output text
         if echo "$LOGIN_OUTPUT" | grep -q "Login successful"; then
             echo "✅ Login confirmed via output message."
         else
-            # Fallback: try whoami again
             if hf whoami > /dev/null 2>&1; then
                 echo "✅ Login confirmed via whoami."
             else
@@ -350,7 +328,6 @@ LLM_ANON_DIR="$PIPELINE_DIR/LLM-Anon"
 mkdir -p "$MODEL_DIR" "$VIDEOS_DIR" "$AUDIOS_DIR" "$TRANSCRIPTS_DIR" "$ANNONYM_DIR" "$LLM_ANON_DIR"
 echo "✅ Created directories."
 TARGET_BASE="$MODEL_DIR"
-
 
 # 10. Download WhisperX Models
 echo ""
@@ -385,7 +362,6 @@ if [ -n "$WHISPER_MODELS_INPUT" ]; then
             echo "✅ Model '$model_name' already exists at $target_dir. Skipping download."
         else
             echo "Downloading: $model_name ($hf_repo)..."
-            # FIX: Changed 'false' to 'False' (Capitalized)
             huggingface-cli download "$hf_repo" --local-dir "$target_dir" --local-dir-use-symlinks False
             
             if [ $? -eq 0 ]; then
@@ -399,21 +375,18 @@ else
     echo "No models selected. Skipping WhisperX downloads."
 fi
 
-# 11. Download Pyannote Speaker Diarization Model (Community-1)
+# 11. Download Pyannote Speaker Diarization Model
 echo ""
 echo "-------------------------------------------------"
 echo "Downloading Pyannote Speaker Diarization Model (community-1)"
-echo "This model is required for distinguishing speakers."
 echo ""
 
-# Correct path matching the repo name
 DIARIZE_TARGET="$MODEL_DIR/models--pyannote--speaker-diarization-community-1"
 
 if [ -d "$DIARIZE_TARGET" ]; then
     echo "✅ Pyannote Diarization model already exists at $DIARIZE_TARGET. Skipping."
 else
-    echo "Downloading Pyannote model (this may take a while)..."
-    # Ensure you are logged in to Hugging Face with a valid token
+    echo "Downloading Pyannote model..."
     huggingface-cli download pyannote/speaker-diarization-community-1 --local-dir "$DIARIZE_TARGET" --local-dir-use-symlinks False
     
     if [ $? -eq 0 ]; then
@@ -438,10 +411,8 @@ if [ -d "$BASE_TARGET" ]; then
     echo "✅ Base model already exists at $BASE_TARGET. Skipping."
 else
     echo "Downloading base model..."
-    # Ensure we download directly to the target, not a subfolder
     huggingface-cli download jhu-clsp/mmBERT-base --local-dir "$BASE_TARGET" --local-dir-use-symlinks False
     
-    # Verify and flatten if necessary
     if [ -d "$BASE_TARGET/jhu-clsp-mmBERT-base" ]; then
         echo "⚠️  Detected nested folder. Flattening structure..."
         mv "$BASE_TARGET/jhu-clsp-mmBERT-base"/* "$BASE_TARGET/"
@@ -471,7 +442,6 @@ else
     if [ $? -eq 0 ]; then 
         echo "✅ PII model downloaded and structure verified."
         
-        # Final verification: Check for critical files
         if [ ! -f "$PII_TARGET/crf_config.json" ]; then
             echo "❌ CRITICAL: crf_config.json missing after flattening. Installation may fail."
             exit 1
