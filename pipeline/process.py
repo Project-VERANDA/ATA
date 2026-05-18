@@ -18,6 +18,32 @@ from openai import OpenAI
 from dotenv import load_dotenv
 load_dotenv()
 
+# GPU Detection Check
+
+def check_gpu_resources():
+    """
+    Checks for GPU availability and logs the status.
+    This is called only when processing starts, not during --help.
+    """
+    logger.info("="*40)
+    logger.info("GPU DETECTION CHECK")
+    logger.info("="*40)
+    cuda_available = torch.cuda.is_available()
+    device_count = torch.cuda.device_count()
+    
+    if cuda_available:
+        logger.info(f"✅ CUDA is AVAILABLE!")
+        logger.info(f"   Number of GPUs detected: {device_count}")
+        for i in range(device_count):
+            logger.info(f"   GPU {i}: {torch.cuda.get_device_name(i)}")
+        logger.info(f"   Current Device: cuda:{torch.cuda.current_device()}")
+    else:
+        logger.warning("❌ CUDA is NOT available. Falling back to CPU.")
+        logger.warning("   This will cause significantly slower processing speeds.")
+        logger.warning("   Check if NVIDIA drivers are installed or if a GPU instance is attached.")
+    logger.info("="*40)
+
+
 # --- Session Logger ---
 
 class SessionLogger:
@@ -132,11 +158,7 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
-logger.info("="*40)
-logger.info("GPU DETECTION CHECK")
-logger.info("="*40)
-cuda_available = torch.cuda.is_available()
-device_count = torch.cuda.device_count()
+
 logger.info(f"DEBUG: API Key loaded? {'YES' if os.getenv('CHAT_AI_API_KEY') else 'NO'}")
 
 if cuda_available:
@@ -599,6 +621,9 @@ def process_audios(enable_diarization=True):
     """
     # Parse command line args
     args = parse_args()
+    check_gpu_resources() 
+
+    # Normalize language code
     force_language = args.lang
     
     # Normalize language code
@@ -786,19 +811,15 @@ def load_models():
     """Loads models locally on GPU if available."""
     global _loaded_whisper_model, _loaded_diarize_model
     
-    if _loaded_whisper_model and _loaded_diarize_model:
-        return _loaded_whisper_model, _loaded_diarize_model
-
+    # 1. Check GPU and determine device
+    check_gpu_resources()
+    
+    # Define device variables locally here so they are available for the rest of the function
     device_str = "cuda" if torch.cuda.is_available() else "cpu"
     device = torch.device(device_str)
     
-    logger.info(f"=== DEVICE CHECK ===")
-    logger.info(f"CUDA Available: {torch.cuda.is_available()}")
-    if device_str == "cuda":
-        logger.info(f"GPU Detected: {torch.cuda.get_device_name(0)}")
-    else:
-        logger.warning("⚠️ NO GPU DETECTED. Falling back to CPU.")
-    logger.info("====================")
+    if _loaded_whisper_model and _loaded_diarize_model:
+        return _loaded_whisper_model, _loaded_diarize_model
 
     # 1. Load WhisperX Model (Direct Path Loading with faster_whisper)
     try:
@@ -811,8 +832,6 @@ def load_models():
         compute_type = "float16" if device_str == "cuda" else "float32"
         
         # Load the model directly from the folder path
-        # This bypasses the HuggingFace cache system entirely
-        # We pass the absolute path to the folder containing model.bin, config.json, etc.
         _loaded_whisper_model = WhisperModel(
             str(WHISPERX_MODEL_PATH), 
             device=device_str, 
@@ -1909,7 +1928,8 @@ Examples:
   python process.py                          # Run all steps (default)
   python process.py --disable-transcription  # Skip audio extraction
   python process.py --disable-diarization    # Skip speaker identification
-  python process.py --disable-anonymization  # Skip BERT anonymization
+  python process.py --disable-anonymization  # Skip anonymization
+  python process.py --disable-llm            # Disable the LLM element of the anonymization process
   python process.py --llm-only               # Skip BERT and process existing anonymized files with LLM
   python process.py --disable-transcription --disable-diarization  # Multiple disables
         """
@@ -1923,7 +1943,7 @@ Examples:
     parser.add_argument('--disable-anonymization', action='store_true',
                         help='Disable BERT-based anonymization')
     parser.add_argument('--disable-llm', action='store_true',
-                        help='Disable LLM-based indirect identifier removal')
+                    help='Disable LLM-based indirect identifier removal (Run BERT anonymization only)')
     
     # New flag for LLM-only mode
     parser.add_argument('--llm-only', action='store_true',
