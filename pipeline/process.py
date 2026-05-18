@@ -1069,8 +1069,8 @@ def parse_transcript_into_blocks(transcript_text):
 
 
 """ def predict_dialogue_flert(sentences_tokens, model, tokenizer, id_to_tag_map, device="cpu", context_window=2):
-    """
-"""     Predicts NER labels for a sequence of sentences using a FLERT-style context window.
+    
+    Predicts NER labels for a sequence of sentences using a FLERT-style context window.
     
     Args:
         sentences_tokens (list[list[str]]): List of sentences, where each sentence is a list of word tokens (strings).
@@ -1082,8 +1082,8 @@ def parse_transcript_into_blocks(transcript_text):
         
     Returns:
         list[list[str]]: A list of label lists, one per sentence. Each inner list contains the 
-                         anonymization tags (or empty string) for the corresponding words. """
-    """
+                         anonymization tags (or empty string) for the corresponding words. 
+
     sep = tokenizer.sep_token
     all_predictions = []
 
