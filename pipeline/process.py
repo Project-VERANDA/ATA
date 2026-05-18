@@ -1253,46 +1253,52 @@ def split_dialogue_into_sentences(text, nlp_pipeline=None):
 
 def reconstruct_text_from_predictions(original_sentences, predictions, speaker_map):
     """
-    Reconstructs the text from predictions, ensuring original structure is preserved.
-    FIXED: Ensures 1:1 token alignment and preserves non-PII words.
-    
-    Args:
-        original_sentences: List of (speaker, tokens) tuples from split_dialogue_into_sentences.
-        predictions: List of label lists corresponding to each sentence.
-        speaker_map: Dict mapping original speaker IDs to their current labels (if changed).
-        
-    Returns:
-        Reconstructed text string.
+    Reconstructs the text from predictions.
+    FIXED: Merges consecutive sentences from the SAME speaker into a single block.
     """
-    reconstructed_lines = []
+    reconstructed_blocks = []
     
+    current_speaker = None
+    current_text_parts = []
+
     for i, (speaker, tokens) in enumerate(original_sentences):
-        # Get predictions for this sentence, defaulting to empty list if missing
+        # Get predictions for this sentence
         labels = predictions[i] if i < len(predictions) else []
         
         reconstructed_words = []
         
-        # Iterate through tokens and align with labels
+        # Align tokens with labels
         for w_idx, word in enumerate(tokens):
-            # Determine the tag for this word
-            if w_idx < len(labels):
-                tag = labels[w_idx]
-            else:
-                # Fallback if labels run out: treat as "O" (keep word)
-                tag = "O"
+            tag = labels[w_idx] if w_idx < len(labels) else "O"
             
-            # If tag is empty string or "O", keep the original word
             if not tag or tag == "O":
                 reconstructed_words.append(word)
             else:
-                # Replace with the anonymization tag
                 reconstructed_words.append(tag)
         
-        # Join words with spaces
-        line_text = " ".join(reconstructed_words)
-        reconstructed_lines.append(f"{speaker}: {line_text}")
+        sentence_text = " ".join(reconstructed_words)
         
-    return "\n".join(reconstructed_lines)
+        # --- MERGING LOGIC ---
+        if speaker == current_speaker:
+            # Same speaker: append to current block with a space
+            current_text_parts.append(sentence_text)
+        else:
+            # Different speaker: finalize previous block if it exists
+            if current_speaker and current_text_parts:
+                # Join the parts with a space to form one continuous paragraph
+                full_text = " ".join(current_text_parts)
+                reconstructed_blocks.append(f"{current_speaker}: {full_text}")
+            
+            # Start new block
+            current_speaker = speaker
+            current_text_parts = [sentence_text]
+
+    # Append the final block
+    if current_speaker and current_text_parts:
+        full_text = " ".join(current_text_parts)
+        reconstructed_blocks.append(f"{current_speaker}: {full_text}")
+        
+    return "\n".join(reconstructed_blocks)
 
 def predict_sentences(sentences_tokens, model, tokenizer, id_to_tag_map, device="cpu"):
     """
@@ -1565,6 +1571,7 @@ class AnonymizationEngine:
         # 3. Reconstruct Text
         # We need to pass the original (speaker, tokens) and the predictions
         reconstructed_text = reconstruct_text_from_predictions(sentences_data, predictions, {})
+        reconstructed_text = normalize_punctuation(reconstructed_text)
         
         return reconstructed_text, True, "Success"
 
@@ -1834,6 +1841,67 @@ def run_adversarial_anonymization(text, model_id, iterations=3):
             break
 
     return current_text, iteration_log
+
+import re
+
+def normalize_punctuation(text):
+    """
+    Fixes common punctuation spacing issues and capitalization.
+    - Removes space before commas, periods, question marks, exclamation marks.
+    - Adds space after punctuation if missing.
+    - Capitalizes the first letter of sentences.
+    """
+    if not text:
+        return text
+
+    lines = text.split('\n')
+    normalized_lines = []
+
+    for line in lines:
+        # Match pattern: SPEAKER_XX: text
+        match = re.match(r'^(SPEAKER_\d+):\s*(.*)$', line)
+        if not match:
+            normalized_lines.append(line)
+            continue
+
+        speaker = match.group(1)
+        content = match.group(2)
+
+        # 1. Remove space before punctuation: "word ," -> "word,"
+        content = re.sub(r'\s+([,.!?;:])', r'\1', content)
+        
+        # 2. Ensure space after punctuation if missing (e.g., "word.word" -> "word. word")
+        # Look for punctuation followed immediately by a letter
+        content = re.sub(r'([.!?;:])([A-Za-z])', r'\1 \2', content)
+        
+        # 3. Capitalize the first letter of the sentence
+        if content:
+            content = content[0].upper() + content[1:]
+
+        # 4. Handle capitalization after sentence endings (simple heuristic)
+        # Split by sentence ending, capitalize start of new sentences
+        # Note: This is tricky with anonymized tags like [NAME], so we be careful
+        # We'll split by [.!?] followed by space
+        sentences = re.split(r'([.!?])', content)
+        final_parts = []
+        capitalize_next = False
+        
+        for part in sentences:
+            if part in ['.', '!', '?']:
+                final_parts.append(part)
+                capitalize_next = True
+            elif part.strip():
+                if capitalize_next:
+                    # Only capitalize if it looks like a word, not a tag
+                    if part[0].isalpha():
+                        part = part[0].upper() + part[1:]
+                    capitalize_next = False
+                final_parts.append(part)
+        
+        content = "".join(final_parts)
+        normalized_lines.append(f"{speaker}: {content}")
+
+    return "\n".join(normalized_lines)
 
 # --- Step 3: Anonymize Existing Transcripts ---
 
