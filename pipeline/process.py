@@ -1846,10 +1846,11 @@ import re
 
 def normalize_punctuation(text):
     """
-    Fixes common punctuation spacing issues and capitalization.
-    - Removes space before commas, periods, question marks, exclamation marks.
-    - Adds space after punctuation if missing.
-    - Capitalizes the first letter of sentences.
+    Fixes punctuation spacing issues:
+    - Removes space before apostrophes: 's → 's
+    - Removes space around hyphens: stand - up → stand-up
+    - Removes space before commas, periods, etc.
+    - Ensures space after punctuation
     """
     if not text:
         return text
@@ -1858,7 +1859,6 @@ def normalize_punctuation(text):
     normalized_lines = []
 
     for line in lines:
-        # Match pattern: SPEAKER_XX: text
         match = re.match(r'^(SPEAKER_\d+):\s*(.*)$', line)
         if not match:
             normalized_lines.append(line)
@@ -1867,21 +1867,23 @@ def normalize_punctuation(text):
         speaker = match.group(1)
         content = match.group(2)
 
-        # 1. Remove space before punctuation: "word ," -> "word,"
+        # 1. Fix apostrophe spacing: "word 's" → "word's"
+        content = re.sub(r"\s+'(\w)", r"'\1", content)
+        
+        # 2. Fix hyphen spacing: "word - word" → "word-word"
+        content = re.sub(r'\s+-\s+', '-', content)
+        
+        # 3. Remove space before punctuation: "word ," → "word,"
         content = re.sub(r'\s+([,.!?;:])', r'\1', content)
         
-        # 2. Ensure space after punctuation if missing (e.g., "word.word" -> "word. word")
-        # Look for punctuation followed immediately by a letter
+        # 4. Ensure space after punctuation if missing
         content = re.sub(r'([.!?;:])([A-Za-z])', r'\1 \2', content)
         
-        # 3. Capitalize the first letter of the sentence
+        # 5. Capitalize first letter
         if content:
             content = content[0].upper() + content[1:]
 
-        # 4. Handle capitalization after sentence endings (simple heuristic)
-        # Split by sentence ending, capitalize start of new sentences
-        # Note: This is tricky with anonymized tags like [NAME], so we be careful
-        # We'll split by [.!?] followed by space
+        # 6. Handle sentence-ending capitalization
         sentences = re.split(r'([.!?])', content)
         final_parts = []
         capitalize_next = False
@@ -1892,7 +1894,6 @@ def normalize_punctuation(text):
                 capitalize_next = True
             elif part.strip():
                 if capitalize_next:
-                    # Only capitalize if it looks like a word, not a tag
                     if part[0].isalpha():
                         part = part[0].upper() + part[1:]
                     capitalize_next = False
