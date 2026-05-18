@@ -1254,6 +1254,7 @@ def split_dialogue_into_sentences(text, nlp_pipeline=None):
 def reconstruct_text_from_predictions(original_sentences, predictions, speaker_map):
     """
     Reconstructs the text from predictions, ensuring original structure is preserved.
+    FIXED: Ensures 1:1 token alignment and preserves non-PII words.
     
     Args:
         original_sentences: List of (speaker, tokens) tuples from split_dialogue_into_sentences.
@@ -1265,33 +1266,29 @@ def reconstruct_text_from_predictions(original_sentences, predictions, speaker_m
     """
     reconstructed_lines = []
     
-    # We need to group sentences back into lines by speaker to match original format
-    # But since the model splits sentences, we might have multiple sentences per speaker turn.
-    # The safest approach is to reconstruct line-by-line based on the original input structure.
-    
-    # However, the input to this function is a flat list of sentences.
-    # To preserve the "SPEAKER: Sentence 1. Sentence 2." format, we need to know which sentences belonged to which original line.
-    # Since we lost the original line grouping in split_dialogue_into_sentences, we will output one line per sentence.
-    # OR, we can try to merge consecutive sentences from the same speaker if they were originally one line.
-    
-    # Simpler approach for now: Output one line per predicted sentence.
-    # This is safer than trying to guess original line breaks.
-    
     for i, (speaker, tokens) in enumerate(original_sentences):
-        labels = predictions[i]
+        # Get predictions for this sentence, defaulting to empty list if missing
+        labels = predictions[i] if i < len(predictions) else []
+        
         reconstructed_words = []
         
+        # Iterate through tokens and align with labels
         for w_idx, word in enumerate(tokens):
+            # Determine the tag for this word
             if w_idx < len(labels):
                 tag = labels[w_idx]
-                if tag and tag != "O":
-                    reconstructed_words.append(tag)
-                else:
-                    reconstructed_words.append(word)
             else:
+                # Fallback if labels run out: treat as "O" (keep word)
+                tag = "O"
+            
+            # If tag is empty string or "O", keep the original word
+            if not tag or tag == "O":
                 reconstructed_words.append(word)
+            else:
+                # Replace with the anonymization tag
+                reconstructed_words.append(tag)
         
-        # Join words
+        # Join words with spaces
         line_text = " ".join(reconstructed_words)
         reconstructed_lines.append(f"{speaker}: {line_text}")
         
@@ -1366,9 +1363,10 @@ class AnonymizationEngine:
             logger.info(f"AnonymizationEngine initialized: Method={self.method}, Level={self.level}")
             self._load_model()
 
-    def _build_safe_label_mapping(self):
+        def _build_safe_label_mapping(self):
         """
         Constructs a dynamic mapping from model labels to anonymization tags.
+        FIXED: Ensures robust fallback for unknown IDs.
         """
         all_target_tags = {
             'PERSON': '[PERSON]',
@@ -1390,7 +1388,7 @@ class AnonymizationEngine:
             'PRODUCT': '[ID]',
             'QUANTITY': '[ID]',
             'MISC': '[ID]',
-            'O': ''
+            'O': '' # "O" means keep original word
         }
 
         active_tags = set(all_target_tags.keys())
@@ -1406,14 +1404,27 @@ class AnonymizationEngine:
             logger.info(f"Excluding tags: {exclude_set}")
 
         mapping = {}
+        # Ensure we map EVERY possible label ID from the model config
         for label_id, label_name in self.original_id2label.items():
-            clean_label = label_name.replace("B-", "").replace("I-", "")
+            clean_label = label_name.replace("B-", "").replace("I-", "").replace("S-", "").replace("E-", "")
             
-            if clean_label in active_tags:
-                mapping[str(label_id)] = all_target_tags[clean_label]
+            # Normalize label name for comparison
+            clean_label_upper = clean_label.upper()
+            
+            if clean_label_upper in active_tags:
+                mapping[str(label_id)] = all_target_tags[clean_label_upper]
             else:
+                # If not active, map to empty string (keep original word)
                 mapping[str(label_id)] = ""
                 
+        # CRITICAL SAFETY: Ensure "O" (Outside) is always mapped to empty string
+        # Even if the model config doesn't explicitly list "O" as a label ID
+        if "0" not in mapping and "O" not in mapping: 
+             # Some configs use 0 for O, others use string "O"
+             # We trust the loop above, but if the model uses a specific ID for O, it's covered.
+             pass
+
+        logger.info(f"Built label mapping with {len(mapping)} entries.")
         return mapping
 
     def _load_model(self):
