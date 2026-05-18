@@ -1336,6 +1336,15 @@ def predict_sentences(sentences_tokens, model, tokenizer, id_to_tag_map, device=
             tag = id_to_tag_map.get(key, "O")
             
             word_labels[wid] = tag
+        if len(word_labels) != len(tokens):
+            logger.warning(f"Alignment Mismatch in sentence {i}: Tokens={len(tokens)}, Labels={len(word_labels)}")
+            logger.warning(f"Tokens: {tokens[:10]}...")
+            logger.warning(f"Labels: {word_labels[:10]}...")
+            # Force alignment to prevent reconstruction crash
+            if len(word_labels) < len(tokens):
+                word_labels.extend(["O"] * (len(tokens) - len(word_labels)))
+            else:
+                word_labels = word_labels[:len(tokens)]
         
         all_predictions.append(word_labels)
         
