@@ -177,26 +177,50 @@ echo "Upgrading pip..."
 pip install --upgrade pip -q
 
 # ============================================================================
-# 🔧 CRITICAL FIX: Install click>=8.0 EARLY to prevent Python 3.12 TypeError
-# This must happen BEFORE typer/spacy/pyannote.audio are installed
+# 🔧 CRITICAL FIX: Install click==8.1.7 AND compatible typer EARLY
+# This prevents Python 3.12 TypeError with 'Choice' subscriptable and gtts conflicts.
 # ============================================================================
-echo "Ensuring click>=8.0 is installed (Python 3.12 compatibility fix)..."
+echo "Ensuring click==8.1.7 and compatible typer are installed (Python 3.12 + gtts fix)..."
 if ! check_pip_installed "click"; then
-    echo "Installing click>=8.0..."
-    pip install "click>=8.0"
+    echo "Installing click==8.1.7..."
+    pip install "click==8.1.7" --force-reinstall --no-deps
 else
-    # Check if installed click version is sufficient
     CLICK_VERSION=$(pip show click | grep Version | awk '{print $2}' | cut -d. -f1)
+    # Check if it's 8.1.x (safe) or 8.2+ (conflict with gtts) or <8.1 (error)
     if [ "$CLICK_VERSION" -lt 8 ]; then
-        echo "⚠️  Detected click version < 8.0. Upgrading to prevent Python 3.12 errors..."
-        pip install --upgrade "click>=8.0"
+        echo "⚠️  Detected click version < 8.0. Upgrading to 8.1.7..."
+        pip install "click==8.1.7" --force-reinstall --no-deps
+    elif [ "$CLICK_VERSION" -gt 8 ]; then
+        echo "⚠️  Detected click version > 8.1. Downgrading to 8.1.7 to satisfy gtts..."
+        pip install "click==8.1.7" --force-reinstall --no-deps
     else
-        echo "✅ click version is sufficient ($(pip show click | grep Version | awk '{print $2}'))."
+        # It is 8.1.x, check minor version roughly
+        MINOR=$(pip show click | grep Version | awk '{print $2}' | cut -d. -f2)
+        if [ "$MINOR" -lt 1 ]; then
+             echo "⚠️  Detected click 8.0.x. Upgrading to 8.1.7..."
+             pip install "click==8.1.7" --force-reinstall --no-deps
+        else
+             echo "✅ click version is sufficient (8.1.x)."
+        fi
     fi
 fi
 
-echo "Ensuring typer compatibility..."
-pip install --upgrade "typer>=0.9.0"
+# Ensure typer is compatible with click 8.1.7 and Python 3.12
+if ! check_pip_installed "typer"; then
+    echo "Installing compatible typer (0.9.0 - 0.12.x)..."
+    pip install "typer>=0.9.0,<0.13.0" --force-reinstall --no-deps
+else
+    TYPER_VERSION=$(pip show typer | grep Version | awk '{print $2}')
+    # Simple check: if major version is 0.13+, it might require newer click
+    MAJOR=$(echo $TYPER_VERSION | cut -d. -f1)
+    MINOR=$(echo $TYPER_VERSION | cut -d. -f2)
+    if [ "$MAJOR" -eq 0 ] && [ "$MINOR" -ge 13 ]; then
+        echo "⚠️  Detected typer >= 0.13. Downgrading to 0.12.5 for compatibility..."
+        pip install "typer==0.12.5" --force-reinstall --no-deps
+    else
+        echo "✅ typer version is compatible ($TYPER_VERSION)."
+    fi
+fi
 
 echo "Checking NLP and Audio libraries..."
 
@@ -232,12 +256,13 @@ for pkg in "${STANDARD_PKGS[@]}"; do
     fi
 done
 
-# 3. Spacy Model Check (Multilingual 'xx' required for sentence splitting)
-if python -m spacy check xx &> /dev/null; then
-    echo "✅ spaCy multilingual model (xx) is already installed."
+# 3. Spacy Model Check (FIXED: Use full model name 'xx_ent_wiki_sm')
+echo "Checking spaCy multilingual model..."
+if python -m spacy check xx_ent_wiki_sm &> /dev/null; then
+    echo "✅ spaCy multilingual model (xx_ent_wiki_sm) is already installed."
 else
-    echo "Installing spaCy multilingual model (xx)..."
-    python -m spacy download xx
+    echo "Installing spaCy multilingual model (xx_ent_wiki_sm)..."
+    python -m spacy download xx_ent_wiki_sm
 fi
 
 # 4. Torchcodec check
@@ -283,7 +308,7 @@ echo "Checking click/typer/spacy compatibility..."
 if python -c "import click; from click import Choice; c = Choice(['a','b'])" 2>/dev/null; then
     echo "✅ click is compatible with Python 3.12"
 else
-    echo "❌ WARNING: click may not be compatible. Run: pip install --upgrade 'click>=8.0'"
+    echo "❌ WARNING: click may not be compatible. Run: pip install 'click==8.1.7'"
 fi
 
 if python -c "import typer" 2>/dev/null; then
@@ -376,7 +401,7 @@ mkdir -p "$MODEL_DIR" "$VIDEOS_DIR" "$AUDIOS_DIR" "$TRANSCRIPTS_DIR" "$ANNONYM_D
 echo "✅ Created directories."
 TARGET_BASE="$MODEL_DIR"
 
-# 10. Download WhisperX Models
+# 10. Download WhisperX Models (FIXED: Use 'hf download')
 echo ""
 echo "-------------------------------------------------"
 echo "WhisperX Model Download Options"
@@ -409,7 +434,8 @@ if [ -n "$WHISPER_MODELS_INPUT" ]; then
             echo "✅ Model '$model_name' already exists at $target_dir. Skipping download."
         else
             echo "Downloading: $model_name ($hf_repo)..."
-            huggingface-cli download "$hf_repo" --local-dir "$target_dir" --local-dir-use-symlinks False
+            # Using 'hf download' instead of deprecated 'huggingface-cli download'
+            hf download "$hf_repo" --local-dir "$target_dir" --local-dir-use-symlinks false
             
             if [ $? -eq 0 ]; then
                 echo "✅ Successfully downloaded: $model_name"
@@ -422,7 +448,7 @@ else
     echo "No models selected. Skipping WhisperX downloads."
 fi
 
-# 11. Download Pyannote Speaker Diarization Model
+# 11. Download Pyannote Speaker Diarization Model (FIXED: Use 'hf download')
 echo ""
 echo "-------------------------------------------------"
 echo "Downloading Pyannote Speaker Diarization Model (community-1)"
@@ -434,7 +460,7 @@ if [ -d "$DIARIZE_TARGET" ]; then
     echo "✅ Pyannote Diarization model already exists at $DIARIZE_TARGET. Skipping."
 else
     echo "Downloading Pyannote model..."
-    huggingface-cli download pyannote/speaker-diarization-community-1 --local-dir "$DIARIZE_TARGET" --local-dir-use-symlinks False
+    hf download pyannote/speaker-diarization-community-1 --local-dir "$DIARIZE_TARGET" --local-dir-use-symlinks false
     
     if [ $? -eq 0 ]; then
         echo "✅ Pyannote Diarization model downloaded successfully."
@@ -444,7 +470,7 @@ else
     fi
 fi
 
-# 12. Download mmbert Models
+# 12. Download mmbert Models (FIXED: Use 'hf download')
 echo ""
 echo "-------------------------------------------------"
 echo "Downloading mmbert Multilingual PII Model & Base BERT"
@@ -458,7 +484,7 @@ if [ -d "$BASE_TARGET" ]; then
     echo "✅ Base model already exists at $BASE_TARGET. Skipping."
 else
     echo "Downloading base model..."
-    huggingface-cli download jhu-clsp/mmBERT-base --local-dir "$BASE_TARGET" --local-dir-use-symlinks False
+    hf download jhu-clsp/mmBERT-base --local-dir "$BASE_TARGET" --local-dir-use-symlinks false
     
     if [ -d "$BASE_TARGET/jhu-clsp-mmBERT-base" ]; then
         echo "⚠️  Detected nested folder. Flattening structure..."
@@ -475,7 +501,7 @@ if [ -d "$PII_TARGET" ]; then
     echo "✅ PII model already exists at $PII_TARGET. Skipping."
 else
     echo "Downloading PII model..."
-    huggingface-cli download deryaerman/mmbert_multilingual_pii_ner --local-dir "$PII_TARGET" --local-dir-use-symlinks False
+    hf download deryaerman/mmbert_multilingual_pii_ner --local-dir "$PII_TARGET" --local-dir-use-symlinks false
 
     SUBFOLDER=$(find "$PII_TARGET" -mindepth 1 -maxdepth 1 -type d | head -n 1)
     
@@ -523,7 +549,7 @@ echo "✅ .env file created. Edit it with your real API key."
 echo ""
 echo "=== Setup Complete! ==="
 echo "To use the environment:"
-echo "  source $HOME/miniconda3/etc/profile.d/conda.sh"
+echo "  source \$HOME/miniconda3/etc/profile.d/conda.sh"
 echo "  conda activate $ENV_NAME"
 echo ""
 echo "Project Structure:"
