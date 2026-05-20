@@ -161,7 +161,7 @@ check_pip_installed_robust() {
     return 1
 }
 
-# --- HELPER FUNCTION: Check if Git package is installed ---
+# --- HELPER FUNCTION: Check if Git Package is Installed ---
 check_git_installed() {
     local url=$1
     local pkg_name=$2
@@ -175,6 +175,25 @@ check_git_installed() {
 # 6. Install Python packages (Optimized)
 echo "Upgrading pip..."
 pip install --upgrade pip -q
+
+# ============================================================================
+# 🔧 CRITICAL FIX: Install click>=8.0 EARLY to prevent Python 3.12 TypeError
+# This must happen BEFORE typer/spacy/pyannote.audio are installed
+# ============================================================================
+echo "Ensuring click>=8.0 is installed (Python 3.12 compatibility fix)..."
+if ! check_pip_installed "click"; then
+    echo "Installing click>=8.0..."
+    pip install "click>=8.0"
+else
+    # Check if installed click version is sufficient
+    CLICK_VERSION=$(pip show click | grep Version | awk '{print $2}' | cut -d. -f1)
+    if [ "$CLICK_VERSION" -lt 8 ]; then
+        echo "⚠️  Detected click version < 8.0. Upgrading to prevent Python 3.12 errors..."
+        pip install --upgrade "click>=8.0"
+    else
+        echo "✅ click version is sufficient ($(pip show click | grep Version | awk '{print $2}'))."
+    fi
+fi
 
 echo "Checking NLP and Audio libraries..."
 
@@ -249,6 +268,31 @@ else
         echo "❌ CRITICAL: Failed to install CRF library."
         exit 1
     fi
+fi
+
+# ============================================================================
+# 🔧 POST-INSTALLATION VERIFICATION: Critical for Python 3.12 compatibility
+# ============================================================================
+echo ""
+echo "=== Verifying Critical Dependencies ==="
+echo "Checking click/typer/spacy compatibility..."
+
+if python -c "import click; from click import Choice; c = Choice(['a','b'])" 2>/dev/null; then
+    echo "✅ click is compatible with Python 3.12"
+else
+    echo "❌ WARNING: click may not be compatible. Run: pip install --upgrade 'click>=8.0'"
+fi
+
+if python -c "import typer" 2>/dev/null; then
+    echo "✅ typer imported successfully"
+else
+    echo "❌ WARNING: typer import failed"
+fi
+
+if python -c "import spacy" 2>/dev/null; then
+    echo "✅ spacy imported successfully"
+else
+    echo "❌ WARNING: spacy import failed"
 fi
 
 # 7. Web Interface Option
