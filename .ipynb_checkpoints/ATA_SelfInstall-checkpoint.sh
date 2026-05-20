@@ -195,6 +195,9 @@ else
     fi
 fi
 
+echo "Ensuring typer compatibility..."
+pip install --upgrade "typer>=0.9.0"
+
 echo "Checking NLP and Audio libraries..."
 
 # 1. WhisperX (Special handling for Git)
