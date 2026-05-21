@@ -472,7 +472,7 @@ if [ -d "$DIARIZE_TARGET" ]; then
     echo "✅ Pyannote Diarization model already exists at $DIARIZE_TARGET. Skipping."
 else
     echo "Downloading Pyannote model..."
-    huggingface-cli download pyannote/speaker-diarization-community-1 --local-dir "$DIARIZE_TARGET" --local-dir-use-symlinks false
+    huggingface-cli download pyannote/speaker-diarization-community-1 --local-dir "$DIARIZE_TARGET" --local-dir-use-symlinks False
     
     if [ $? -eq 0 ]; then
         echo "✅ Pyannote Diarization model downloaded successfully."
@@ -494,7 +494,7 @@ if [ -d "$BASE_TARGET" ]; then
     echo "✅ Base model already exists at $BASE_TARGET. Skipping."
 else
     echo "Downloading base model..."
-    huggingface-cli download jhu-clsp/mmBERT-base --local-dir "$BASE_TARGET" --local-dir-use-symlinks false
+    huggingface-cli download jhu-clsp/mmBERT-base --local-dir "$BASE_TARGET" --local-dir-use-symlinks False
     
     if [ -d "$BASE_TARGET/jhu-clsp-mmBERT-base" ]; then
         echo "⚠️  Detected nested folder. Flattening structure..."
@@ -511,7 +511,7 @@ if [ -d "$PII_TARGET" ]; then
     echo "✅ PII model already exists at $PII_TARGET. Skipping."
 else
     echo "Downloading PII model..."
-    huggingface-cli download deryaerman/mmbert_multilingual_pii_ner --local-dir "$PII_TARGET" --local-dir-use-symlinks false
+    huggingface-cli download deryaerman/mmbert_multilingual_pii_ner --local-dir "$PII_TARGET" --local-dir-use-symlinks False
 
     SUBFOLDER=$(find "$PII_TARGET" -mindepth 1 -maxdepth 1 -type d | head -n 1)
     
