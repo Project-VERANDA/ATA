@@ -401,7 +401,14 @@ mkdir -p "$MODEL_DIR" "$VIDEOS_DIR" "$AUDIOS_DIR" "$TRANSCRIPTS_DIR" "$ANNONYM_D
 echo "✅ Created directories."
 TARGET_BASE="$MODEL_DIR"
 
-# 10. Download WhisperX Models (FIXED: Use 'hf download')
+# 10. Set Model Directory Path
+echo ""
+echo "Setting up model directory..."
+MODEL_DIR="$PWD/pipeline/model"
+mkdir -p "$MODEL_DIR"
+echo "✅ Model directory set to: $MODEL_DIR"
+
+# 11. Download WhisperX Models
 echo ""
 echo "-------------------------------------------------"
 echo "WhisperX Model Download Options"
@@ -427,6 +434,7 @@ if [ -n "$WHISPER_MODELS_INPUT" ]; then
         fi
 
         hf_repo="${MODEL_MAP[$model_name]}"
+        # Create unique folder name for each model
         folder_name="models--$(echo "$hf_repo" | sed 's/\//\--/g')"
         target_dir="$MODEL_DIR/$folder_name"
 
@@ -434,13 +442,17 @@ if [ -n "$WHISPER_MODELS_INPUT" ]; then
             echo "✅ Model '$model_name' already exists at $target_dir. Skipping download."
         else
             echo "Downloading: $model_name ($hf_repo)..."
-            # Using 'hf download' instead of deprecated 'huggingface-cli download'
-            hf download "$hf_repo" --local-dir "$target_dir" --local-dir-use-symlinks false
-            
-            if [ $? -eq 0 ]; then
+            # Try with symlinks flag first, fallback without if it fails
+            if huggingface-cli download "$hf_repo" --local-dir "$target_dir" --local-dir-use-symlinks false 2>/dev/null; then
                 echo "✅ Successfully downloaded: $model_name"
             else
-                echo "❌ Failed to download: $model_name"
+                echo "⚠️  Trying without symlinks flag..."
+                huggingface-cli download "$hf_repo" --local-dir "$target_dir"
+                if [ $? -eq 0 ]; then
+                    echo "✅ Successfully downloaded: $model_name"
+                else
+                    echo "❌ Failed to download: $model_name"
+                fi
             fi
         fi
     done
@@ -448,7 +460,7 @@ else
     echo "No models selected. Skipping WhisperX downloads."
 fi
 
-# 11. Download Pyannote Speaker Diarization Model (FIXED: Use 'hf download')
+# 12. Download Pyannote Speaker Diarization Model
 echo ""
 echo "-------------------------------------------------"
 echo "Downloading Pyannote Speaker Diarization Model (community-1)"
@@ -460,7 +472,7 @@ if [ -d "$DIARIZE_TARGET" ]; then
     echo "✅ Pyannote Diarization model already exists at $DIARIZE_TARGET. Skipping."
 else
     echo "Downloading Pyannote model..."
-    hf download pyannote/speaker-diarization-community-1 --local-dir "$DIARIZE_TARGET" --local-dir-use-symlinks false
+    huggingface-cli download pyannote/speaker-diarization-community-1 --local-dir "$DIARIZE_TARGET" --local-dir-use-symlinks false
     
     if [ $? -eq 0 ]; then
         echo "✅ Pyannote Diarization model downloaded successfully."
@@ -470,21 +482,19 @@ else
     fi
 fi
 
-# 12. Download mmbert Models (FIXED: Use 'hf download')
+# 13. Download mmbert Models
 echo ""
 echo "-------------------------------------------------"
 echo "Downloading mmbert Multilingual PII Model & Base BERT"
 echo ""
 
-TARGET_BASE="$TARGET_BASE"
-
 # --- Base Model (mmBERT-base) ---
-BASE_TARGET="$TARGET_BASE/mmBERT-base-local"
+BASE_TARGET="$MODEL_DIR/mmBERT-base-local"
 if [ -d "$BASE_TARGET" ]; then
     echo "✅ Base model already exists at $BASE_TARGET. Skipping."
 else
     echo "Downloading base model..."
-    hf download jhu-clsp/mmBERT-base --local-dir "$BASE_TARGET" --local-dir-use-symlinks false
+    huggingface-cli download jhu-clsp/mmBERT-base --local-dir "$BASE_TARGET" --local-dir-use-symlinks false
     
     if [ -d "$BASE_TARGET/jhu-clsp-mmBERT-base" ]; then
         echo "⚠️  Detected nested folder. Flattening structure..."
@@ -496,12 +506,12 @@ else
 fi
 
 # --- PII Model (mmbert_multilingual_pii_ner) ---
-PII_TARGET="$TARGET_BASE/mmbert_multilingual_pii_ner"
+PII_TARGET="$MODEL_DIR/mmbert_multilingual_pii_ner"
 if [ -d "$PII_TARGET" ]; then
     echo "✅ PII model already exists at $PII_TARGET. Skipping."
 else
     echo "Downloading PII model..."
-    hf download deryaerman/mmbert_multilingual_pii_ner --local-dir "$PII_TARGET" --local-dir-use-symlinks false
+    huggingface-cli download deryaerman/mmbert_multilingual_pii_ner --local-dir "$PII_TARGET" --local-dir-use-symlinks false
 
     SUBFOLDER=$(find "$PII_TARGET" -mindepth 1 -maxdepth 1 -type d | head -n 1)
     
