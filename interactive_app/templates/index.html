@@ -496,7 +496,7 @@
             <h3>Input Audio</h3>
             <div class="controls">
                 <button id="record-btn" class="button">
-                    <span class="icon" id="record-icon">🎤</span> Start Recording
+                    <span class="icon" id="record-icon">🎤 Start </span>Recording
                 </button>
                 <div id="timer" class="timer">00:00</div>
                 <div class="separator">OR</div>
@@ -793,8 +793,8 @@
                     mediaRecorder.start();
                     isRecording = true;
                     recordBtn.classList.add('recording');
-                    recordIcon.textContent = '⏹️';
-                    recordBtn.childNodes[1].nodeValue = " Stop Recording";
+                    recordIcon.textContent = '⏹️ Stop ';
+                    recordBtn.childNodes[1].nodeValue = "Recording";
                     
                     startTimer();
                 } catch (err) {
@@ -808,8 +808,8 @@
                     mediaRecorder.stop();
                     isRecording = false;
                     recordBtn.classList.remove('recording');
-                    recordIcon.textContent = '🎤';
-                    recordBtn.childNodes[1].nodeValue = " Start Recording";
+                    recordIcon.textContent = '🎤 Start ';
+                    recordBtn.childNodes[1].nodeValue = "Recording";
                     stopTimer();
                 }
             }
