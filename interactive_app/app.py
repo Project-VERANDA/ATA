@@ -392,9 +392,14 @@ def generate_speech_route():
         if not GTTS_AVAILABLE:
             return jsonify({'error': 'TTS not available'}), 500
         
-        voice_settings = data.get('voice_settings', {'voice': 'de'})
-        language = voice_settings.get('voice', 'de')
+        lang = data['lang'].strip()
+        if not lang or lang=="auto":
+            lang="en"
+        lang=lang.lower()
         
+        voice_settings = data.get('voice_settings', {'voice': lang})
+        language = voice_settings.get('voice', lang)
+                
         audio_path, tts_engine = generate_speech(text, voice_settings, language)
         
         if audio_path and os.path.exists(audio_path):

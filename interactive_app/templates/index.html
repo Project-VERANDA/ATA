@@ -998,7 +998,7 @@
                     const response = await fetch('/generate_speech', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ text: text })
+                        body: JSON.stringify({ text: text, lang: transcriptionLanguageSelect.value })
                     });
                     
                     const result = await response.json();
