@@ -552,7 +552,8 @@
             <h3>Anonymized Text</h3>
             <textarea id="anonymized-text" class="text-area" placeholder="Anonymized text will appear here..." readonly></textarea>
             <div id="tts-container" class="hidden">
-                 <button id="generate-speech-btn" class="button">Generate Speech</button>
+                 <button id="generate-speech-btn" class="button">Synthetic Audio</button>
+                 <button id="process-org-audio-btn" class="button">Process Audio</button>
                 <audio id="audio-player" controls class="hidden"></audio>
             </div>
         </div>
@@ -629,11 +630,15 @@
             const whisperModelSelect = document.getElementById('whisper-model-select');
             const transcriptionLanguageSelect = document.getElementById('transcription-language');
             
+            let offsetData = null;
+            let audioName = null;
+            
             const anonymizeBtn = document.getElementById('anonymize-btn');
             const anonymizedText = document.getElementById('anonymized-text');
             
             const ttsContainer = document.getElementById('tts-container');
             const generateSpeechBtn = document.getElementById('generate-speech-btn');
+            const processOrgAudioBtn = document.getElementById('process-org-audio-btn');
             const audioPlayer = document.getElementById('audio-player');
             const statusDiv = document.getElementById('status');
             const loader = document.getElementById('loader');
@@ -896,9 +901,12 @@
                     });
                 
                     const result = await response.json();
-                
+                    // console.log (`File-Audio Name...`); 
+                    // console.log (`File-Audio Name ${result.audio_name} and ${fileToTranscribe} and ${uploadedFile} and ${fileName}`); 
                     if (response.ok && result.success) {
                         transcribedText.value = result.transcription;
+                        offsetData = result.offsets;  // #RRX
+                        audioName = result.audio_name;  // #RRX
                         anonymizeBtn.disabled = false;
                         downloadOriginalBtn.disabled = false;
                         updateStatus("Transcription successful!", false);
@@ -983,6 +991,39 @@
                 } finally {
                     showLoader(false);
                     anonymizeBtn.disabled = false;
+                }
+            }
+            
+            async function processOrgAudio() {
+                const text = anonymizedText.value;
+                
+                if (!text.trim()) {
+                    updateStatus("No text to generate speech from.", true);
+                    return;
+                }
+                
+                showLoader(true);
+                try {
+                    const response = await fetch('/generate_org_audio', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ text: text, offSet: offsetData, audioName: audioName })
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (response.ok && result.success) {
+                        audioPlayer.src = result.audio_url;
+                        audioPlayer.classList.remove('hidden');
+                        downloadSpeechBtn.disabled = false;
+                        updateStatus("Speech generated successfully!", false);
+                    } else {
+                        throw new Error(result.error || "Speech generation failed.");
+                    }
+                } catch (error) {
+                    updateStatus(`Speech generation failed: ${error.message}`, true);
+                } finally {
+                    showLoader(false);
                 }
             }
 
@@ -1098,6 +1139,7 @@
             saveEditBtn.addEventListener('click', saveEdit);
             anonymizeBtn.addEventListener('click', anonymizeText);
             generateSpeechBtn.addEventListener('click', generateSpeech);
+            processOrgAudioBtn.addEventListener('click', processOrgAudio);
             anonymizedText.addEventListener('input', () => {
                 const hasAnonymizedText = anonymizedText.value.trim().length > 0;
                 llmRewriteBtn.disabled = !hasAnonymizedText;
