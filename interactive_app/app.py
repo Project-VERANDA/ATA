@@ -12,6 +12,7 @@ from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from werkzeug.utils import secure_filename
 from collections import OrderedDict
+from audio_utils import AudioBeepReplacer
 
 # --- Path Configuration ---
 # Determine the directory containing this script (interactive_app/)
@@ -230,6 +231,32 @@ def generate_speech(text, voice_settings=None, language='de'):
         logger.error(f"Speech generation with beeps failed: {e}")
         return None, None
 
+def get_relevant_offsets(conversation, offsets):
+    conversation=re.sub(r"SPEAKER_[0-9]*:", "", conversation)
+    conversation=re.sub(r"\n", " ", conversation)
+    conversation=re.sub(r"  *", " ", conversation)
+    conversation=re.sub(r"^ *", "", conversation)
+
+    tokens=conversation.split(" ")
+
+    peep_array=[]
+    cnt=0
+    for i in range(len(offsets)):
+        for j in range(len(offsets[i]['words'])):
+            x_word=offsets[i]['words'][j]['word']
+	
+            if cnt<len(tokens):
+                if re.match(r"\[.*\]", tokens[cnt]):
+                    print ("peep!")
+                    peep_array.append({'start': offsets[i]['words'][j]['start'], 'end':offsets[i]['words'][j]['end'], 'word':offsets[i]['words'][j]['word']})
+                elif x_word!=tokens[cnt]:
+                    logger.error(f"offset alginment error: {x_word} | {tokens[cnt]}")
+	           
+            cnt+=1
+    
+    return peep_array
+
+
 # --- ROUTES ---
 
 @app.route('/')
@@ -276,13 +303,15 @@ def upload_file():
             file.save(filepath)
             
             logger.info(f"Transcribing file: {filename} in language: {language}")
-            transcription = transcribe_audio_locally(filepath, language=language)
+            transcription, wordOffS = transcribe_audio_locally(filepath, language=language)
             
-            os.remove(filepath)
+            #os.remove(filepath)
             
             return jsonify({
                 'success': True,
-                'transcription': transcription
+                'transcription': transcription,
+                'offsets': wordOffS,
+                'audio_name': filepath
             })
         
         return jsonify({'error': 'Invalid file format'}), 400
@@ -329,16 +358,18 @@ def transcribe_recording():
             audio_file_to_transcribe = temp_file_path
         
         logger.info(f"Starting transcription of: {audio_file_to_transcribe}")
-        transcription = transcribe_audio_locally(audio_file_to_transcribe, language=language)
+        transcription, wordOffS = transcribe_audio_locally(audio_file_to_transcribe, language=language)
             
-        if temp_file_path and os.path.exists(temp_file_path):
-            os.unlink(temp_file_path)
-        if converted_file_path and os.path.exists(converted_file_path):
-            os.unlink(converted_file_path)
+        #if temp_file_path and os.path.exists(temp_file_path):
+        #    os.unlink(temp_file_path)
+        #if converted_file_path and os.path.exists(converted_file_path):
+        #    os.unlink(converted_file_path)
             
         return jsonify({
             'success': True,
-            'transcription': transcription
+            'transcription': transcription,
+            'offsets': wordOffS,
+            'audio_name': audio_file_to_transcribe
         })
     
     except Exception as e:
@@ -377,6 +408,50 @@ def anonymize_text():
     except Exception as e:
         logger.error(f"Error in anonymize route: {str(e)}")
         return jsonify({'error': f'Error anonymizing text: {str(e)}'}), 500
+
+
+@app.route('/generate_org_audio', methods=['POST'])
+def generate_org_audio_route():
+    try:
+        data = request.get_json()
+        if not data or 'text' not in data:
+            return jsonify({'error': 'No text provided'}), 400
+        
+        text = data['text'].strip()
+        offS = data['offSet']
+        audio_file_name = data['audioName']
+        print ("text:", text)
+        #print ("offS:", offS)
+        print ("AUDIO:", audio_file_name, "<")
+        if not text:
+            return jsonify({'error': 'Empty text'}), 400
+        
+        if not GTTS_AVAILABLE:
+            return jsonify({'error': 'TTS not available'}), 500
+            
+        offsets = get_relevant_offsets(text, offS)
+        print ("=>", offsets)
+        output_wav="speech_output_beeped.mp3"
+
+        audio_path = os.path.join(os.path.abspath(app.config['UPLOAD_FOLDER']), output_wav)
+
+        replacer = AudioBeepReplacer()
+        output_file = replacer.replace_offsets_with_beeps(audio_file_name,offsets,audio_path)
+
+        if audio_path and os.path.exists(audio_path):
+            audio_filename = os.path.basename(audio_path)
+            return jsonify({
+                'success': True,
+                'audio_file': audio_filename,
+                'audio_url': f'/download_speech/{audio_filename}',
+                'message': 'Speech generated successfully!'
+            })
+        else:
+            return jsonify({'error': 'Failed to generate speech'}), 500
+    except Exception as e:
+        logger.error(f"Error generating audio: {str(e)}")
+        return jsonify({'error': f'Error generating audio: {str(e)}'}), 500
+
 
 @app.route('/generate_speech', methods=['POST'])
 def generate_speech_route():

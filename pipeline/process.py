@@ -10,6 +10,7 @@ import re
 import time
 import argparse
 import json
+import numpy as np
 from datetime import datetime
 from collections import defaultdict
 from pathlib import Path
@@ -543,6 +544,24 @@ def verify_diarization_model(model_path):
     logger.info(f"Diarization model verified at: {model_path}")
     return True
 
+
+def convert_numpy(obj):
+    if isinstance(obj, dict):
+        return {k: convert_numpy(v) for k, v in obj.items()}
+
+    elif isinstance(obj, list):
+        return [convert_numpy(v) for v in obj]
+
+    elif isinstance(obj, np.floating):
+        return float(obj)
+
+    elif isinstance(obj, np.integer):
+        return int(obj)
+
+    else:
+        return obj
+        
+        
 # --- Extract Audio ---
 
 def process_videos():
@@ -1014,7 +1033,9 @@ def transcribe_audio_locally(audio_path, language='de'):
         else:
             logger.info(f"--- Transcription Complete. Total lines: {len(result_lines)} ---")
 
-        return result_text
+        resultOffset=convert_numpy(result["segments"])
+        
+        return result_text, resultOffset
 
     except Exception as e:
         error_msg = f"Transcription failed: {e}"
