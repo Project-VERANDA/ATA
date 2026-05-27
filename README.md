@@ -1,120 +1,344 @@
-# Audio-Transcript-Anonymizer
+# Audio-Transcript-Anonymizer (**ATA**)
 
-This Pipeline accepts an audio or video file, transcribes the content using WhisperX and applies speaker diarization via Pyannote.
-It can be used for interviews, therapy sessions or conversations involving multiple speakers in general.
+A comprehensive pipeline for privacy-preserving audio processing. This tool accepts audio or video files, transcribes the content using WhisperX, applies speaker diarization via Pyannote, and anonymizes Personally Identifiable Information (**PII**) using **BERT** and LLMs. It uniquely supports audio-level anonymization, replacing sensitive spoken segments with beeps to create fully anonymized audio files.
 
+Ideal for: Interviews, therapy sessions, legal consultations, and any conversation involving multiple speakers where privacy is paramount. 🚀 Features
 
-# Features
+    
+  Video to Audio Extraction: Automatically isolates audio from video files (**MP4**, **MKV**, etc.).
+  
+  * High-Accuracy Transcription: Powered by WhisperX (Faster-Whisper) with support for 12+ languages.
+  
+  * Speaker Diarization: Identifies and separates speakers using Pyannote.audio.
+  
+  * Text Anonymization (**BERT**): Detects and replaces **PII** (names, emails, locations, phone numbers, etc.) using a multilingual **BERT** model.
+  
+   * 🆕 Audio Anonymization (Beep Replacement): Maps identified **PII** to audio timestamps and replaces sensitive segments with beeps, preserving the rest of the conversation.
+  
+  * **LLM** Rewriting: Uses Large Language Models to generalize indirect identifiers (e.g., specific job titles, rare locations) that **BERT** might miss.
+  
+  * Adversarial Mode: Optional *Red Team vs. Blue Team* loop to iteratively improve anonymization quality.
+  
+  * Web Interface: User-friendly **GUI** for uploading, recording, editing, and downloading anonymized results.
+  
+  * Bulk Processing: Supports batch processing via command line or **ZIP** file uploads.
 
-Isolation of audio from video files
+# 📦 Installation Prerequisites
 
-Automatic transcription via WhisperX
+    Python 3.8+
+    FFmpeg: Required for audio/video conversion.
+    Ubuntu/Debian: sudo apt-get install ffmpeg
+    macOS: brew install ffmpeg
+    Windows: Download from ffmpeg.org and add to **PATH**.
+    **NVIDIA** **GPU** (Optional but Recommended): For 10x faster processing.
 
-Speaker diarization via Pyannote.audio
+**Step-by-Step Setup**
 
-Text anonymization with BERT via https://huggingface.co/deryaerman/mmbert_multilingual_pii_ner (Master's thesis project @ the German Research Centre for Artificial Intelligence)
-
-LLM rewriting of text to remove indirect identifiers that BERT will not detect.
-
-Conversation back into synthetic audio,
-
-
-# Installation
-
-ATA_Setup.sh is a bash script that will install all the relevant files including for the required models. Read the sub-steps below **FIRST**. 
-
-When you have completed these steps, run the setup by typing into your command line while in the ATA folder: ./ATA_Setup.sh
-There are a few points where you may be prompted to chose installation features
-
-Upon completion of the script, you will see there is an instruction telling you to update the .env environment file. Only do this if you want to use the LLM API call features of this tool. _I advise ignoring this for now - this feature is not yet fully functional._
-
-## Hardware requirements
-
-This tool allows for flexible model usage. In total with all models, you should ensure you have ~30 GB of storage space available on your system for all features and models. Please note this does _not_ include the use of local LLM models, which this tool does not currently support. This also does not include the storage space required to store all of your audio/video files and the resulting 
-
-WhisperX (for transcription) and pyanote (the speaker-identification model) can be run using GPU (nvidia-only!) or CPU. GPU availability allows for both of these steps to run _considerably_ faster (x13 times faster by one calculation). If there is no GPU available or at least none detected, these processes will fall back to CPU. They will complete faster with more CPU resources.
-
-## Pre-installation
-### Model Download / Access
-The WhisperX (AKA Faster Whisper) and anonymization model downloads are fully automated. However, the diarization model is gated on Huggingface - You must provide contact information to be able to use or download it. To do this, create a Huggingface account or log in, then navigate to https://huggingface.co/pyannote/speaker-diarization-community-1. Fill in the requested information on the webpage to gain access to the model. 
-
-We highly suggest using the large-v3 model for best accuracy in the transcription. If your system does not have a GPU available and limited CPU resources, you may wish to consider a smaller model. Unfortunately, I cannot give you a guide about which model will work best for your system.
-
-
-### Huggingface Tokens
-While logged in, navigate to https://huggingface.co/settings/tokens and create a read-only token. Save the token code somewhere (for good data security practises, don't save it on the cloud unless your cloud is encrypted! For example, with Proton (link)).
-
-When you run the self-install script, you will be prompted for the huggingface token. Paste the token when prompted.
-
-## Flask Installation
-
-You will be prompted with a question asking if you want to install the Flask requirements. This is only necessary if you also want to enable the web interface. If you do not need the web interface, input `n` and press enter. Otherwise, input `y` and press enter. The required packages will install.
-
-
-# Running the script
-
-After the ATA_SelfInstall script has completed with your desired options, you can use ATA either via command-line arguments or via the web interface.
-I strongly suggest regularly pulling the latest version of this software with the following command in the ATA directory.
-```git pull```
-
-## Commandline Processing of data
-Run the script. From the ATA folder, in your command-line, type: python pipeline/process.py 
-
-### LLM rewriting of files.
-This version of the software currently attempts to call a Charité LLM server. This will not work for anyone else - it only works on ATA's internal Charité server. When running this on your own instance, you will have to update the API endpoint and API token for your chosen service provider. Edit the hidden environment file (.env) file with your API key, and update the API endpoint in pipeline/process.py and web_interface/app.py for your chosen LLM API provider.
-**I suggest for now ignoring this feature.**
-
-If you do have an LLM provider available, then you can use the LLM-rewrite feature in the command line with
-```python pipeline/process.py --enable-llm```
-This will output both the BERT-anonymized texts in the annoym folder in /pipeline/, and the LLM-rewritten texts in the LLM-Anon folder in /pipeline/. The LLM rewrite rewrites the BERT-anonymized texts, not the non-anonymized transcripts.
-
-## Web interface set-up
-To use the web interface, you need to install the flask interface prompted during the ATA_SelfInstall.sh set-up outlined above. If you did not install it originally, running the script again and selecting the flask install on the new run should work fine. 
-**Back up your files before re-running the 
-
-To start the web interface, type instead: python interactive_app/app.py
-You will hopefully be able to access the web interface by opening https://10.0.1.159/ in your browser. HTTPS is required to enable the microphone recording feature.
-If you are able to access the web interface, it should hopefully be fairly self-explanatory. Record a sample audio or upload your own. Click the buttons.
-If the web interface is not accessible, you will need to do some troubleshooting. This repo is not advanced enough to handle that entirely internally. Sorry.
-
-### LLM Models
-This version of the software currently attempts to call a Charité LLM server. This will not work for anyone else - it only works on ATA's internal Charité server. When running this on your own instance, you will have to update the API endpoint and API token for your chosen service provider. Edit the hidden environment file (.env) file with your API key, and update the API endpoint in pipeline/process.py and web_interface/app.py for your chosen LLM API provider.
-**I suggest for now ignoring this feature.**
-
-# Post-installation model downloading
-If the model download fails due to a missing token, or you want to install the models at a later time, you can download them with following commands:
-
-Download the community-1 model with the following guide:
-
-First, authenticate to Huggingface. You will need a Huggingface acccount first, and then create an access token (which you can get from https://huggingface.co/settings/tokens after logging in).
-
-```huggingface-cli login```
-Then paste your access token.
-
-If your authentication functions correctly, navigate to the ATA/pipeline/model/ folder and download the diarization model with the following command:
+  Clone the repository:
 ```
-huggingface-cli download pyannote/speaker-diarization-community-1 \
->   --local-dir models--pyannote--speaker-diarization-community-1 \
->   --local-dir-use-symlinks False
+    git clone <repository-url>
+    cd ATA
+``` 
+   Run the setup script:
+```
+    ./ATA_Setup.sh
+```
+   Follow the prompts.
+
+   * Choose y to install Flask (Web Interface) if you plan to use the **GUI**.
+   * Input n if you only need the command-line interface.
+
+   * Configure Hugging Face Access (One-time):
+   
+   * Create an account at Hugging Face.
+   
+   * Request access to the diarization model: Visit pyannote/speaker-diarization-community-1 and fill out the form.
+   
+   * Generate a Read-Only Token: Go to Settings/Tokens.
+   
+   * When prompted during setup, paste your token.
+   
+   **(Optional) Configure LLM API:**
+   
+   * Create a .env file in the ATA root directory (see Configuration below).
+   
+   * This is required for the LLM rewriting and adversarial features.
+
+
+
+# 🛠️ Usage Option A: Command Line Interface (**CLI**)
+
+Run the full pipeline with granular control:
+
+## Run full pipeline (Default)
+
+`python pipeline/process.py`
+
+## Run with specific language (e.g., German)
+
+`python pipeline/process.py --lang DE`
+
+## Skip diarization for faster processing
+
+`python pipeline/process.py --disable-diarization`
+
+## Run only LLM rewrite on existing anonymized files
+
+`python pipeline/process.py --llm-only --llm-model medgemma27b`
+
+## Enable adversarial anonymization (3 iterations)
+
+`python pipeline/process.py --adversarial`
+
+## Exclude specific tags from anonymization
+
+`python pipeline/process.py --exclude-tags PROFESSION QUANTITY`
+
+# CLI Arguments Reference
+Argument	Description
+```--disable-transcription	Skip audio extraction from video files.
+
+--disable-diarization	Skip speaker identification (uses generic labels).
+
+--disable-anonymization	Skip **BERT**-based **PII** removal.
+
+--disable-llm	Disable **LLM**-based indirect identifier removal.
+
+--llm-only	Skip **BERT**; process existing annonym folder files with **LLM** only.
+
+--lang <**CODE**>	Force language (AR, DE, EN, FI, FR, HI, IT, PL, PT, SP, ES, TR).
+
+--llm-model <**MODEL**>	Select specific **LLM** model (e.g., medgemma, gpt-oss-120b).
+
+--verbose	Enable debug-level logging.
+
+--adversarial	Enable dual-agent adversarial anonymization loop.
+
+--include-tags <**TAGS**>	Restrict anonymization to specific tags (e.g., **PERSON** **ORG**).
+
+--exclude-tags <**TAGS**>	Ignore specific tags (e.g., **PROFESSION**).`
 ```
 
-Download all the WhisperX models with the following command, which can be copy/pasted into the command line when in the pipeline/model/ folder.
-```for size in tiny base small medium large-v2 large-v3; do
-  echo "Downloading faster-whisper-$size..."
-  huggingface-cli download Systran/faster-whisper-$size \
-    --local-dir "models--Systran--faster-whisper-$size" \
-    --local-dir-use-symlinks False
-done
+## Option B: Web Interface
+
+  Start the server:
+
+    python interactive_app/app.py
+
+  Note: The server generates a self-signed **SSL** certificate automatically. You may need to accept the security warning in your browser.
+
+  Access the interface:
+    Open [https://**127**.0.0.1:**5001**](https://**127**.0.0.1:**5001**) in your browser.
+  **HTTPS** is required for the microphone recording feature.
+
+  Workflow:
+   * Upload: Drag & drop audio/video files or click to browse.
+   
+   * Record: Use the built-in microphone recorder for live transcription.
+   
+   * Transcribe: Select language and click *Transcribe*.
+   
+   *  Edit: Correct any transcription errors manually.
+   
+   * Anonymize: Click *Anonymize Text* to apply **BERT** and/or **LLM**.
+   
+   * 🆕 Generate Anonymized Audio: Click this button to replace **PII** segments with beeps.
+   
+   * Download: Download the text transcript and the _beeped.wav audio file.
+
+🔧 Configuration Environment Variables (.env)
+
+Create a .env file in the **ATA** root directory to configure optional features:
+
+## LLM API Configuration (Required for LLM Rewrite & Adversarial Mode)
+
+```
+CHAT_AI_API_KEY=your_api_key_here 
+CHAT_AI_ENDPOINT=https://your-api-endpoint.com/v1
+CHAT_AI_MODEL=gpt-oss-120b
 ```
 
-Alternatively, use only the large-v3 model.
+## Web Interface Settings
+```
+USE_HTTPS=true
+```
+  ⚠️ Note: You must update this to your own API provider (e.g., OpenAI, local LLM server) for external use.
 
-```huggingface-cli download Systran/faster-whisper-large-v3 \
-  --local-dir models--Systran--faster-whisper-large-v3 \
-  --local-dir-use-symlinks False
-  ```
+# Hardware Requirements
 
-_It may not be necessary to install the whisper-large-v3 file to the models folder. This should be tested._
+|Component|CPU Only|With NVIDIA GPU|
+----|----|----
+| WhisperX Transcription|~13x slower|Optimal|
+----|----|----|
+|Speaker DiarizatioN|~13x slower|Optimal|
+----|----|----
+|Memory (**RAM**)|**8GB** minimum|**16GB** recommended|
+----|----|----
+|Storage (Models)|~**30GB**|	~**30GB**|
+
+
+### Verify **GPU** Availability:
+
+```
+python -c "import torch; print('**CUDA** Available:', torch.cuda.is_available())"
+```
+
+# 📂 Output Directory Structure
+
+**ATA**/ 
+├── pipeline/ │   
+├── videos/          # Input video files │   
+├── audios/          # Extracted **WAV** files │   
+├── transcripts/     # Raw transcription files (.txt) │   
+├── anonym/          # **BERT**-anonymized transcripts (_anon.txt) │   ├── **LLM**-Anon/    # **LLM**-rewritten transcripts (_llm_*.txt, _adversarial_*.txt) 
+│   
+├── uploads/         # Temporary storage for web uploads (includes _beeped.wav files) 
+│   ├── model/           # Downloaded AI models 
+│    └── logs/            # Session logs (session_YYYY-MM-DD_HH-MM-SS.txt) 
+└── interactive_app/     # Web interface files
+
+Note on Audio Outputs:
+
+    Anonymized audio files generated via the web interface are saved in pipeline/uploads/ with the suffix _beeped.wav (e.g., interview_beeped.wav).
+    These files are temporary; download them via the web interface or move them manually.
+
+🎙️ New Feature: Audio Beep Replacement
+
+The pipeline now supports audio-level anonymization. ### How It Works
+
+    Transcription & Identification: The system transcribes audio and identifies **PII** entities using the **BERT** model.
+    Offset Mapping: The system maps the text-based **PII** tags back to their precise time offsets in the original audio file.
+    Beep Replacement: Using AudioBeepReplacer, the identified segments are replaced with a 1000Hz sine wave beep (adjustable).
+    Output: Generates a new audio file where sensitive information is audibly masked while preserving the rest of the conversation.
+
+### Programmatic Usage
+
+If you are integrating this into your own scripts:
+
+from audio_utils import AudioBeepReplacer
+
+# 'offsets' must be obtained from the transcription step (returned by transcribe_audio_locally)
+
+replacer = AudioBeepReplacer(beep_freq=**1000**, beep_gain_db=-6) output_file = replacer.replace_offsets_with_beeps(*input.wav*, offsets, *output_beeped.wav*)
+
+🛡️ Supported **PII** Tags
+
+The **BERT** anonymization model detects and replaces the following entity types:
+
+|Tag |	Description	| Replacement|
+
+**PERSON** |	Names |	[**PERSON**]
+----|----|----
+PERSON_EMAIL |	Email addresses |	[**EMAIL**]
+----|----|----
+PERSON_SOCIAL_RELATION |	Family/Social relations	| [NAME_RELATIVE]
+----|----|----
+**ORG** |	Organizations |	[**ORGANISATION**]
+----|----|----
+LOC_CITY | Cities |	[**CITY**]
+----|----|----
+LOC_COUNTRY	| Countries |	[**COUNTRY**]
+----|----|----
+LOC_STREET	| Street addresses	| [**STREET**]
+----|----|----
+**DATETIME**	| Dates/Times |	[**DATETIME**]
+----|----|----
+DATETIME_AGE |	Age references |	[**AGE**]
+----|----|----
+CODE_PHONE	| Phone numbers	| [**PHONE**]
+----|----|----
+CODE_URL |	URLs |	[**URL**]
+----|----|----
+**PROFESSION** |	Job titles |	[**PROFESSION**]
+
+Use --include-tags or --exclude-tags to customize which tags are anonymized. 
+
+# 🐞 Troubleshooting Issue: 
+
+## *Audio Beep Replacement failed* or *PyDub not available*
+
+Cause: Missing pydub library or ffmpeg binary. Solution:
+
+    Install PyDub: pip install pydub
+    Install FFmpeg:
+    Ubuntu: sudo apt-get install ffmpeg
+    macOS: brew install ffmpeg
+    Windows: Download and add to **PATH**.
+    Restart the server.
+
+## Issue: *Offset alignment error* in logs
+
+Cause: The text transcription does not perfectly match the audio timing. Solution:
+
+    This is a known limitation of **ASR**. The system attempts auto-correction.
+    Manually editing the transcript in the web interface before generating audio improves alignment.
+
+## Issue: *Diarization model access denied*
+
+Solution:
+
+    Ensure you have requested access at Hugging Face.
+    Run huggingface-cli login and enter your token.
+
+## Issue: Web interface not accessible
+
+Solution:
+
+    Check if port **5001** is blocked by a firewall.
+    Verify USE_HTTPS=true in .env if using **HTTPS**.
+    Review logs in pipeline/logs/.
+
+# 🔄 Pending Updates & Roadmap
+
+* [ ] Batch Processing: Add folder-based batch processing (currently **ZIP** only).
+    
+* [ ] Local **LLM** Support: Switch from **API** calls to local **LLM** models (e.g., Ollama, LM Studio).
+    
+* [ ] Live Streaming: Implement chunk-processing for live transcription and anonymization.
+    
+* [ ] Non-**NVIDIA** **GPU**: Add support for **AMD**/Intel GPUs.
+    
+* [ ] Improved **TTS**: Switch from Google **TTS** to a local text-to-speech engine.
+    
+* [ ] Production Web Interface: Upgrade the demo interface to a full production-ready UI.
+
+* [ ] * [x] Re-adding the anonymization process.
+* [ ] Adding the models to the Github Repo.
+* [x] Add a web interface.
+  *   [ ] Update the existing web interface to be a "demo" interface.
+  *   [ ] Create a new production interface.
+      * [ ] Add buttons for the interface to enable/disable each feature in the pipeline.
+* [x] Add a recording button to the web interface for demos.
+* [ ] Add batch transcripting via selected folder instead of only with selected files.
+* [ ] Add automatic cleanup of the input video/audio folders. 
+* [ ] Add arguments for a debug running of the pipeline.
+* [x] Add text to speech for the output transcripts.
+* [x] Switch the diarization to speaker-diarization-community-1 from the older diarization model.
+* [x] Automate the downloading of WhisperX models.
+* [ ] Switch from API calls for the AI models to local model processing.
+  *  [ ] Add a check/installation for local models, and if not, fall back to API calls.
+  *  [ ] Disable the LLM rewrite function when no LLM model is available.
+  *  [ ] Switch the .env file to also host the LLM API endpoint variable, instead of hardcoding it into the code.
+* [ ] Do some optimizations for the LLM system prompt.
+* [ ] Try getting all the local LLM models working.
+* [x] Update the Running the Script section of this ReadMe.
+* [ ] Add arguments for process.py to enable/disable each feature in the pipeline.
+* [ ] Add code enabling other non-nvidia GPUs.
+* [ ] Switch from Google TTS to a new, locally-running text-to-speech tool.
+* [ ] Disable the translation feature of WhisperX.
+* [ ] Look into whether there can be chunk-processing of live-recorded data for live transcription and anonymization.
+
+# 📄 License & Credits
+
+This project utilizes:
+
+    WhisperX (Faster-Whisper)
+    Pyannote.audio
+    Hugging Face Transformers (mmbert_multilingual_pii_ner)
+    Flask
+    PyDub
+
+Developed for privacy-preserving audio analysis.
 
 # Pending updates
 
