@@ -37,7 +37,7 @@ Ideal for: Interviews, therapy sessions, legal consultations, and any conversati
 
   Clone the repository:
 ```
-    git clone <repository-url>
+    git clone https://github.com/Project-VERANDA/ATA/
     cd ATA
 ``` 
    Run the setup script:
@@ -228,13 +228,13 @@ The **BERT** anonymization model detects and replaces the following entity types
 
 |Tag |	Description	| Replacement|
 
-**PERSON** |	Names |	[**PERSON**]
+PERSON|Names|[**PERSON**]
 ----|----|----
 PERSON_EMAIL |	Email addresses |	[**EMAIL**]
 ----|----|----
 PERSON_SOCIAL_RELATION |	Family/Social relations	| [NAME_RELATIVE]
 ----|----|----
-**ORG** |	Organizations |	[**ORGANISATION**]
+ORG |	Organizations |	[**ORGANISATION**]
 ----|----|----
 LOC_CITY | Cities |	[**CITY**]
 ----|----|----
@@ -242,7 +242,7 @@ LOC_COUNTRY	| Countries |	[**COUNTRY**]
 ----|----|----
 LOC_STREET	| Street addresses	| [**STREET**]
 ----|----|----
-**DATETIME**	| Dates/Times |	[**DATETIME**]
+DATETIME	| Dates/Times |	[**DATETIME**]
 ----|----|----
 DATETIME_AGE |	Age references |	[**AGE**]
 ----|----|----
