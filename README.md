@@ -2,8 +2,9 @@
 
 A comprehensive pipeline for privacy-preserving audio processing. This tool accepts audio or video files, transcribes the content using WhisperX, applies speaker diarization via Pyannote, and anonymizes Personally Identifiable Information (**PII**) using **BERT** and LLMs. It uniquely supports audio-level anonymization, replacing sensitive spoken segments with beeps to create fully anonymized audio files.
 
-Ideal for: Interviews, therapy sessions, legal consultations, and any conversation involving multiple speakers where privacy is paramount. 🚀 Features
+Ideal for: Interviews, therapy sessions, legal consultations, and any conversation involving multiple speakers where privacy is paramount. 
 
+# 🚀 Features
     
   Video to Audio Extraction: Automatically isolates audio from video files (**MP4**, **MKV**, etc.).
   
