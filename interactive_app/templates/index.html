@@ -551,11 +551,12 @@
         <div class="section">
             <h3>Anonymized Text</h3>
             <textarea id="anonymized-text" class="text-area" placeholder="Anonymized text will appear here..." readonly></textarea>
-            <div id="tts-container" class="hidden">
+            <div id="tts-container" class="hidden" style="display: flex; gap: 10px; justify-content: center; margin-top: 15px;">
+                 <button id="surrogate-btn" class="button">Surrogate</button>
                  <button id="generate-speech-btn" class="button">Synthetic Audio</button>
                  <button id="process-org-audio-btn" class="button">Process Audio</button>
-                <audio id="audio-player" controls class="hidden"></audio>
             </div>
+            <audio id="audio-player" controls class="hidden"></audio>
         </div>
         
         <div class="section">
