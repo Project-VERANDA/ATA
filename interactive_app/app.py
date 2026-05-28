@@ -8,6 +8,7 @@ import logging
 import ipaddress
 import zipfile
 import shutil
+import difflib
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from werkzeug.utils import secure_filename
@@ -231,6 +232,69 @@ def generate_speech(text, voice_settings=None, language='de'):
         logger.error(f"Speech generation with beeps failed: {e}")
         return None, None
 
+
+def diff_relevant_offsets(offs, s2):
+    # flatten offsets + build reference string
+    offsets = []
+    s1_tokens = []
+
+    for item in offs:
+        for w in item["words"]:
+            word = w["word"]
+            s1_tokens.append(word)
+            offsets.append([w["start"], w["end"], word.lower()])
+
+    s1 = " ".join(s1_tokens).lower()
+
+    # normalize s2
+    s2 = re.sub(r"SPEAKER_[0-9]+:", "", s2)
+    s2 = re.sub(r"\n", "", s2).lower()
+
+
+    w1 = s1.split()
+    w2 = s2.split()
+
+    matcher = difflib.SequenceMatcher(None, w1, w2)
+
+    result = [
+        {
+            "type": tag,
+            "s1_words": w1[i1:i2],
+            "s1_range": (i1, i2),
+            "s2_words": w2[j1:j2],
+            "s2_range": (j1, j2),
+        }
+        for tag, i1, i2, j1, j2 in matcher.get_opcodes()
+        if tag != "equal"
+    ]
+
+    time_span_remove = []
+
+
+    for r in result:
+
+        start_i, end_i = r["s1_range"]
+
+        # end boundary (use next token start if possible)
+        if end_i < len(offsets):
+            x_en = float(offsets[end_i][0])
+        else:
+            x_en = float(offsets[-1][0])
+
+        # start boundary (use previous token end if possible)
+        if start_i - 1 >= 0:
+            x_st = float(offsets[start_i - 1][1])
+        else:
+            x_st = float(offsets[0][1])
+
+        time_span_remove.append({
+            "start": x_st,
+            "end": x_en,
+            "word": r["s1_words"],
+        })
+
+    return time_span_remove
+    
 def get_relevant_offsets(conversation, offsets):
     conversation=re.sub(r"SPEAKER_[0-9]*:", "", conversation)
     conversation=re.sub(r"\n", " ", conversation)
@@ -421,7 +485,7 @@ def generate_org_audio_route():
         offS = data['offSet']
         audio_file_name = data['audioName']
         print ("text:", text)
-        #print ("offS:", offS)
+        print ("offS:", offS)
         print ("AUDIO:", audio_file_name, "<")
         if not text:
             return jsonify({'error': 'Empty text'}), 400
@@ -429,7 +493,7 @@ def generate_org_audio_route():
         if not GTTS_AVAILABLE:
             return jsonify({'error': 'TTS not available'}), 500
             
-        offsets = get_relevant_offsets(text, offS)
+        offsets = diff_relevant_offsets(offS, text)
         print ("=>", offsets)
         output_wav="speech_output_beeped.mp3"
 
