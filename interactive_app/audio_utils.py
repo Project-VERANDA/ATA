@@ -4,7 +4,7 @@ import os
 
 
 class AudioBeepReplacer:
-    def __init__(self, beep_freq=1000, beep_gain_db=-6):
+    def __init__(self, beep_freq=1000, beep_gain_db=-30):
         self.Sine = Sine
         self.beep_freq = beep_freq
         self.beep_gain_db = beep_gain_db
