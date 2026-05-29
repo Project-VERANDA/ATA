@@ -638,6 +638,7 @@
             const anonymizedText = document.getElementById('anonymized-text');
             
             const ttsContainer = document.getElementById('tts-container');
+            const surrogateBtn = document.getElementById('surrogate-btn');
             const generateSpeechBtn = document.getElementById('generate-speech-btn');
             const processOrgAudioBtn = document.getElementById('process-org-audio-btn');
             const audioPlayer = document.getElementById('audio-player');
@@ -1028,6 +1029,41 @@
                 }
             }
 
+            async function surrogateText() {
+                const text = anonymizedText.value;
+                if (!text.trim()) {
+                    updateStatus("No text to generate a surrogate.", true);
+                    return;
+                }
+                
+                showLoader(true);
+                try {
+                    const response = await fetch('/surrogate_text', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ text: text, lang: transcriptionLanguageSelect.value })
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (response.ok && result.success) {
+                        anonymizedText.value = result.surrogated_text;
+                        anonymizedText.dispatchEvent(new Event('input'));
+                        ttsContainer.classList.remove('hidden');
+                        downloadBertBtn.disabled = false;
+                        updateStatus("Surrogation successful!", false);
+                    } else {
+                        throw new Error(result.error || "Surrogation failed.");
+                    }
+                } catch (error) {
+                    console.error('Surrogation error:', error);
+                    updateStatus(`Surrogation failed: ${error.message}`, true);
+                } finally {
+                    showLoader(false);
+                    anonymizeBtn.disabled = false;
+                }
+            }
+            
             async function generateSpeech() {
                 const text = anonymizedText.value;
                 if (!text.trim()) {
@@ -1139,6 +1175,7 @@
             transcribeBtn.addEventListener('click', transcribe);
             saveEditBtn.addEventListener('click', saveEdit);
             anonymizeBtn.addEventListener('click', anonymizeText);
+            surrogateBtn.addEventListener('click', surrogateText);
             generateSpeechBtn.addEventListener('click', generateSpeech);
             processOrgAudioBtn.addEventListener('click', processOrgAudio);
             anonymizedText.addEventListener('input', () => {
