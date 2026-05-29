@@ -1272,6 +1272,42 @@ def split_dialogue_into_sentences(text, nlp_pipeline=None):
                 
     return sentences_with_speakers
 
+def merge_adjacent_tags(text):
+    # split into tags, whitespace, and normal text
+    parts = re.split(r"(\s+|\[[A-Z_]+\])", text)
+
+    merged = []
+    last_tag = None
+    only_whitespace_since_tag = False
+
+    for part in parts:
+        if not part:
+            continue
+
+        # tag?
+        if re.fullmatch(r"\[[A-Z_]+\]", part):
+            if part == last_tag and only_whitespace_since_tag:
+                # skip duplicate adjacent tag
+                continue
+
+            merged.append(part)
+            last_tag = part
+            only_whitespace_since_tag = True
+
+        # whitespace?
+        elif part.isspace():
+            merged.append(part)
+
+        else:
+            # normal text
+            merged.append(part)
+            last_tag = None
+            only_whitespace_since_tag = False
+
+    out_str="".join(merged)
+    out_str=re.sub("  *", " ", out_str)
+    return out_str
+    
 def reconstruct_text_from_predictions(original_sentences, predictions, speaker_map):
     """
     Reconstructs the text from predictions.
@@ -1593,7 +1629,9 @@ class AnonymizationEngine:
         # We need to pass the original (speaker, tokens) and the predictions
         reconstructed_text = reconstruct_text_from_predictions(sentences_data, predictions, {})
         reconstructed_text = normalize_punctuation(reconstructed_text)
-        
+        # merges the tags -> not optimal, as this shold be solved actually via IOB tags
+        reconstructed_text=merge_adjacent_tags(reconstructed_text)
+
         return reconstructed_text, True, "Success"
 
 def call_llm_rewriter(text, model_id, system_prompt=None):
