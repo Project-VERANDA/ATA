@@ -9,6 +9,7 @@ import ipaddress
 import zipfile
 import shutil
 import difflib
+import random
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from werkzeug.utils import secure_filename
@@ -180,6 +181,171 @@ WHISPER_LANG_MAP = {
     'TR': 'tr'
 }
 
+SURROGATES = {
+    "EN": {
+        "PERSON": [
+            "John Smith", "Emma Johnson", "Michael Brown", "Sophia Miller",
+            "Daniel Wilson", "Olivia Moore", "James Taylor", "Emily Davis",
+            "Benjamin Clark", "Charlotte White", "Henry Walker", "Mia Harris",
+            "Alexander Hall", "Amelia Young", "David Allen", "Ella King",
+            "Joseph Wright", "Grace Scott", "Samuel Green", "Lily Baker"
+        ],
+        "CITY": [
+            "Berlin", "London", "New York", "Chicago", "Boston",
+            "Seattle", "Munich", "Hamburg", "Paris", "Vienna",
+            "Toronto", "Dublin", "Leeds", "Bristol", "Manchester",
+            "Frankfurt", "Cologne", "Zurich", "Amsterdam", "Prague"
+        ],
+        "ZIP": [
+            "10001", "20095", "75008", "10115", "50667",
+            "80331", "SW1A1AA", "94105", "60601", "33101",
+            "70173", "01067", "28195", "4000", "8001",
+            "1010", "2000", "80333", "04109", "90402"
+        ],
+        "AGE": [
+            "21", "24", "27", "30", "33",
+            "36", "39", "42", "45", "48",
+            "51", "54", "57", "60", "63",
+            "66", "69", "72", "75", "78"
+        ],
+        "EMAIL": [
+            "john@example.com", "emma@test.com", "michael@mail.com",
+            "sophia@demo.org", "daniel@company.net", "olivia@example.org",
+            "james@sample.com", "emily@test.org", "ben@demo.net",
+            "charlotte@mail.org", "henry@example.net", "mia@test.com",
+            "alex@sample.org", "amelia@demo.com", "david@mail.net",
+            "ella@example.org", "joseph@test.net", "grace@sample.com",
+            "samuel@demo.org", "lily@mail.com"
+        ],
+        "PHONE": [
+            "+1 202 555 0101", "+1 202 555 0102", "+1 202 555 0103",
+            "+44 20 7946 0001", "+44 20 7946 0002",
+            "+49 30 123456", "+49 40 987654",
+            "+33 1 23456789", "+41 44 1234567", "+43 1 987654",
+            "+1 303 555 1212", "+1 404 555 2323", "+49 89 456789",
+            "+44 161 555 1000", "+33 4 11111111",
+            "+1 212 555 8888", "+49 221 987654",
+            "+43 662 123456", "+41 31 7654321", "+1 617 555 0909"
+        ],
+        "PROFESSION": [
+            "doctor", "teacher", "engineer", "lawyer", "designer",
+            "developer", "nurse", "scientist", "manager", "architect",
+            "chef", "journalist", "consultant", "photographer", "pilot",
+            "researcher", "pharmacist", "electrician", "mechanic", "writer"
+        ],
+        "URL": [
+            "https://example.com", "https://test.org", "https://demo.net",
+            "https://sample.com", "https://mywebsite.org",
+            "https://company.net", "https://homepage.com",
+            "https://service.org", "https://product.net",
+            "https://info.com", "https://data.org",
+            "https://project.net", "https://alpha.com",
+            "https://beta.org", "https://gamma.net",
+            "https://delta.com", "https://epsilon.org",
+            "https://zeta.net", "https://theta.com",
+            "https://lambda.org"
+        ],
+        "PRODUCT": [
+            "iPhone", "ThinkPad", "Galaxy Tablet", "MacBook",
+            "Surface Pro", "PlayStation", "AirPods", "Kindle",
+            "GoPro", "Fitbit", "Nikon Camera", "Dell Monitor",
+            "HP Printer", "Canon Lens", "Dyson Vacuum",
+            "Sony Headphones", "Bose Speaker", "Apple Watch",
+            "Nintendo Switch", "Pixel Phone"
+        ],
+        "STREET": [
+            "Main Street", "Oak Avenue", "Maple Road", "Pine Street",
+            "Cedar Lane", "Elm Street", "Washington Avenue",
+            "Lakeview Drive", "Hillcrest Road", "Sunset Boulevard",
+            "Park Avenue", "River Road", "King Street",
+            "Queen Street", "Church Lane", "Station Road",
+            "Mill Road", "Victoria Street", "Bridge Street", "High Street"
+        ]
+    },
+
+    "DE": {
+        "PERSON": [
+            "Max Müller", "Anna Schmidt", "Peter Weber", "Laura Fischer",
+            "Thomas Wagner", "Julia Becker", "Lukas Hoffmann", "Sarah Koch",
+            "Felix Bauer", "Leonie Richter", "Jonas Klein", "Marie Wolf",
+            "Paul Schröder", "Lisa Neumann", "Tim Braun", "Nina Hartmann",
+            "David Lange", "Sophie Krüger", "Jan Meier", "Eva Schulz"
+        ],
+        "CITY": [
+            "Berlin", "Hamburg", "München", "Köln", "Frankfurt",
+            "Stuttgart", "Dresden", "Leipzig", "Bremen", "Hannover",
+            "Düsseldorf", "Dortmund", "Essen", "Bonn", "Mannheim",
+            "Nürnberg", "Augsburg", "Karlsruhe", "Potsdam", "Freiburg"
+        ],
+        "ZIP": [
+            "10115", "20095", "80331", "50667", "60311",
+            "70173", "01067", "04109", "28195", "30159",
+            "40213", "44135", "45127", "53111", "68159",
+            "90402", "86150", "76133", "14467", "79098"
+        ],
+        "AGE": [
+            "18", "22", "25", "28", "31",
+            "34", "37", "40", "43", "46",
+            "49", "52", "55", "58", "61",
+            "64", "67", "70", "73", "76"
+        ],
+        "EMAIL": [
+            "max@beispiel.de", "anna@test.de", "peter@mail.de",
+            "laura@firma.de", "thomas@demo.de", "julia@beispiel.org",
+            "lukas@test.org", "sarah@mail.org", "felix@demo.net",
+            "leonie@firma.com", "jonas@test.com", "marie@example.de",
+            "paul@beispiel.com", "lisa@demo.org", "tim@mail.net",
+            "nina@test.net", "david@firma.org", "sophie@example.com",
+            "jan@beispiel.net", "eva@test.de"
+        ],
+        "PHONE": [
+            "+49 30 123456", "+49 40 987654", "+49 89 456789",
+            "+49 221 111111", "+49 711 222222",
+            "+49 351 333333", "+49 341 444444", "+49 421 555555",
+            "+49 511 666666", "+49 211 777777",
+            "+49 231 888888", "+49 201 999999",
+            "+49 228 123123", "+49 621 321321",
+            "+49 911 456456", "+49 821 654654",
+            "+49 761 789789", "+49 331 987987",
+            "+49 69 135791", "+49 731 246810"
+        ],
+        "PROFESSION": [
+            "Arzt", "Lehrer", "Ingenieur", "Anwalt", "Designer",
+            "Entwickler", "Krankenpfleger", "Wissenschaftler", "Manager",
+            "Architekt", "Koch", "Journalist", "Berater", "Fotograf",
+            "Pilot", "Forscher", "Apotheker", "Elektriker",
+            "Mechaniker", "Schriftsteller"
+        ],
+        "URL": [
+            "https://beispiel.de", "https://test.org", "https://demo.net",
+            "https://firma.de", "https://webseite.org",
+            "https://projekt.net", "https://daten.de",
+            "https://service.org", "https://produkt.net",
+            "https://info.de", "https://alpha.org",
+            "https://beta.net", "https://gamma.de",
+            "https://delta.org", "https://epsilon.net",
+            "https://zeta.de", "https://theta.org",
+            "https://lambda.net", "https://omega.de",
+            "https://portal.org"
+        ],
+        "PRODUCT": [
+            "iPhone", "ThinkPad", "Galaxy Tablet", "MacBook",
+            "Surface Pro", "PlayStation", "AirPods", "Kindle",
+            "GoPro", "Fitbit", "Nikon Kamera", "Dell Monitor",
+            "HP Drucker", "Canon Objektiv", "Dyson Staubsauger",
+            "Sony Kopfhörer", "Bose Lautsprecher", "Apple Watch",
+            "Nintendo Switch", "Pixel Smartphone"
+        ],
+        "STREET": [
+            "Hauptstraße", "Bahnhofstraße", "Gartenweg", "Schillerstraße",
+            "Goethestraße", "Bergstraße", "Dorfstraße", "Mühlenweg",
+            "Kirchstraße", "Lindenweg", "Parkstraße", "Wiesenweg",
+            "Waldstraße", "Ringstraße", "Schulstraße", "Mozartstraße",
+            "Lessingstraße", "Friedhofsweg", "Birkenweg", "Ahornstraße"
+        ]
+    }
+}
+
 ALLOWED_EXTENSIONS = {'wav', 'mp3', 'mp4', 'm4a', 'flac', 'ogg', 'webm'}
 
 def allowed_file(filename):
@@ -320,6 +486,42 @@ def get_relevant_offsets(conversation, offsets):
     
     return peep_array
 
+
+
+def replace_surrogates(text, lang="EN"):
+    lang = lang.upper()
+
+    if lang not in SURROGATES:
+        lang = "EN"
+
+    values = SURROGATES[lang]
+
+    # keep track of recently used replacements per tag
+    used = {k: [] for k in values}
+
+    def repl(match):
+        tag = match.group(1)
+
+        if tag not in values:
+            return match.group(0)
+
+        choices = values[tag]
+
+        # try to avoid immediate repetitions
+        available = [x for x in choices if x not in used[tag]]
+
+        if not available:
+            # reset if everything was already used
+            used[tag] = []
+            available = choices
+
+        value = random.choice(available)
+        used[tag].append(value)
+
+        return value
+
+    return re.sub(r"\[([A-Z_]+)\]", repl, text)
+    
 
 # --- ROUTES ---
 
@@ -474,6 +676,27 @@ def anonymize_text():
         return jsonify({'error': f'Error anonymizing text: {str(e)}'}), 500
 
 
+@app.route('/surrogate_text', methods=['POST'])
+def surrogate_text():
+    try:
+        data = request.get_json()
+        if not data or 'text' not in data:
+            return jsonify({'error': 'No text provided'}), 400
+        
+        text = data['text']
+        
+        s_text = replace_surrogates(text)
+        
+        return jsonify({
+            'success': True, 
+            'surrogated_text': s_text,
+            'tts_available': GTTS_AVAILABLE
+        })
+    
+    except Exception as e:
+        logger.error(f"Error in anonymize route: {str(e)}")
+        return jsonify({'error': f'Error anonymizing text: {str(e)}'}), 500
+        
 @app.route('/generate_org_audio', methods=['POST'])
 def generate_org_audio_route():
     try:
