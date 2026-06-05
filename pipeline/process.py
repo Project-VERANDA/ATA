@@ -205,6 +205,44 @@ MAX_SPEAKERS = 4
 # Local Model Paths
 WHISPERX_MODEL_PATH = MODEL_FOLDER / "models--Systran--faster-whisper-large-v3"
 
+
+# System prompts per language
+PARAPHRASE_PROMPTS = {
+    'DE': (
+        "Du bist ein linguistischer Anonymisierungsassistent. Deine Aufgabe ist es, Dialoge "
+        "leicht umzuformulieren, um individuelle Sprachmuster zu entfernen und eine "
+        "Sprechererkennung zu verhindern. Behalte die exakte ursprüngliche Bedeutung bei "
+        "und verwende standardisiertes Hochdeutsch. Weise jedem Sprecher einen leicht "
+        "anderen, aber vollständig neutralen Vokabelstil zu. "
+        "Falls Platzhalter in eckigen Klammern vorkommen (z. B. [NAME], [HOUSENUMBER], "
+        "[CITY], [DATE]), ersetze sie durch passende, realistisch wirkende, aber "
+        "vollständig fiktive Werte, die zum Kontext passen. Verwende niemals echte "
+        "Personen- oder Kontaktdaten. "
+        "Behalte die ursprünglichen Sprecherbezeichnungen unverändert bei. "
+        "Gib NUR den finalen Dialog aus. Keine Einleitungen, keine Erklärungen."
+    ),
+    'EN': (
+        "You are a linguistic anonymization assistant. Your task is to slightly "
+        "rephrase and modify dialogue to remove unique individual speech patterns, "
+        "preventing speaker identification. Maintain the exact original meaning "
+        "and use standard neutral English. Assign a slightly different but "
+        "entirely neutral vocabulary style to each speaker. "
+        "If placeholders enclosed in square brackets appear (e.g., [NAME], "
+        "[HOUSENUMBER], [CITY], [DATE]), replace them with suitable, realistic-looking "
+        "but entirely fictitious values that fit the context. Never use real personal "
+        "or contact information. "
+        "Keep the original speaker labels unchanged. "
+        "Output ONLY the final dialogue. No introductions, no explanations."
+    ),
+}
+
+USER_PROMPTS = {
+    'DE': "Bitte anonymisiere das folgende Gespräch:",
+    'EN': "Please anonymize the following conversation:",
+}
+
+
+
 # CRITICAL FALLBACK LOGIC
 if not WHISPERX_MODEL_PATH.exists():
     logger.warning("❌ large-v3 model NOT found. Searching for alternatives...")
@@ -1634,6 +1672,50 @@ class AnonymizationEngine:
 
         return reconstructed_text, True, "Success"
 
+
+def generate_paraphrase(raw_dialogue, lang='DE', model="llama-3.2-3b-instruct", temperature=0.3):
+    """
+    Rephrase/anonymize a dialogue using a local LM Studio model.
+
+    Args:
+        raw_dialogue (str):  The dialogue text with SPEAKER_XX: labels.
+        lang (str):          Language code, 'DE' or 'EN' (default: 'DE').
+        model (str):         LM Studio model string to use.
+        temperature (float): Sampling temperature (default: 0.3).
+
+    Returns:
+        str: The paraphrased dialogue, or None on failure.
+    """
+    
+    lang = lang.upper()
+    if lang not in PARAPHRASE_PROMPTS:
+        logger.warning(f"Language '{lang}' not supported, falling back to 'EN'.")
+        lang = 'EN'
+
+    system_prompt = PARAPHRASE_PROMPTS[lang]
+    user_prompt = f"{USER_PROMPTS[lang]}\n{raw_dialogue.strip()}"
+
+    try:
+        client = OpenAI(api_key=CHAT_AI_API_KEY, base_url=CHAT_AI_ENDPOINT)
+        #client = OpenAI(base_url="http://localhost:1234/v1", api_key="lm-studio")
+        
+        
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user",   "content": user_prompt},
+            ],
+            temperature=temperature,
+        )
+        result = response.choices[0].message.content.strip()
+        logger.info(f"Paraphrase generated successfully ({lang}, model={model}).")
+        return result
+
+    except Exception as e:
+        logger.error(f"generate_paraphrase failed: {e}")
+        return None
+
 def call_llm_rewriter(text, model_id, system_prompt=None):
     """
     Calls the external LLM API to rewrite text.
@@ -1649,6 +1731,7 @@ def call_llm_rewriter(text, model_id, system_prompt=None):
 
     try:
         client = OpenAI(api_key=CHAT_AI_API_KEY, base_url=CHAT_AI_ENDPOINT)
+        client = OpenAI(base_url="http://localhost:1234/v1", api_key="lm-studio")
         
         # Resolve model ID
         final_model = model_id
