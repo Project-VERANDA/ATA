@@ -1673,7 +1673,7 @@ class AnonymizationEngine:
         return reconstructed_text, True, "Success"
 
 
-def generate_paraphrase(raw_dialogue, lang='DE', model="llama-3.2-3b-instruct", temperature=0.3):
+def generate_paraphrase(raw_dialogue, lang='DE', model="gpt-oss-120b", temperature=0.3):
     """
     Rephrase/anonymize a dialogue using a local LM Studio model.
 
