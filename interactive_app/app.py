@@ -551,13 +551,27 @@ def _synthesize_segment(text, language='de', speaker_id=0):
     try:
         temp_file = f"/tmp/coqui_multi_output_{int(time.time() * 1000)}_{random.randint(1000, 9999)}.wav"
         
-        # Determine valid speaker range
-        # German Thorsten has 4 speakers (0-3). English VCTK has 109 (0-108).
-        # We modulate the input speaker_id to stay within bounds.
-        if 'thorsten' in str(_coqui_tts.model_path):
+        # Determine valid speaker range - FIXED for TTS >= 0.22
+        # Get model name from different possible attributes based on TTS version
+        model_identifier = ""
+        if hasattr(_coqui_tts, 'model_name'):
+            model_identifier = _coqui_tts.model_name.lower()
+        elif hasattr(_coqui_tts, '_models') and len(_coqui_tts._models) > 0:
+            model_identifier = list(_coqui_tts._models.keys())[0].lower()
+        elif hasattr(_coqui_tts, 'synthesizer') and hasattr(_coqui_tts.synthesizer, 'tts_model'):
+            model_identifier = str(type(_coqui_tts.synthesizer.tts_model).__name__).lower()
+        else:
+            model_identifier = str(_coqui_tts).lower()
+        
+        logger.debug(f"Model identifier: {model_identifier}")
+        
+        # Determine max speakers based on model type
+        if 'thorsten' in model_identifier or 'multispeaker' in model_identifier:
             max_speakers = 4
-        elif 'vctk' in str(_coqui_tts.model_path):
+        elif 'vctk' in model_identifier:
             max_speakers = 109
+        elif 'multidataset' in model_identifier:  # Spanish multi-device
+            max_speakers = 3
         else:
             max_speakers = 1
             
@@ -580,6 +594,8 @@ def _synthesize_segment(text, language='de', speaker_id=0):
         
     except Exception as e:
         logger.error(f"Coqui TTS failed for speaker {speaker_id} ('{text[:30]}...'): {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         return None
 
 def allowed_file(filename):
