@@ -330,7 +330,6 @@ read -p "Do you want to install the Web Interface (Flask, edge-tts, etc.)? (y/n)
 INSTALL_WEB=${INSTALL_WEB:-y}
 
 if [[ "$INSTALL_WEB" =~ ^[Yy]$ ]]; then
-    # CHANGED: Removed gtts, added edge-tts and nest_asyncio
     WEB_PKGS=("flask" "python-dotenv" "requests" "cryptography" "edge-tts" "nest_asyncio")
     SKIP_WEB=true
     for pkg in "${WEB_PKGS[@]}"; do

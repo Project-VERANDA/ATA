@@ -786,7 +786,7 @@ def anonymize_text():
             'success': True, 
             'anonymized_text': anonymized_text, 
             'model_used': 'Local BERT', 
-            'tts_available': GTTS_AVAILABLE
+            'tts_available': EDGE_TTS_AVAILABLE
         })
     
     except Exception as e:
@@ -809,7 +809,7 @@ def surrogate_text():
         return jsonify({
             'success': True, 
             'surrogated_text': s_text,
-            'tts_available': GTTS_AVAILABLE
+            'tts_available': EDGE_TTS_AVAILABLE
         })
     
     except Exception as e:
@@ -831,7 +831,7 @@ def rephrase_text():
         return jsonify({
             'success': True, 
             'rephrased_text': p_text,
-            'tts_available': GTTS_AVAILABLE
+            'tts_available': EDGE_TTS_AVAILABLE
         })
     
     except Exception as e:
@@ -853,7 +853,7 @@ def generate_org_audio_route():
         if not text:
             return jsonify({'error': 'Empty text'}), 400
         
-        if not GTTS_AVAILABLE:
+        if not EDGE_TTS_AVAILABLE:
             return jsonify({'error': 'TTS not available'}), 500
             
         offsets = diff_relevant_offsets(offS, text)
@@ -891,7 +891,7 @@ def generate_speech_route():
         if not text:
             return jsonify({'error': 'Empty text'}), 400
         
-        if not GTTS_AVAILABLE:
+        if not EDGE_TTS_AVAILABLE:
             return jsonify({'error': 'TTS not available'}), 500
         
         lang = data['lang'].strip()
@@ -923,7 +923,7 @@ def generate_speech_route():
 def get_available_voices():
     try:
         voices = []
-        if EDGE_TTS_AVAILABLE: # Changed from GTTS_AVAILABLE
+        if EDGE_TTS_AVAILABLE: # Changed from EDGE_TTS_AVAILABLE
             # List some common voices or let frontend map via language code
             voices = [{'id': lang, 'name': f'{lang.upper()} (Edge TTS)', 'language': [lang], 'engine': 'edge_tts'} 
                       for lang in ['de', 'en', 'fr', 'es']]
