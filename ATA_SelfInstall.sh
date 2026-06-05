@@ -532,7 +532,7 @@ else
         echo "✅ Structure flattened successfully."
     fi
 
-    if [ $? -eq 0 ]; 
+    if [ $? -eq 0 ]; then
         echo "✅ PII model downloaded and structure verified."
         
         if [ ! -f "$PII_TARGET/crf_config.json" ]; then
