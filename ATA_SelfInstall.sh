@@ -329,7 +329,7 @@ read -p "Do you want to install the Web Interface (Flask, Coqui TTS, etc.)? (y/n
 INSTALL_WEB=${INSTALL_WEB:-y}
 
 if [[ "$INSTALL_WEB" =~ ^[Yy]$ ]]; then
-    WEB_PKGS=("flask" "python-dotenv" "requests" "cryptography" "TTS" "scipy" "numpy")
+    WEB_PKGS=("flask" "python-dotenv" "requests" "cryptography" "TTS" "scipy")
     SKIP_WEB=true
     for pkg in "${WEB_PKGS[@]}"; do
         if ! check_pip_installed "$pkg"; then
@@ -339,26 +339,35 @@ if [[ "$INSTALL_WEB" =~ ^[Yy]$ ]]; then
     done
 
     if [ "$SKIP_WEB" = false ]; then
-        echo "Installing Web Interface dependencies (Coqui TTS for offline speech)..."
+        echo "Installing Web Interface dependencies..."
         
-        # Upgrade pip first to ensure latest wheel support
+        # Upgrade pip, setuptools, wheel
         pip install --upgrade pip setuptools wheel
         
-        # Install Coqui TTS explicitly with flags to bypass potential wheel issues
-        echo "Installing TTS (Coqui)... This may take a moment."
+        # CRITICAL ORDER: Install core data libs FIRST to satisfy whisperx/pyannote
+        # This allows pip to pull NumPy 2.0+ which both stacks require
+        echo "Installing NumPy and Pandas (satisfies whisperx/pyannote requirements)..."
+        pip install "numpy>=2.0.0" "pandas>=2.2.0" --no-cache-dir || {
+            echo "⚠️  Standard numpy/pandas install failed, trying fallback range..."
+            pip install "numpy>=1.24.0,<3.0.0" "pandas>=2.0.0,<3.0.0" --no-cache-dir
+        }
+        
+        # Now install Coqui TTS (newer versions support NumPy 2.0+)
+        echo "Installing Coqui TTS..."
         pip install "TTS>=0.22.0" --no-cache-dir || {
-            echo "⚠️  Standard install failed. Trying fallback method..."
-            # Fallback: Try installing from source if wheels fail
-            pip install git+https://github.com/coqui-ai/TTS.git --no-cache-dir || {
-                echo "❌ CRITICAL: Failed to install Coqui TTS. Please check your network and Python version."
+            echo "⚠️  TTS standard install failed. Trying source build..."
+            pip install git+https://github.com/coqui-ai/TTS.git@stable --no-cache-dir || {
+                echo "❌ CRITICAL: Failed to install Coqui TTS."
                 exit 1
             }
         }
         
-        # Install remaining web deps
-        pip install flask python-dotenv requests cryptography scipy numpy
+        # Install remaining web frameworks
+        echo "Installing Flask and other dependencies..."
+        pip install flask python-dotenv requests cryptography scipy --no-cache-dir
         
         echo "✅ Web Interface dependencies installed."
+        echo "   Note: Dependency warnings may appear (see above). These are often non-fatal."
     else
         echo "Skipping Web Interface installation (all packages already present)."
     fi
