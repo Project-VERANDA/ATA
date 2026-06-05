@@ -10,6 +10,9 @@ import zipfile
 import shutil
 import difflib
 import random
+import edge_tts
+import asyncio
+from openai import OpenAI
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from werkzeug.utils import secure_filename
@@ -50,6 +53,7 @@ try:
         transcribe_audio_locally, 
         load_models, 
         call_llm_rewriter, 
+        generate_paraphrase,
         AVAILABLE_LLM_MODELS, 
         CHAT_AI_API_KEY, 
         CHAT_AI_ENDPOINT,
@@ -233,6 +237,28 @@ SURROGATES = {
             "chef", "journalist", "consultant", "photographer", "pilot",
             "researcher", "pharmacist", "electrician", "mechanic", "writer"
         ],
+        "ORGANISATION": [
+	    "Acme Corporation",
+	    "Global Tech Solutions",
+	    "Green Valley Hospital",
+	    "Sunrise Medical Center",
+	    "Northbridge University",
+	    "Blue River Consulting",
+	    "United Logistics Group",
+	    "Pioneer Software Ltd.",
+	    "Metro Insurance Services",
+	    "Future Energy Systems",
+	    "City Health Network",
+	    "Bright Education Trust",
+	    "National Research Institute",
+	    "Western Manufacturing Inc.",
+	    "Community Care Foundation",
+	    "Summit Financial Partners",
+	    "Digital Innovation Labs",
+	    "Central Public Library",
+	    "Evergreen Construction",
+	    "International Trade Association"
+	],
         "URL": [
             "https://example.com", "https://test.org", "https://demo.net",
             "https://sample.com", "https://mywebsite.org",
@@ -316,6 +342,28 @@ SURROGATES = {
             "Pilot", "Forscher", "Apotheker", "Elektriker",
             "Mechaniker", "Schriftsteller"
         ],
+        "ORGANISATION": [
+	    "Universitätsklinikum Berlin",
+	    "Technische Universität München",
+	    "Stadtwerke Hamburg",
+	    "Muster GmbH",
+	    "Beispiel AG",
+	    "Forschungszentrum Leipzig",
+	    "Klinikum Stuttgart",
+	    "Deutsches Institut für Informatik",
+	    "Berliner Verkehrsbetriebe",
+	    "Münchner Versicherungsgruppe",
+	    "Norddeutsche Logistik GmbH",
+	    "Gesundheitszentrum Köln",
+	    "Innovationslabor Dresden",
+	    "Rhein-Main Consulting",
+	    "Bildungswerk Frankfurt",
+	    "Sozialverband Deutschland",
+	    "Energieversorgung Bayern",
+	    "MediCare Krankenhausverbund",
+	    "Industrieverband Nordrhein",
+	    "Wissenschaftsakademie Freiburg"
+	],
         "URL": [
             "https://beispiel.de", "https://test.org", "https://demo.net",
             "https://firma.de", "https://webseite.org",
@@ -346,7 +394,78 @@ SURROGATES = {
     }
 }
 
+# Voice maps per language
+SPEAKER_VOICES = {
+    'de': {
+        'SPEAKER_00': 'de-DE-KillianNeural',
+        'SPEAKER_01': 'de-DE-KatjaNeural',
+        'SPEAKER_02': 'de-DE-ConradNeural',
+        'SPEAKER_03': 'de-AT-JonasNeural',
+    },
+    'en': {
+        'SPEAKER_00': 'en-US-ChristopherNeural',
+        'SPEAKER_01': 'en-US-JennyNeural',
+        'SPEAKER_02': 'en-GB-RyanNeural',
+        'SPEAKER_03': 'en-GB-SoniaNeural',
+    }
+}
+
+
+
 ALLOWED_EXTENSIONS = {'wav', 'mp3', 'mp4', 'm4a', 'flac', 'ogg', 'webm'}
+
+async def _synthesize_segment(text, voice):
+    """Synthesize a single text segment using edge_tts, returns AudioSegment."""
+    communicate = edge_tts.Communicate(text, voice)
+    fp = io.BytesIO()
+    async for chunk in communicate.stream():
+        if chunk["type"] == "audio":
+            fp.write(chunk["data"])
+    fp.seek(0)
+    return AudioSegment.from_mp3(fp)
+
+
+async def _generate_speech_async(text, language='de'):
+    # Matches "SPEAKER_00:" at the start of a line, capturing the speaker ID
+    speaker_regex = re.compile(r'^(SPEAKER_0[0-3]):\s*', re.MULTILINE)
+    tag_regex = re.compile(r'(\[[A-Z_]+\])')
+    beep_sound = generate_beep()
+    final_audio = AudioSegment.empty()
+
+    voice_map = SPEAKER_VOICES.get(language, SPEAKER_VOICES['en'])
+    current_voice = list(voice_map.values())[0]  # default to first voice
+
+    # Find all speaker blocks: [(speaker_id, text), ...]
+    segments = []
+    matches = list(speaker_regex.finditer(text))
+
+    for i, match in enumerate(matches):
+        speaker_id = match.group(1)          # e.g. "SPEAKER_00"
+        start = match.end()                  # text starts after "SPEAKER_00: "
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        spoken_text = text[start:end].strip()
+        segments.append((speaker_id, spoken_text))
+
+    # Now synthesize each block with the right voice
+    for speaker_id, spoken_text in segments:
+        current_voice = voice_map.get(speaker_id, list(voice_map.values())[0])
+
+        # Handle [TAG] beeps within each speaker's text
+        sub_parts = tag_regex.split(spoken_text)
+        for sub in sub_parts:
+            if not sub or not sub.strip():
+                continue
+            if tag_regex.match(sub):
+                final_audio += beep_sound
+            else:
+                try:
+                    segment = await _synthesize_segment(sub.strip(), current_voice)
+                    final_audio += segment
+                except Exception as e:
+                    logger.error(f"edge_tts failed for segment: '{sub[:30]}...'. Error: {e}")
+
+    return final_audio
+
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -355,6 +474,39 @@ def generate_beep(duration_ms=400, freq=1000):
     return Sine(freq).to_audio_segment(duration=duration_ms).apply_gain(-12)
 
 def generate_speech(text, voice_settings=None, language='de'):
+
+    if not PYDUB_AVAILABLE:
+        logger.error("pydub not available, cannot generate speech.")
+        return None, None
+    try:
+        # Run the async function — works in both script and Jupyter
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # Jupyter: event loop already running, use nest_asyncio or create task
+                import nest_asyncio
+                nest_asyncio.apply()
+                final_audio = loop.run_until_complete(_generate_speech_async(text, language))
+            else:
+                final_audio = loop.run_until_complete(_generate_speech_async(text, language))
+        except RuntimeError:
+            final_audio = asyncio.run(_generate_speech_async(text, language))
+
+        if len(final_audio) == 0:
+            logger.warning("No audio was generated (all segments were tags or empty).")
+            return None, None
+
+        audio_filename = f"speech_output_{int(time.time())}.mp3"
+        audio_path = os.path.join(os.path.abspath(app.config['UPLOAD_FOLDER']), audio_filename)
+        final_audio.export(audio_path, format="mp3")
+        logger.info(f"Speech generated successfully with edge_tts: {audio_path}")
+        return audio_path, 'edge_tts'
+
+    except Exception as e:
+        logger.error(f"Speech generation failed: {e}")
+        return None, None
+        
+def generate_speech2(text, voice_settings=None, language='de'):
     if not GTTS_AVAILABLE or not PYDUB_AVAILABLE:
         logger.error("gTTS or pydub not available, cannot generate speech with beeps.")
         return None, None
@@ -523,6 +675,9 @@ def replace_surrogates(text, lang="EN"):
     return re.sub(r"\[([A-Z_]+)\]", repl, text)
     
 
+
+
+
 # --- ROUTES ---
 
 @app.route('/')
@@ -684,8 +839,9 @@ def surrogate_text():
             return jsonify({'error': 'No text provided'}), 400
         
         text = data['text']
+        la = data['lang']
         
-        s_text = replace_surrogates(text)
+        s_text = replace_surrogates(text, la)
         
         return jsonify({
             'success': True, 
@@ -696,7 +852,30 @@ def surrogate_text():
     except Exception as e:
         logger.error(f"Error in anonymize route: {str(e)}")
         return jsonify({'error': f'Error anonymizing text: {str(e)}'}), 500
+
+@app.route('/rephrase_text', methods=['POST'])
+def rephrase_text():
+    try:
+        data = request.get_json()
+        if not data or 'text' not in data:
+            return jsonify({'error': 'No text provided'}), 400
         
+        text = data['text']
+        la = data['lang']
+
+        p_text = generate_paraphrase(text, la)
+
+        return jsonify({
+            'success': True, 
+            'rephrased_text': p_text,
+            'tts_available': GTTS_AVAILABLE
+        })
+    
+    except Exception as e:
+        logger.error(f"Error in anonymize route: {str(e)}")
+        return jsonify({'error': f'Error anonymizing text: {str(e)}'}), 500
+        
+    
 @app.route('/generate_org_audio', methods=['POST'])
 def generate_org_audio_route():
     try:
@@ -707,9 +886,7 @@ def generate_org_audio_route():
         text = data['text'].strip()
         offS = data['offSet']
         audio_file_name = data['audioName']
-        print ("text:", text)
-        print ("offS:", offS)
-        print ("AUDIO:", audio_file_name, "<")
+
         if not text:
             return jsonify({'error': 'Empty text'}), 400
         
@@ -717,7 +894,7 @@ def generate_org_audio_route():
             return jsonify({'error': 'TTS not available'}), 500
             
         offsets = diff_relevant_offsets(offS, text)
-        print ("=>", offsets)
+
         output_wav="speech_output_beeped.mp3"
 
         audio_path = os.path.join(os.path.abspath(app.config['UPLOAD_FOLDER']), output_wav)
