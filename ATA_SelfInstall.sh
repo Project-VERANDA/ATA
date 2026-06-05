@@ -406,7 +406,7 @@ if [[ "$DOWNLOAD_INPUT" =~ ^[Yy]$ ]]; then
         local model_id=$1
         local display_name=$2
         echo "Downloading $display_name ($model_id)..."
-        huggingface-cli download "$model_id" --local-dir-use-symlinks false 2>&1 | grep -v "You seem to have already downloaded" || true
+        huggingface-cli download "$model_id" --local-dir-use-symlinks False 2>&1 | grep -v "You seem to have already downloaded" || true
         echo "✅ $display_name downloaded."
     }
 
@@ -517,7 +517,7 @@ if [ -n "$WHISPER_MODELS_INPUT" ]; then
             echo "✅ WhisperX model '$model_name' already exists. Skipping."
         else
             echo "Downloading: $model_name ($hf_repo)..."
-            huggingface-cli download "$hf_repo" --local-dir "$target_dir" --local-dir-use-symlinks false 2>/dev/null || \
+            huggingface-cli download "$hf_repo" --local-dir "$target_dir" --local-dir-use-symlinks False 2>/dev/null || \
             huggingface-cli download "$hf_repo" --local-dir "$target_dir"
             
             if [ $? -eq 0 ]; then
