@@ -243,6 +243,8 @@ STANDARD_PKGS=(
     "pandas"
     "openai"
     "python-dotenv"
+    "scipy"
+    "numpy"
 )
 
 for pkg in "${STANDARD_PKGS[@]}"; do
@@ -305,7 +307,7 @@ echo "=== Verifying Critical Dependencies ==="
 if python -c "import click; from click import Choice; c = Choice(['a','b'])" 2>/dev/null; then
     echo "✅ click is compatible with Python 3.12"
 else
-    echo "❌ WARNING: click may not be compatible."
+    echo "❌ WARNING: click may not be incompatible."
 fi
 
 if python -c "import typer" 2>/dev/null; then
@@ -345,6 +347,53 @@ if [[ "$INSTALL_WEB" =~ ^[Yy]$ ]]; then
     fi
 else
     echo "Skipping Web Interface installation."
+fi
+
+# ============================================================================
+# 🗣️ DOWNLOAD MULTI-VOICE MODELS
+# ============================================================================
+echo ""
+echo "-------------------------------------------------"
+echo "Coqui TTS Multi-Voice Models Download"
+echo "Required for Offline Speaker Differentiation:"
+echo "  - German: thorsten-multispeaker (4 voices)"
+echo "  - English: vctk (109 voices)"
+echo "Total size: ~700MB (downloaded on first run by code, or here now)."
+echo ""
+
+DOWNLOAD_MODELS=${DOWNLOAD_MODELS:-y} # Default yes if not set
+read -p "Do you want to download these models now? (y/n) [y]: " DOWNLOAD_INPUT
+DOWNLOAD_INPUT=${DOWNLOAD_INPUT:-y}
+
+if [[ "$DOWNLOAD_INPUT" =~ ^[Yy]$ ]]; then
+    echo "Downloading Multi-Voice Models..."
+    
+    # Helper to download model
+    download_coqui_model() {
+        local model_id=$1
+        local display_name=$2
+        echo "Downloading $display_name ($model_id)..."
+        huggingface-cli download "$model_id" --local-dir-use-symlinks false 2>&1 | grep -v "You seem to have already downloaded" || true
+        echo "✅ $display_name downloaded."
+    }
+
+    # German Model
+    if ! python -c "from TTS.api import TTS; TTS('tts_models/de/thorsten-multispeaker/vits')" 2>/dev/null; then
+        download_coqui_model "tts_models/de/thorsten-multispeaker/vits" "German Multi-Voice (Thorsten)"
+    else
+        echo "✅ German Multi-Voice model already available."
+    fi
+
+    # English Model
+    if ! python -c "from TTS.api import TTS; TTS('tts_models/en/vctk/vits')" 2>/dev/null; then
+        download_coqui_model "tts_models/en/vctk/vits" "English Multi-Voice (VCTK)"
+    else
+        echo "✅ English Multi-Voice model already available."
+    fi
+    
+    echo "✅ All Multi-Voice models ready."
+else
+    echo "Skipping model download. They will be downloaded automatically on first run."
 fi
 
 # 8. Hugging Face Token
@@ -425,11 +474,14 @@ if [ -n "$WHISPER_MODELS_INPUT" ]; then
         fi
 
         hf_repo="${MODEL_MAP[$model_name]}"
-        folder_name="models--$(echo "$hf_repo" | sed 's/\//\--/g')"
-        target_dir="$MODEL_DIR/$folder_name"
-
+        # Coqui models are stored in .cache/tts by default, but we can download others here if needed
+        # For Coqui, we rely on the automatic download or the explicit download above
+        echo "Note: WhisperX models are handled separately. Coqui models were downloaded above."
+        
+        # Standard WhisperX download logic if you still want them in pipeline/model
+        target_dir="$MODEL_DIR/$(echo "$hf_repo" | sed 's/\//\--/g')"
         if [ -d "$target_dir" ]; then
-            echo "✅ Model '$model_name' already exists. Skipping."
+            echo "✅ WhisperX model '$model_name' already exists. Skipping."
         else
             echo "Downloading: $model_name ($hf_repo)..."
             huggingface-cli download "$hf_repo" --local-dir "$target_dir" --local-dir-use-symlinks false 2>/dev/null || \
@@ -443,7 +495,7 @@ if [ -n "$WHISPER_MODELS_INPUT" ]; then
         fi
     done
 else
-    echo "No models selected. Skipping WhisperX downloads."
+    echo "No WhisperX models selected. Skipping."
 fi
 
 # 12. Download Pyannote Speaker Diarization Model
@@ -556,4 +608,4 @@ echo "     python pipeline/process.py"
 echo "  4. (Optional) Run the Web Interface (with Offline Coqui TTS):"
 echo "     python interactive_app/app.py"
 echo ""
-echo "Note: The Web Interface will automatically download Coqui voice models on first run."
+echo "Note: Coqui Multi-Voice models (German/English) were downloaded automatically."

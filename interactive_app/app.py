@@ -400,60 +400,26 @@ SURROGATES = {
     }
 }
 
-# Voice maps per language
-SPEAKER_VOICES = {
-    'de': {
-        'SPEAKER_00': 'de-DE-KillianNeural',
-        'SPEAKER_01': 'de-DE-KatjaNeural',
-        'SPEAKER_02': 'de-DE-ConradNeural',
-        'SPEAKER_03': 'de-AT-JonasNeural',
-    },
-    'en': {
-        'SPEAKER_00': 'en-US-ChristopherNeural',
-        'SPEAKER_01': 'en-US-JennyNeural',
-        'SPEAKER_02': 'en-GB-RyanNeural',
-        'SPEAKER_03': 'en-GB-SoniaNeural',
-    }
-}
-
 ALLOWED_EXTENSIONS = {'wav', 'mp3', 'mp4', 'm4a', 'flac', 'ogg', 'webm'}
+
+_coqui_tts = None
 
 def generate_beep(duration_ms=400, freq=1000):
     return Sine(freq).to_audio_segment(duration=duration_ms).apply_gain(-12)
 
-def _synthesize_segment(text, language='de'):
-    """Synthesize a single text segment using Coqui TTS locally."""
-    if not COQUI_AVAILABLE or not _coqui_tts:
-        logger.error("Coqui TTS not available.")
-        return None
-    
-    try:
-        temp_file = f"/tmp/coqui_output_{int(time.time() * 1000)}_{random.randint(1000, 9999)}.wav"
-        
-        _coqui_tts.tts_to_file(text=text, file_path=temp_file)
-        
-        audio_segment = AudioSegment.from_wav(temp_file)
-        
-        if os.path.exists(temp_file):
-            os.remove(temp_file)
-        
-        return audio_segment
-        
-    except Exception as e:
-        logger.error(f"Coqui TTS failed for segment '{text[:30]}...': {e}")
-        return None
-
-# --- Generate_speech function ---
 def generate_speech(text, voice_settings=None, language='de'):
     """
     Generate speech using Coqui TTS - Fully Offline
+    Supports Multi-Voice for English (VCTK) and German (Thorsten)
     """
     global _coqui_tts
     
+    # Check dependencies
     if not COQUI_AVAILABLE:
         logger.error("Coqui TTS not available. Install with: pip install TTS")
         return None, None
     
+    # Initialize/Load model for language if needed
     if not _coqui_tts:
         init_coqui_tts(language)
     
@@ -465,23 +431,33 @@ def generate_speech(text, voice_settings=None, language='de'):
         beep_sound = generate_beep()
         final_audio = AudioSegment.empty()
         
-        speaker_regex = re.compile(r'^(SPEAKER_0[0-3]):\s*', re.MULTILINE)
+        # Regex patterns
+        speaker_regex = re.compile(r'^(SPEAKER_0[0-9]+):\s*', re.MULTILINE)  # Updated to match SPEAKER_00-SPEAKER_09+
         tag_regex = re.compile(r'(\[[A-Z_]+\])')
         
+        # Parse speaker segments
         segments = []
         matches = list(speaker_regex.finditer(text))
         
         for i, match in enumerate(matches):
-            speaker_id = match.group(1)
+            speaker_id = match.group(1)  # e.g., "SPEAKER_00"
             start = match.end()
             end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
             spoken_text = text[start:end].strip()
             segments.append((speaker_id, spoken_text))
         
+        # If no speakers found, treat entire text as one segment
         if not segments:
             segments = [("", text)]
         
-        for speaker_id, spoken_text in segments:
+        # Synthesize each segment
+        for raw_speaker_id, spoken_text in segments:
+            # Parse speaker number ONCE per segment (optimization)
+            try:
+                spk_num = int(raw_speaker_id.split('_')[1])
+            except (ValueError, IndexError):
+                spk_num = 0
+            
             sub_parts = tag_regex.split(spoken_text)
             
             for sub in sub_parts:
@@ -489,21 +465,24 @@ def generate_speech(text, voice_settings=None, language='de'):
                     continue
                     
                 if tag_regex.match(sub):
+                    # Insert beep for tags like [PERSON], [DATE], etc.
                     final_audio += beep_sound
                 else:
-                    segment = _synthesize_segment(sub.strip(), language)
+                    # Call synthesis with specific speaker ID
+                    segment = _synthesize_segment(sub.strip(), language, speaker_id=spk_num)
                     if segment:
                         final_audio += segment
         
         if len(final_audio) == 0:
-            logger.warning("No audio was generated.")
+            logger.warning("No audio was generated (all segments were tags or empty).")
             return None, None
         
+        # Save final output
         audio_filename = f"speech_output_{int(time.time())}.mp3"
         audio_path = os.path.join(os.path.abspath(app.config['UPLOAD_FOLDER']), audio_filename)
         final_audio.export(audio_path, format="mp3")
         
-        logger.info(f"Speech generated successfully with Coqui TTS: {audio_path}")
+        logger.info(f"Speech generated successfully with Coqui TTS (Multi-Voice): {audio_path}")
         return audio_path, 'coqui_tts'
         
     except Exception as e:
@@ -513,50 +492,95 @@ def generate_speech(text, voice_settings=None, language='de'):
         return None, None
 
 # --- Helper Function: Initialize Coqui TTS Globally ---
-_coqui_tts = None
 
-def init_coqui_tts(language='en'):
-    """Initialize Coqui TTS engine globally to avoid reloading models"""
+def init_coqui_tts(language='de'):
+    """Initialize Coqui TTS engine with Multi-Voice support for EN/DE"""
     global _coqui_tts
     
-    if _coqui_tts is not None:
+    # Check if we need to reload (Language changed)
+    current_lang = getattr(_coqui_tts, '_current_lang', None)
+    if _coqui_tts is not None and current_lang == language:
         return _coqui_tts
-        
+    
     try:
         from TTS.api import TTS
         
-        logger.info(f"Loading Coqui TTS model for language: {language}...")
-        
-        # Select model based on language
+        # Select Multi-Voice Models
         if language.lower() == 'de':
-            model_name = "tts_models/de/thorsten/tacotron2-DDC"  # German male voice
-        elif language.lower() == 'es':
-            model_name = "tts_models/es/multi-device/vits"      # Spanish
-        elif language.lower() == 'fr':
-            model_name = "tts_models/fr/css10/vits"             # French
+            # German: Thorsten Multispeaker (4 voices: 0=Male, 1=Female, etc.)
+            model_name = "tts_models/de/thorsten-multispeaker/vits"
+        elif language.lower() == 'en':
+            # English: VCTK (Many voices, speaker_ids 0-108+)
+            model_name = "tts_models/en/vctk/vits"
         else:
-            model_name = "tts_models/en/ljspeech/fast_pitch"     # Default English
+            # Fallback to standard single-voice if no multi-voice exists
+            logger.warning(f"No multi-voice model found for {language}. Falling back to standard.")
+            if language.lower() == 'fr': model_name = "tts_models/fr/css10/vits"
+            elif language.lower() == 'es': model_name = "tts_models/es/multi-device/vits" # This one is actually multi-speaker
+            else: model_name = "tts_models/en/ljspeech/fast_pitch"
         
-        # Load model (first time will download from Hugging Face ~100-300MB)
+        logger.info(f"Loading Multi-Voice Model: {model_name}...")
+        
+        # Load the model
+        # Note: This takes time on first run as it downloads ~700MB
         _coqui_tts = TTS(model_name=model_name)
         
-        # Try to move to GPU if available, otherwise CPU
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         _coqui_tts.to(device)
-        
         _coqui_tts._current_lang = language
         
-        logger.info("✅ Coqui TTS initialized successfully.")
+        logger.info("✅ Multi-Voice Coqui TTS initialized successfully.")
+        logger.info(f"   Language: {language}")
         logger.info(f"   Device: {device}")
-        logger.info(f"   Model: {model_name}")
+        logger.info(f"   Available Voices: Depends on model (German=4, English=109+)")
         
     except Exception as e:
-        logger.error(f"Failed to initialize Coqui TTS: {e}")
+        logger.error(f"Failed to initialize Multi-Voice Coqui TTS: {e}")
         import traceback
         logger.error(traceback.format_exc())
         _coqui_tts = None
     
     return _coqui_tts
+
+def _synthesize_segment(text, language='de', speaker_id=0):
+    """Synthesize a single text segment using Coqui TTS with specific speaker ID."""
+    if not COQUI_AVAILABLE or not _coqui_tts:
+        logger.error("Coqui TTS not available.")
+        return None
+    
+    try:
+        temp_file = f"/tmp/coqui_multi_output_{int(time.time() * 1000)}_{random.randint(1000, 9999)}.wav"
+        
+        # Determine valid speaker range
+        # German Thorsten has 4 speakers (0-3). English VCTK has 109 (0-108).
+        # We modulate the input speaker_id to stay within bounds.
+        if 'thorsten' in str(_coqui_tts.model_path):
+            max_speakers = 4
+        elif 'vctk' in str(_coqui_tts.model_path):
+            max_speakers = 109
+        else:
+            max_speakers = 1
+            
+        effective_speaker_id = int(speaker_id) % max_speakers
+        
+        # Call TTS with speaker_id
+        _coqui_tts.tts_to_file(
+            text=text, 
+            file_path=temp_file,
+            speaker_id=effective_speaker_id
+        )
+        
+        audio_segment = AudioSegment.from_wav(temp_file)
+        
+        # Cleanup
+        if os.path.exists(temp_file):
+            os.remove(temp_file)
+        
+        return audio_segment
+        
+    except Exception as e:
+        logger.error(f"Coqui TTS failed for speaker {speaker_id} ('{text[:30]}...'): {e}")
+        return None
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
