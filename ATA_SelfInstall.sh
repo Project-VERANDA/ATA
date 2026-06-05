@@ -178,23 +178,22 @@ pip install --upgrade pip -q
 
 # ============================================================================
 # 🔧 CRITICAL FIX: Install click==8.1.7 AND compatible typer EARLY
-# This prevents Python 3.12 TypeError with 'Choice' subscriptable and gtts conflicts.
+# This prevents Python 3.12 TypeError with 'Choice' subscriptable conflicts.
 # ============================================================================
-echo "Ensuring click==8.1.7 and compatible typer are installed (Python 3.12 + edge-tts fix)..."
+echo "Ensuring click==8.1.7 and compatible typer are installed..."
 if ! check_pip_installed "click"; then
     echo "Installing click==8.1.7..."
     pip install "click==8.1.7" --force-reinstall --no-deps
 else
     CLICK_VERSION=$(pip show click | grep Version | awk '{print $2}' | cut -d. -f1)
-    # Check if it's 8.1.x (safe) or 8.2+ (conflict with gtts) or <8.1 (error)
+    # Check if it's 8.1.x (safe) or 8.2+ (conflict) or <8.1 (error)
     if [ "$CLICK_VERSION" -lt 8 ]; then
         echo "⚠️  Detected click version < 8.0. Upgrading to 8.1.7..."
         pip install "click==8.1.7" --force-reinstall --no-deps
     elif [ "$CLICK_VERSION" -gt 8 ]; then
-        echo "⚠️  Detected click version > 8.1. Downgrading to 8.1.7 to satisfy edge-tts..."
+        echo "⚠️  Detected click version > 8.1. Downgrading to 8.1.7..."
         pip install "click==8.1.7" --force-reinstall --no-deps
     else
-        # It is 8.1.x, check minor version roughly
         MINOR=$(pip show click | grep Version | awk '{print $2}' | cut -d. -f2)
         if [ "$MINOR" -lt 1 ]; then
              echo "⚠️  Detected click 8.0.x. Upgrading to 8.1.7..."
@@ -205,17 +204,16 @@ else
     fi
 fi
 
-# Ensure typer is compatible with click 8.1.7 and Python 3.12
+# Ensure typer is compatible
 if ! check_pip_installed "typer"; then
     echo "Installing compatible typer (0.9.0 - 0.12.x)..."
     pip install "typer>=0.9.0,<0.13.0" --force-reinstall --no-deps
 else
     TYPER_VERSION=$(pip show typer | grep Version | awk '{print $2}')
-    # Simple check: if major version is 0.13+, it might require newer click
     MAJOR=$(echo $TYPER_VERSION | cut -d. -f1)
     MINOR=$(echo $TYPER_VERSION | cut -d. -f2)
     if [ "$MAJOR" -eq 0 ] && [ "$MINOR" -ge 13 ]; then
-        echo "⚠️  Detected typer >= 0.13. Downgrading to 0.12.5 for compatibility..."
+        echo "⚠️  Detected typer >= 0.13. Downgrading to 0.12.5..."
         pip install "typer==0.12.5" --force-reinstall --no-deps
     else
         echo "✅ typer version is compatible ($TYPER_VERSION)."
@@ -256,7 +254,7 @@ for pkg in "${STANDARD_PKGS[@]}"; do
     fi
 done
 
-# 3. Spacy Model Check (FIXED: Use full model name 'xx_ent_wiki_sm')
+# 3. Spacy Model Check
 echo "Checking spaCy multilingual model..."
 if python -m spacy check xx_ent_wiki_sm &> /dev/null; then
     echo "✅ spaCy multilingual model (xx_ent_wiki_sm) is already installed."
@@ -299,16 +297,15 @@ else
 fi
 
 # ============================================================================
-# 🔧 POST-INSTALLATION VERIFICATION: Critical for Python 3.12 compatibility
+# 🔧 POST-INSTALLATION VERIFICATION
 # ============================================================================
 echo ""
 echo "=== Verifying Critical Dependencies ==="
-echo "Checking click/typer/spacy compatibility..."
 
 if python -c "import click; from click import Choice; c = Choice(['a','b'])" 2>/dev/null; then
     echo "✅ click is compatible with Python 3.12"
 else
-    echo "❌ WARNING: click may not be compatible. Run: pip install 'click==8.1.7'"
+    echo "❌ WARNING: click may not be compatible."
 fi
 
 if python -c "import typer" 2>/dev/null; then
@@ -326,11 +323,12 @@ fi
 # 7. Web Interface Option
 echo ""
 echo "-------------------------------------------------"
-read -p "Do you want to install the Web Interface (Flask, edge-tts, etc.)? (y/n): " INSTALL_WEB
+read -p "Do you want to install the Web Interface (Flask, Coqui TTS, etc.)? (y/n): " INSTALL_WEB
 INSTALL_WEB=${INSTALL_WEB:-y}
 
 if [[ "$INSTALL_WEB" =~ ^[Yy]$ ]]; then
-    WEB_PKGS=("flask" "python-dotenv" "requests" "cryptography" "edge-tts" "nest_asyncio")
+    # CHANGED: Removed edge-tts/gtts, added TTS (Coqui), scipy, numpy
+    WEB_PKGS=("flask" "python-dotenv" "requests" "cryptography" "TTS" "scipy" "numpy")
     SKIP_WEB=true
     for pkg in "${WEB_PKGS[@]}"; do
         if ! check_pip_installed "$pkg"; then
@@ -340,8 +338,8 @@ if [[ "$INSTALL_WEB" =~ ^[Yy]$ ]]; then
     done
 
     if [ "$SKIP_WEB" = false ]; then
-        echo "Installing Web Interface dependencies (using edge-tts)..."
-        pip install flask python-dotenv requests cryptography edge-tts nest_asyncio
+        echo "Installing Web Interface dependencies (Coqui TTS for offline speech)..."
+        pip install flask python-dotenv requests cryptography TTS scipy numpy
     else
         echo "✅ All Web Interface dependencies are already installed."
     fi
@@ -364,24 +362,18 @@ else
     HF_TOKEN=$(echo "$HF_TOKEN" | tr -d '\r\n\t ')
     
     if [ -z "$HF_TOKEN" ]; then
-        echo "⚠️  No token provided and not logged in. You may need to manually download models later."
-        echo "   To fix later: Run 'hf auth login' manually."
+        echo "⚠️  No token provided. You may need to manually download models later."
     else
         echo "Logging in to Hugging Face..."
         LOGIN_OUTPUT=$(hf auth login --token "$HF_TOKEN" 2>&1)
-        LOGIN_STATUS=$?
         
         echo "$LOGIN_OUTPUT"
         
-        if echo "$LOGIN_OUTPUT" | grep -q "Login successful"; then
-            echo "✅ Login confirmed via output message."
+        if echo "$LOGIN_OUTPUT" | grep -q "Login successful" || hf whoami > /dev/null 2>&1; then
+            echo "✅ Login confirmed."
         else
-            if hf whoami > /dev/null 2>&1; then
-                echo "✅ Login confirmed via whoami."
-            else
-                echo "❌ Login failed. Please check your token."
-                exit 1
-            fi
+            echo "❌ Login failed. Please check your token."
+            exit 1
         fi
     fi
 fi
@@ -399,7 +391,6 @@ LLM_ANON_DIR="$PIPELINE_DIR/LLM-Anon"
 
 mkdir -p "$MODEL_DIR" "$VIDEOS_DIR" "$AUDIOS_DIR" "$TRANSCRIPTS_DIR" "$ANNONYM_DIR" "$LLM_ANON_DIR"
 echo "✅ Created directories."
-TARGET_BASE="$MODEL_DIR"
 
 # 10. Set Model Directory Path
 echo ""
@@ -434,25 +425,20 @@ if [ -n "$WHISPER_MODELS_INPUT" ]; then
         fi
 
         hf_repo="${MODEL_MAP[$model_name]}"
-        # Create unique folder name for each model
         folder_name="models--$(echo "$hf_repo" | sed 's/\//\--/g')"
         target_dir="$MODEL_DIR/$folder_name"
 
         if [ -d "$target_dir" ]; then
-            echo "✅ Model '$model_name' already exists at $target_dir. Skipping download."
+            echo "✅ Model '$model_name' already exists. Skipping."
         else
             echo "Downloading: $model_name ($hf_repo)..."
-            # Try with symlinks flag first, fallback without if it fails
-            if huggingface-cli download "$hf_repo" --local-dir "$target_dir" --local-dir-use-symlinks false 2>/dev/null; then
+            huggingface-cli download "$hf_repo" --local-dir "$target_dir" --local-dir-use-symlinks false 2>/dev/null || \
+            huggingface-cli download "$hf_repo" --local-dir "$target_dir"
+            
+            if [ $? -eq 0 ]; then
                 echo "✅ Successfully downloaded: $model_name"
             else
-                echo "⚠️  Trying without symlinks flag..."
-                huggingface-cli download "$hf_repo" --local-dir "$target_dir"
-                if [ $? -eq 0 ]; then
-                    echo "✅ Successfully downloaded: $model_name"
-                else
-                    echo "❌ Failed to download: $model_name"
-                fi
+                echo "❌ Failed to download: $model_name"
             fi
         fi
     done
@@ -469,7 +455,7 @@ echo ""
 DIARIZE_TARGET="$MODEL_DIR/models--pyannote--speaker-diarization-community-1"
 
 if [ -d "$DIARIZE_TARGET" ]; then
-    echo "✅ Pyannote Diarization model already exists at $DIARIZE_TARGET. Skipping."
+    echo "✅ Pyannote Diarization model already exists. Skipping."
 else
     echo "Downloading Pyannote model..."
     huggingface-cli download pyannote/speaker-diarization-community-1 --local-dir "$DIARIZE_TARGET" --local-dir-use-symlinks False
@@ -477,8 +463,7 @@ else
     if [ $? -eq 0 ]; then
         echo "✅ Pyannote Diarization model downloaded successfully."
     else
-        echo "❌ Failed to download Pyannote model. Diarization may be disabled."
-        echo "   Ensure you are logged in to Hugging Face with a valid token."
+        echo "❌ Failed to download Pyannote model."
     fi
 fi
 
@@ -489,10 +474,6 @@ echo "Downloading mmbert Multilingual PII Model & Base BERT"
 echo ""
 
 # --- Base Model (mmBERT-base) ---
-# CRITICAL: The PII model's crf_config.json expects the base model at:
-# MODEL_FOLDER/jhu-clsp/mmBERT-base
-# We must create this specific nested structure.
-
 BASE_PARENT="$MODEL_DIR/jhu-clsp"
 BASE_TARGET="$BASE_PARENT/mmBERT-base"
 
@@ -501,14 +482,12 @@ if [ -d "$BASE_TARGET" ] && [ -f "$BASE_TARGET/config.json" ]; then
 else
     echo "Setting up base model at $BASE_TARGET..."
     mkdir -p "$BASE_PARENT"
-    
-    # Download directly to the specific nested path
     huggingface-cli download jhu-clsp/mmBERT-base --local-dir "$BASE_TARGET" --local-dir-use-symlinks False
     
     if [ $? -eq 0 ] && [ -f "$BASE_TARGET/config.json" ]; then
-        echo "✅ Base model successfully installed at $BASE_TARGET"
+        echo "✅ Base model successfully installed."
     else
-        echo "❌ Error: Failed to download or verify base model."
+        echo "❌ Error: Failed to download base model."
         exit 1
     fi
 fi
@@ -516,57 +495,35 @@ fi
 # --- PII Model (mmbert_multilingual_pii_ner) ---
 PII_TARGET="$MODEL_DIR/mmbert_multilingual_pii_ner"
 if [ -d "$PII_TARGET" ]; then
-    echo "✅ PII model already exists at $PII_TARGET. Skipping."
+    echo "✅ PII model already exists. Skipping."
 else
     echo "Downloading PII model..."
     huggingface-cli download deryaerman/mmbert_multilingual_pii_ner --local-dir "$PII_TARGET" --local-dir-use-symlinks False
 
-    # Check for nested folder and flatten if necessary (though HF CLI usually handles this well with --local-dir)
     SUBFOLDER=$(find "$PII_TARGET" -mindepth 1 -maxdepth 1 -type d | head -n 1)
-    
     if [ -n "$SUBFOLDER" ] && [ "$SUBFOLDER" != "$PII_TARGET" ]; then
-        echo "⚠️  Detected nested folder structure. Flattening to match code expectations..."
+        echo "⚠️  Flattening nested folder structure..."
         mv "$SUBFOLDER"/* "$PII_TARGET/"
         rmdir "$SUBFOLDER"
-        echo "✅ Structure flattened successfully."
     fi
 
-    if [ $? -eq 0 ]; then
+    if [ $? -eq 0 ] && [ -f "$PII_TARGET/crf_config.json" ]; then 
         echo "✅ PII model downloaded and structure verified."
-        
-        if [ ! -f "$PII_TARGET/crf_config.json" ]; then
-            echo "❌ CRITICAL: crf_config.json missing after flattening. Installation may fail."
-            exit 1
-        fi
-        
-        # Optional: Verify the base_model_name in config matches our setup
-        BASE_NAME_IN_CONFIG=$(grep -o '"base_model_name": "[^"]*"' "$PII_TARGET/crf_config.json" | cut -d'"' -f4)
-        if [ "$BASE_NAME_IN_CONFIG" != "jhu-clsp/mmBERT-base" ]; then
-            echo "⚠️  Warning: crf_config.json expects base model at '$BASE_NAME_IN_CONFIG', but we set it up at 'jhu-clsp/mmBERT-base'."
-            echo "   If the script fails, you may need to update crf_config.json or adjust the folder structure."
-        fi
     else 
         echo "❌ Failed to download PII model."; exit 1
     fi
 fi
 
-# Create Environment file for LLM models.
+# Create Environment file
 cat > .env <<EOF
 # ATA Speech Anonymizer Configuration
 # Generated by ATA_SelfInstall.sh on $(date)
 
-# LLM API Configuration (Required for indirect identifier removal)
-# Replace 'your_api_key_here' with your actual API key
+# LLM API Configuration
 CHAT_AI_API_KEY=your_api_key_here
-
-# LLM Endpoint URL
-# Replace with your specific endpoint if different from the default
 CHAT_AI_ENDPOINT=https://your-endpoint.com/v1
 
-# Optional: Specify a default model key if desired
-# CHAT_AI_MODEL=gpt-oss-120b
-
-# Optional: HTTPS toggle for Web Interface
+# Optional HTTPS toggle
 # USE_HTTPS=true
 EOF
 
@@ -593,11 +550,10 @@ echo "        └── LLM-Anon/ (LLM rewritten)"
 echo ""
 echo "Next Steps:"
 echo "  1. Edit the '.env' file with your API Key."
-echo "  2. Place your video files in the 'pipeline/videos' folder."
+echo "  2. Place video files in 'pipeline/videos'."
 echo "  3. Run the pipeline:"
 echo "     python pipeline/process.py"
-echo "  4. (Optional) Run the Web Interface:"
+echo "  4. (Optional) Run the Web Interface (with Offline Coqui TTS):"
 echo "     python interactive_app/app.py"
 echo ""
-echo "Offline Status: All required models are now local."
-echo ""
+echo "Note: The Web Interface will automatically download Coqui voice models on first run."
