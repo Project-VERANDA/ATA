@@ -54,12 +54,12 @@ fi
 
 # 3. Create the environment
 ENV_NAME="whisperx"
-echo "Creating conda environment '$ENV_NAME' with Python 3.12..."
+echo "Creating conda environment '$ENV_NAME' with Python 3.10..."
 if conda env list | grep -q "^$ENV_NAME "; then
     echo "Environment '$ENV_NAME' already exists. Removing and recreating..."
     conda env remove -n $ENV_NAME -y
 fi
-conda create -n $ENV_NAME python=3.12 -y
+conda create -n $ENV_NAME python=3.10 -y
 
 # 4. Activate the environment
 echo "Activating environment..."
