@@ -322,7 +322,9 @@ else
     echo "❌ WARNING: spacy import failed"
 fi
 
+# ============================================================================
 # 7. Web Interface Option
+# ============================================================================
 echo ""
 echo "-------------------------------------------------"
 read -p "Do you want to install the Web Interface (Flask, Coqui TTS, etc.)? (y/n): " INSTALL_WEB
@@ -341,33 +343,38 @@ if [[ "$INSTALL_WEB" =~ ^[Yy]$ ]]; then
     if [ "$SKIP_WEB" = false ]; then
         echo "Installing Web Interface dependencies..."
         
-        # Upgrade pip, setuptools, wheel
+        # 1. Upgrade pip and build tools
         pip install --upgrade pip setuptools wheel
         
-        # CRITICAL ORDER: Install core data libs FIRST to satisfy whisperx/pyannote
-        # This allows pip to pull NumPy 2.0+ which both stacks require
-        echo "Installing NumPy and Pandas (satisfies whisperx/pyannote requirements)..."
-        pip install "numpy>=2.0.0" "pandas>=2.2.0" --no-cache-dir || {
-            echo "⚠️  Standard numpy/pandas install failed, trying fallback range..."
-            pip install "numpy>=1.24.0,<3.0.0" "pandas>=2.0.0,<3.0.0" --no-cache-dir
-        }
-        
-        # Now install Coqui TTS (newer versions support NumPy 2.0+)
-        echo "Installing Coqui TTS..."
+        # 2. CRITICAL FIX: Install core data libraries FIRST with forced versions
+        # This prevents scipy/TTS from pinning numpy to old versions
+        echo "Step 1/4: Forcing NumPy >=2.1.0 and Pandas >=2.2.3..."
+        pip install --no-cache-dir --force-reinstall \
+            "numpy>=2.1.0,<3.0.0" \
+            "pandas>=2.2.3,<3.0.0" \
+            "scipy>=1.14.0" || {
+                echo "⚠️  Force install failed. Trying standard install..."
+                pip install "numpy>=2.1.0" "pandas>=2.2.3" "scipy>=1.14.0" --no-cache-dir
+            }
+
+        # 3. Verify versions before proceeding
+        python -c "import numpy; import pandas; assert float(numpy.__version__.split('.')[0]) >= 2, 'NumPy too low'; print(f'✅ NumPy: {numpy.__version__}, Pandas: {pandas.__version__}')"
+
+        # 4. Now install Coqui TTS (which will respect the new numpy)
+        echo "Step 2/4: Installing Coqui TTS..."
         pip install "TTS>=0.22.0" --no-cache-dir || {
-            echo "⚠️  TTS standard install failed. Trying source build..."
-            pip install git+https://github.com/coqui-ai/TTS.git@stable --no-cache-dir || {
+            echo "⚠️  PyPI TTS failed. Trying GitHub source..."
+            pip install git+https://github.com/coqui-ai/TTS.git@main --no-cache-dir || {
                 echo "❌ CRITICAL: Failed to install Coqui TTS."
                 exit 1
             }
         }
+
+        # 5. Install remaining web frameworks
+        echo "Step 3/4: Installing Flask and dependencies..."
+        pip install flask python-dotenv requests cryptography pydub ffmpeg-python spacy --no-cache-dir
         
-        # Install remaining web frameworks
-        echo "Installing Flask and other dependencies..."
-        pip install flask python-dotenv requests cryptography scipy --no-cache-dir
-        
-        echo "✅ Web Interface dependencies installed."
-        echo "   Note: Dependency warnings may appear (see above). These are often non-fatal."
+        echo "✅ Step 4/4: Web Interface dependencies installed successfully."
     else
         echo "Skipping Web Interface installation (all packages already present)."
     fi
@@ -635,3 +642,6 @@ echo "  4. (Optional) Run the Web Interface (with Offline Coqui TTS):"
 echo "     python interactive_app/app.py"
 echo ""
 echo "Note: Coqui Multi-Voice models (German/English) were downloaded automatically."
+echo ""
+echo "💡 IMPORTANT: You may see 'dependency conflict' warnings from pip regarding numpy/pandas."
+echo "   These are safe to ignore. As long as 'python -c \"import whisperx...\"' works, your system is fine."
