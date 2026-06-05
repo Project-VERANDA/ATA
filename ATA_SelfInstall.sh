@@ -329,7 +329,6 @@ read -p "Do you want to install the Web Interface (Flask, Coqui TTS, etc.)? (y/n
 INSTALL_WEB=${INSTALL_WEB:-y}
 
 if [[ "$INSTALL_WEB" =~ ^[Yy]$ ]]; then
-    # CHANGED: Removed edge-tts/gtts, added TTS (Coqui), scipy, numpy
     WEB_PKGS=("flask" "python-dotenv" "requests" "cryptography" "TTS" "scipy" "numpy")
     SKIP_WEB=true
     for pkg in "${WEB_PKGS[@]}"; do
@@ -341,9 +340,27 @@ if [[ "$INSTALL_WEB" =~ ^[Yy]$ ]]; then
 
     if [ "$SKIP_WEB" = false ]; then
         echo "Installing Web Interface dependencies (Coqui TTS for offline speech)..."
-        pip install flask python-dotenv requests cryptography TTS scipy numpy
+        
+        # Upgrade pip first to ensure latest wheel support
+        pip install --upgrade pip setuptools wheel
+        
+        # Install Coqui TTS explicitly with flags to bypass potential wheel issues
+        echo "Installing TTS (Coqui)... This may take a moment."
+        pip install "TTS>=0.22.0" --no-cache-dir || {
+            echo "⚠️  Standard install failed. Trying fallback method..."
+            # Fallback: Try installing from source if wheels fail
+            pip install git+https://github.com/coqui-ai/TTS.git --no-cache-dir || {
+                echo "❌ CRITICAL: Failed to install Coqui TTS. Please check your network and Python version."
+                exit 1
+            }
+        }
+        
+        # Install remaining web deps
+        pip install flask python-dotenv requests cryptography scipy numpy
+        
+        echo "✅ Web Interface dependencies installed."
     else
-        echo "✅ All Web Interface dependencies are already installed."
+        echo "Skipping Web Interface installation (all packages already present)."
     fi
 else
     echo "Skipping Web Interface installation."
@@ -361,7 +378,7 @@ echo "  - English: vctk (109 voices)"
 echo "Total size: ~700MB (downloaded on first run by code, or here now)."
 echo ""
 
-DOWNLOAD_MODELS=${DOWNLOAD_MODELS:-y} # Default yes if not set
+DOWNLOAD_MODELS=${DOWNLOAD_MODELS:-y} 
 read -p "Do you want to download these models now? (y/n) [y]: " DOWNLOAD_INPUT
 DOWNLOAD_INPUT=${DOWNLOAD_INPUT:-y}
 
