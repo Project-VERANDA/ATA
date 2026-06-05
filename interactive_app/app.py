@@ -10,7 +10,6 @@ import zipfile
 import shutil
 import difflib
 import random
-import edge_tts
 import asyncio
 from openai import OpenAI
 from pathlib import Path
@@ -86,12 +85,14 @@ except ImportError:
     sys.exit("Exiting: WhisperX is a required dependency.")
 
 try:
-    import edge_tts
-    EDGE_TTS_AVAILABLE = True
-    logger.info("Edge-TTS is available.")
+   try:
+    from TTS.api import TTS
+    COQUI_AVAILABLE = True
+    logger.info("Coqui TTS is available.")
 except ImportError:
-    EDGE_TTS_AVAILABLE = False
-    logger.warning("edge-tts not available. Text-to-speech will be disabled.")
+    COQUI_AVAILABLE = False
+    logger.warning("Coqui TTS not available. Text-to-speech will be disabled.")
+    TTS = None
 
 try:
     from pydub import AudioSegment
@@ -104,7 +105,7 @@ except ImportError:
 # --- Application Configuration ---
 BERT_ANONYMIZER_AVAILABLE = True
 DEFAULT_MODEL = 'bert-base-ner'
-TTS_AVAILABLE = EDGE_TTS_AVAILABLE
+TTS_AVAILABLE = COQUI_AVAILABLE
 
 import torch
 from flask import Flask, render_template, request, jsonify, send_file
@@ -123,6 +124,36 @@ try:
     logger.info("Interactive App: Models pre-loaded successfully.")
 except Exception as e:
     logger.error(f"Interactive App: Failed to pre-load models: {e}")
+
+# --- Coqui TTS Global Initialization ---
+_coqui_tts = None
+
+def init_coqui_tts(language='en'):
+    """Initialize Coqui TTS engine globally to avoid reloading models"""
+    global _coqui_tts
+    
+    if _coqui_tts is not None:
+        return _coqui_tts
+        
+    try:
+        logger.info(f"Loading Coqui TTS model for language: {language}...")
+        
+        # Select model based on language
+        if language.lower() == 'de':
+            model_name = "tts_models/de/thorsten/tacotron2-DDC"  # German male voice
+        elif language.lower() == 'es':
+            model_name = "tts_models/es/multi-device/vits"      # Spanish
+        else:
+            model_name = "tts_models/en/ljspeech/fast_pitch"     # Default English
+        
+        _coqui_tts = TTS(model_name=model_name).to(app.config.get('DEVICE', 'cpu'))
+        logger.info("✅ Coqui TTS initialized successfully.")
+        
+    except Exception as e:
+        logger.error(f"Failed to initialize Coqui TTS: {e}")
+        _coqui_tts = None
+    
+    return _coqui_tts
 
 def transcribe_audio(audio_path, language='auto'):
     """
@@ -418,57 +449,184 @@ SPEAKER_VOICES = {
 
 ALLOWED_EXTENSIONS = {'wav', 'mp3', 'mp4', 'm4a', 'flac', 'ogg', 'webm'}
 
-async def _synthesize_segment(text, voice):
-    """Synthesize a single text segment using edge_tts, returns AudioSegment."""
-    communicate = edge_tts.Communicate(text, voice)
-    fp = BytesIO()
-    async for chunk in communicate.stream():
-        if chunk["type"] == "audio":
-            fp.write(chunk["data"])
-    fp.seek(0)
-    return AudioSegment.from_mp3(fp)
-
-
-async def _generate_speech_async(text, language='de'):
-    # Matches "SPEAKER_00:" at the start of a line, capturing the speaker ID
-    speaker_regex = re.compile(r'^(SPEAKER_0[0-3]):\s*', re.MULTILINE)
-    tag_regex = re.compile(r'(\[[A-Z_]+\])')
-    beep_sound = generate_beep()
-    final_audio = AudioSegment.empty()
-
-    voice_map = SPEAKER_VOICES.get(language, SPEAKER_VOICES.get('en'))
-    if not voice_map:
-        voice_map = SPEAKER_VOICES['en']
+def _synthesize_segment(text, language='de'):
+    """Synthesize a single text segment using Coqui TTS locally."""
+    if not COQUI_AVAILABLE or not _coqui_tts:
+        logger.error("Coqui TTS not available.")
+        return None
+    
+    try:
+        # Generate unique temp file name
+        temp_file = f"/tmp/coqui_output_{int(time.time() * 1000)}.wav"
         
-    current_voice = list(voice_map.values())[0]
+        # Run synthesis
+        # Note: Some models accept speaker_id for multi-voice, others don't
+        _coqui_tts.tts_to_file(
+            text=text, 
+            file_path=temp_file
+        )
+        
+        # Load audio with pydub
+        audio_segment = AudioSegment.from_wav(temp_file)
+        
+        # Clean up temp file immediately to save space
+        if os.path.exists(temp_file):
+            os.remove(temp_file)
+        
+        return audio_segment
+        
+    except Exception as e:
+        logger.error(f"Coqui TTS failed for segment '{text[:30]}...': {e}")
+        return None
 
-    segments = []
-    matches = list(speaker_regex.finditer(text))
 
-    for i, match in enumerate(matches):
-        speaker_id = match.group(1)
-        start = match.end()
-        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
-        spoken_text = text[start:end].strip()
-        segments.append((speaker_id, spoken_text))
+def generate_speech(text, voice_settings=None, language='de'):
+    """
+    Generate speech using Coqui TTS - Fully Offline
+    Replaces edge_tts and gTTS implementations
+    """
+    
+    global _coqui_tts
+    
+    # Check dependencies
+    if not COQUI_AVAILABLE:
+        logger.error("Coqui TTS not available. Install with: pip install TTS")
+        return None, None
+    
+    if not _coqui_tts:
+        # Initialize on demand if not loaded yet
+        init_coqui_tts(language)
+    
+    if not _coqui_tts:
+        logger.error("Coqui TTS failed to initialize.")
+        return None, None
+    
+    try:
+        from pydub import AudioSegment
+        beep_sound = generate_beep()
+        final_audio = AudioSegment.empty()
+        
+        # Regex patterns (preserved from original code)
+        speaker_regex = re.compile(r'^(SPEAKER_0[0-3]):\s*', re.MULTILINE)
+        tag_regex = re.compile(r'(\[[A-Z_]+\])')
+        
+        # Simple mapping since Coqui doesn't have exact same voice names as Edge
+        current_voice = 'default'
+        
+        # Parse speaker segments
+        segments = []
+        matches = list(speaker_regex.finditer(text))
+        
+        for i, match in enumerate(matches):
+            speaker_id = match.group(1)
+            start = match.end()
+            end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+            spoken_text = text[start:end].strip()
+            segments.append((speaker_id, spoken_text))
+        
+        # If no speakers found, treat entire text as one segment
+        if not segments:
+            segments = [("", text)]
+        
+        # Synthesize each segment
+        for speaker_id, spoken_text in segments:
+            sub_parts = tag_regex.split(spoken_text)
+            
+            for sub in sub_parts:
+                if not sub or not sub.strip():
+                    continue
+                    
+                if tag_regex.match(sub):
+                    # Insert beep for tags like [PERSON], [DATE], etc.
+                    final_audio += beep_sound
+                else:
+                    # Synthesize actual speech
+                    try:
+                        temp_file = f"/tmp/coqui_output_{int(time.time() * 1000)}_{random.randint(1000, 9999)}.wav"
+                        
+                        # Run synthesis through Coqui
+                        _coqui_tts.tts_to_file(
+                            text=sub.strip(), 
+                            file_path=temp_file
+                        )
+                        
+                        # Load audio with pydub
+                        segment = AudioSegment.from_wav(temp_file)
+                        
+                        # Clean up temp file immediately to save space
+                        if os.path.exists(temp_file):
+                            os.remove(temp_file)
+                        
+                        final_audio += segment
+                        
+                    except Exception as seg_error:
+                        logger.error(f"Coqui TTS failed for segment '{sub[:30]}...': {seg_error}")
+                        continue
+        
+        if len(final_audio) == 0:
+            logger.warning("No audio was generated (all segments were tags or empty).")
+            return None, None
+        
+        # Save final output
+        audio_filename = f"speech_output_{int(time.time())}.mp3"
+        audio_path = os.path.join(os.path.abspath(app.config['UPLOAD_FOLDER']), audio_filename)
+        final_audio.export(audio_path, format="mp3")
+        
+        logger.info(f"Speech generated successfully with Coqui TTS: {audio_path}")
+        return audio_path, 'coqui_tts'
+        
+    except Exception as e:
+        logger.error(f"Speech generation failed: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return None, None
 
-    for speaker_id, spoken_text in segments:
-        current_voice = voice_map.get(speaker_id, list(voice_map.values())[0])
-        sub_parts = tag_regex.split(spoken_text)
-        for sub in sub_parts:
-            if not sub or not sub.strip():
-                continue
-            if tag_regex.match(sub):
-                final_audio += beep_sound
-            else:
-                try:
-                    segment = await _synthesize_segment(sub.strip(), current_voice)
-                    final_audio += segment
-                except Exception as e:
-                    logger.error(f"edge_tts failed for segment: '{sub[:30]}...'. Error: {e}")
 
-    return final_audio
+# --- Helper Function: Initialize Coqui TTS Globally ---
+_coqui_tts = None
 
+def init_coqui_tts(language='en'):
+    """Initialize Coqui TTS engine globally to avoid reloading models"""
+    global _coqui_tts
+    
+    if _coqui_tts is not None:
+        return _coqui_tts
+        
+    try:
+        from TTS.api import TTS
+        
+        logger.info(f"Loading Coqui TTS model for language: {language}...")
+        
+        # Select model based on language
+        if language.lower() == 'de':
+            model_name = "tts_models/de/thorsten/tacotron2-DDC"  # German male voice
+        elif language.lower() == 'es':
+            model_name = "tts_models/es/multi-device/vits"      # Spanish
+        elif language.lower() == 'fr':
+            model_name = "tts_models/fr/css10/vits"             # French
+        else:
+            model_name = "tts_models/en/ljspeech/fast_pitch"     # Default English
+        
+        # Load model (first time will download from Hugging Face ~100-300MB)
+        _coqui_tts = TTS(model_name=model_name)
+        
+        # Try to move to GPU if available, otherwise CPU
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        _coqui_tts.to(device)
+        
+        _coqui_tts._current_lang = language
+        
+        logger.info("✅ Coqui TTS initialized successfully.")
+        logger.info(f"   Device: {device}")
+        logger.info(f"   Model: {model_name}")
+        
+    except Exception as e:
+        logger.error(f"Failed to initialize Coqui TTS: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        _coqui_tts = None
+    
+    return _coqui_tts
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -477,7 +635,7 @@ def generate_beep(duration_ms=400, freq=1000):
     return Sine(freq).to_audio_segment(duration=duration_ms).apply_gain(-12)
 
 def generate_speech(text, voice_settings=None, language='de'):
-    if not PYDUB_AVAILABLE or not EDGE_TTS_AVAILABLE:
+    if not PYDUB_AVAILABLE or not COQUI_AVAILABLE:
         logger.error("pydub or edge-tts not available, cannot generate speech.")
         return None, None
     
@@ -786,7 +944,7 @@ def anonymize_text():
             'success': True, 
             'anonymized_text': anonymized_text, 
             'model_used': 'Local BERT', 
-            'tts_available': EDGE_TTS_AVAILABLE
+            'tts_available': COQUI_AVAILABLE
         })
     
     except Exception as e:
@@ -809,7 +967,7 @@ def surrogate_text():
         return jsonify({
             'success': True, 
             'surrogated_text': s_text,
-            'tts_available': EDGE_TTS_AVAILABLE
+            'tts_available': COQUI_AVAILABLE
         })
     
     except Exception as e:
@@ -831,7 +989,7 @@ def rephrase_text():
         return jsonify({
             'success': True, 
             'rephrased_text': p_text,
-            'tts_available': EDGE_TTS_AVAILABLE
+            'tts_available': COQUI_AVAILABLE
         })
     
     except Exception as e:
@@ -853,7 +1011,7 @@ def generate_org_audio_route():
         if not text:
             return jsonify({'error': 'Empty text'}), 400
         
-        if not EDGE_TTS_AVAILABLE:
+        if not COQUI_AVAILABLE:
             return jsonify({'error': 'TTS not available'}), 500
             
         offsets = diff_relevant_offsets(offS, text)
@@ -891,7 +1049,7 @@ def generate_speech_route():
         if not text:
             return jsonify({'error': 'Empty text'}), 400
         
-        if not EDGE_TTS_AVAILABLE:
+        if not COQUI_AVAILABLE:
             return jsonify({'error': 'TTS not available'}), 500
         
         lang = data['lang'].strip()
@@ -923,11 +1081,11 @@ def generate_speech_route():
 def get_available_voices():
     try:
         voices = []
-        if EDGE_TTS_AVAILABLE: # Changed from EDGE_TTS_AVAILABLE
+        if COQUI_AVAILABLE: # Changed from COQUI_AVAILABLE
             # List some common voices or let frontend map via language code
             voices = [{'id': lang, 'name': f'{lang.upper()} (Edge TTS)', 'language': [lang], 'engine': 'edge_tts'} 
                       for lang in ['de', 'en', 'fr', 'es']]
-        return jsonify({'voices': voices, 'tts_available': EDGE_TTS_AVAILABLE})
+        return jsonify({'voices': voices, 'tts_available': COQUI_AVAILABLE})
     except Exception as e:
         return jsonify({'error': f'Error getting voices: {str(e)}'}), 500
 
@@ -943,8 +1101,8 @@ def health_check():
             'chat_ai_configured': CHAT_AI_API_KEY is not None,
             'default_model': DEFAULT_MODEL,
             'available_models': list(AVAILABLE_MODELS.keys()),
-            'tts_available': EDGE_TTS_AVAILABLE, # Changed
-            'tts_engine': 'edge_tts' if EDGE_TTS_AVAILABLE else None # Changed
+            'tts_available': COQUI_AVAILABLE, # Changed
+            'tts_engine': 'edge_tts' if COQUI_AVAILABLE else None # Changed
         })
     except Exception as e:
         return jsonify({
