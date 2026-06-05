@@ -18,6 +18,11 @@ from datetime import datetime, timezone, timedelta
 from werkzeug.utils import secure_filename
 from collections import OrderedDict
 from audio_utils import AudioBeepReplacer
+from io import BytesIO
+from dotenv import load_dotenv
+load_dotenv()
+CHAT_AI_API_KEY = os.getenv('CHAT_AI_API_KEY')
+CHAT_AI_ENDPOINT = os.getenv('CHAT_AI_ENDPOINT', 'https://llm.cloud.cci.charite.de/v1')
 
 # --- Path Configuration ---
 # Determine the directory containing this script (interactive_app/)
@@ -81,13 +86,12 @@ except ImportError:
     sys.exit("Exiting: WhisperX is a required dependency.")
 
 try:
-    from gtts import gTTS
-    import io
-    GTTS_AVAILABLE = True
-    logger.info("Google TTS (gTTS) available.")
+    import edge_tts
+    EDGE_TTS_AVAILABLE = True
+    logger.info("Edge-TTS is available.")
 except ImportError:
-    GTTS_AVAILABLE = False
-    logger.warning("gTTS not available. Text-to-speech will be disabled.")
+    EDGE_TTS_AVAILABLE = False
+    logger.warning("edge-tts not available. Text-to-speech will be disabled.")
 
 try:
     from pydub import AudioSegment
@@ -100,7 +104,7 @@ except ImportError:
 # --- Application Configuration ---
 BERT_ANONYMIZER_AVAILABLE = True
 DEFAULT_MODEL = 'bert-base-ner'
-TTS_AVAILABLE = GTTS_AVAILABLE
+TTS_AVAILABLE = EDGE_TTS_AVAILABLE
 
 import torch
 from flask import Flask, render_template, request, jsonify, send_file
@@ -417,7 +421,7 @@ ALLOWED_EXTENSIONS = {'wav', 'mp3', 'mp4', 'm4a', 'flac', 'ogg', 'webm'}
 async def _synthesize_segment(text, voice):
     """Synthesize a single text segment using edge_tts, returns AudioSegment."""
     communicate = edge_tts.Communicate(text, voice)
-    fp = io.BytesIO()
+    fp = BytesIO()
     async for chunk in communicate.stream():
         if chunk["type"] == "audio":
             fp.write(chunk["data"])
@@ -432,25 +436,24 @@ async def _generate_speech_async(text, language='de'):
     beep_sound = generate_beep()
     final_audio = AudioSegment.empty()
 
-    voice_map = SPEAKER_VOICES.get(language, SPEAKER_VOICES['en'])
-    current_voice = list(voice_map.values())[0]  # default to first voice
+    voice_map = SPEAKER_VOICES.get(language, SPEAKER_VOICES.get('en'))
+    if not voice_map:
+        voice_map = SPEAKER_VOICES['en']
+        
+    current_voice = list(voice_map.values())[0]
 
-    # Find all speaker blocks: [(speaker_id, text), ...]
     segments = []
     matches = list(speaker_regex.finditer(text))
 
     for i, match in enumerate(matches):
-        speaker_id = match.group(1)          # e.g. "SPEAKER_00"
-        start = match.end()                  # text starts after "SPEAKER_00: "
+        speaker_id = match.group(1)
+        start = match.end()
         end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
         spoken_text = text[start:end].strip()
         segments.append((speaker_id, spoken_text))
 
-    # Now synthesize each block with the right voice
     for speaker_id, spoken_text in segments:
         current_voice = voice_map.get(speaker_id, list(voice_map.values())[0])
-
-        # Handle [TAG] beeps within each speaker's text
         sub_parts = tag_regex.split(spoken_text)
         for sub in sub_parts:
             if not sub or not sub.strip():
@@ -474,18 +477,21 @@ def generate_beep(duration_ms=400, freq=1000):
     return Sine(freq).to_audio_segment(duration=duration_ms).apply_gain(-12)
 
 def generate_speech(text, voice_settings=None, language='de'):
-
-    if not PYDUB_AVAILABLE:
-        logger.error("pydub not available, cannot generate speech.")
+    if not PYDUB_AVAILABLE or not EDGE_TTS_AVAILABLE:
+        logger.error("pydub or edge-tts not available, cannot generate speech.")
         return None, None
+    
     try:
-        # Run the async function — works in both script and Jupyter
+        # Handle event loop for Flask context
+        try:
+            import nest_asyncio
+            nest_asyncio.apply()
+        except ImportError:
+            pass
+            
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
-                # Jupyter: event loop already running, use nest_asyncio or create task
-                import nest_asyncio
-                nest_asyncio.apply()
                 final_audio = loop.run_until_complete(_generate_speech_async(text, language))
             else:
                 final_audio = loop.run_until_complete(_generate_speech_async(text, language))
@@ -493,7 +499,7 @@ def generate_speech(text, voice_settings=None, language='de'):
             final_audio = asyncio.run(_generate_speech_async(text, language))
 
         if len(final_audio) == 0:
-            logger.warning("No audio was generated (all segments were tags or empty).")
+            logger.warning("No audio was generated.")
             return None, None
 
         audio_filename = f"speech_output_{int(time.time())}.mp3"
@@ -504,52 +510,9 @@ def generate_speech(text, voice_settings=None, language='de'):
 
     except Exception as e:
         logger.error(f"Speech generation failed: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         return None, None
-        
-def generate_speech2(text, voice_settings=None, language='de'):
-    if not GTTS_AVAILABLE or not PYDUB_AVAILABLE:
-        logger.error("gTTS or pydub not available, cannot generate speech with beeps.")
-        return None, None
-
-    try:
-        text=re.sub("SPEAKER_00:", "Speaker 0:", text)
-        text=re.sub("SPEAKER_01:", "Speaker 1:", text)
-        text=re.sub("SPEAKER_02:", "Speaker 2:", text)
-        text=re.sub("SPEAKER_03:", "Speaker 3:", text)
-        tag_regex = re.compile(r'(\[[A-Z_]+\])')
-        text_parts = tag_regex.split(text)
-        beep_sound = generate_beep()
-        final_audio = AudioSegment.empty()
-
-        for part in text_parts:
-            if not part:
-                continue
-            if tag_regex.match(part):
-                final_audio += beep_sound
-            elif part.strip():
-                try:
-                    tts = gTTS(text=part.strip(), lang=language, slow=False)
-                    with io.BytesIO() as fp:
-                        tts.write_to_fp(fp)
-                        fp.seek(0)
-                        speech_segment = AudioSegment.from_mp3(fp)
-                        final_audio += speech_segment
-                except Exception as e:
-                    logger.error(f"gTTS failed for segment: '{part[:30]}...'. Error: {e}")
-        
-        if len(final_audio) == 0:
-            logger.warning("No audio was generated (all segments were tags or empty).")
-            return None, None
-
-        audio_filename = f"speech_output_{int(time.time())}.mp3"
-        audio_path = os.path.join(os.path.abspath(app.config['UPLOAD_FOLDER']), audio_filename)
-        final_audio.export(audio_path, format="mp3")
-        logger.info(f"Speech with beeps generated successfully: {audio_path}")
-        return audio_path, 'gtts_with_beeps'
-    except Exception as e:
-        logger.error(f"Speech generation with beeps failed: {e}")
-        return None, None
-
 
 def diff_relevant_offsets(offs, s2):
     # flatten offsets + build reference string
@@ -960,9 +923,11 @@ def generate_speech_route():
 def get_available_voices():
     try:
         voices = []
-        if GTTS_AVAILABLE:
-            voices = [{'id': 'de', 'name': 'Deutsch (Google TTS)', 'language': ['de'], 'engine': 'gtts'}]
-        return jsonify({'voices': voices, 'tts_available': GTTS_AVAILABLE})
+        if EDGE_TTS_AVAILABLE: # Changed from GTTS_AVAILABLE
+            # List some common voices or let frontend map via language code
+            voices = [{'id': lang, 'name': f'{lang.upper()} (Edge TTS)', 'language': [lang], 'engine': 'edge_tts'} 
+                      for lang in ['de', 'en', 'fr', 'es']]
+        return jsonify({'voices': voices, 'tts_available': EDGE_TTS_AVAILABLE})
     except Exception as e:
         return jsonify({'error': f'Error getting voices: {str(e)}'}), 500
 
@@ -978,8 +943,8 @@ def health_check():
             'chat_ai_configured': CHAT_AI_API_KEY is not None,
             'default_model': DEFAULT_MODEL,
             'available_models': list(AVAILABLE_MODELS.keys()),
-            'tts_available': GTTS_AVAILABLE,
-            'tts_engine': 'gtts' if GTTS_AVAILABLE else None
+            'tts_available': EDGE_TTS_AVAILABLE, # Changed
+            'tts_engine': 'edge_tts' if EDGE_TTS_AVAILABLE else None # Changed
         })
     except Exception as e:
         return jsonify({

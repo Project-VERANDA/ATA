@@ -180,7 +180,7 @@ pip install --upgrade pip -q
 # 🔧 CRITICAL FIX: Install click==8.1.7 AND compatible typer EARLY
 # This prevents Python 3.12 TypeError with 'Choice' subscriptable and gtts conflicts.
 # ============================================================================
-echo "Ensuring click==8.1.7 and compatible typer are installed (Python 3.12 + gtts fix)..."
+echo "Ensuring click==8.1.7 and compatible typer are installed (Python 3.12 + edge-tts fix)..."
 if ! check_pip_installed "click"; then
     echo "Installing click==8.1.7..."
     pip install "click==8.1.7" --force-reinstall --no-deps
@@ -191,7 +191,7 @@ else
         echo "⚠️  Detected click version < 8.0. Upgrading to 8.1.7..."
         pip install "click==8.1.7" --force-reinstall --no-deps
     elif [ "$CLICK_VERSION" -gt 8 ]; then
-        echo "⚠️  Detected click version > 8.1. Downgrading to 8.1.7 to satisfy gtts..."
+        echo "⚠️  Detected click version > 8.1. Downgrading to 8.1.7 to satisfy edge-tts..."
         pip install "click==8.1.7" --force-reinstall --no-deps
     else
         # It is 8.1.x, check minor version roughly
@@ -326,11 +326,12 @@ fi
 # 7. Web Interface Option
 echo ""
 echo "-------------------------------------------------"
-read -p "Do you want to install the Web Interface (Flask, gTTS, etc.)? (y/n): " INSTALL_WEB
+read -p "Do you want to install the Web Interface (Flask, edge-tts, etc.)? (y/n): " INSTALL_WEB
 INSTALL_WEB=${INSTALL_WEB:-y}
 
 if [[ "$INSTALL_WEB" =~ ^[Yy]$ ]]; then
-    WEB_PKGS=("flask" "python-dotenv" "requests" "cryptography" "gtts")
+    # CHANGED: Removed gtts, added edge-tts and nest_asyncio
+    WEB_PKGS=("flask" "python-dotenv" "requests" "cryptography" "edge-tts" "nest_asyncio")
     SKIP_WEB=true
     for pkg in "${WEB_PKGS[@]}"; do
         if ! check_pip_installed "$pkg"; then
@@ -340,8 +341,8 @@ if [[ "$INSTALL_WEB" =~ ^[Yy]$ ]]; then
     done
 
     if [ "$SKIP_WEB" = false ]; then
-        echo "Installing Web Interface dependencies..."
-        pip install flask python-dotenv requests cryptography gtts
+        echo "Installing Web Interface dependencies (using edge-tts)..."
+        pip install flask python-dotenv requests cryptography edge-tts nest_asyncio
     else
         echo "✅ All Web Interface dependencies are already installed."
     fi
@@ -531,7 +532,7 @@ else
         echo "✅ Structure flattened successfully."
     fi
 
-    if [ $? -eq 0 ]; then 
+    if [ $? -eq 0 ]; 
         echo "✅ PII model downloaded and structure verified."
         
         if [ ! -f "$PII_TARGET/crf_config.json" ]; then
