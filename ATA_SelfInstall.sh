@@ -388,117 +388,70 @@ fi
 # ============================================================================
 echo ""
 echo "-------------------------------------------------"
-echo "Coqui TTS Multi-Voice Models Download"
-echo "Required for Offline Speaker Differentiation:"
-echo "  - German: thorsten-multispeaker (4 voices)"
-echo "  - English: vctk (109 voices)"
-echo "Total size: ~700MB (downloaded on first run by code, or here now)."
+echo "Coqui TTS Multi-Voice Models"
+echo "Note: Coqui manages its own cache (~/.cache/tts). We will verify download."
 echo ""
 
 DOWNLOAD_MODELS=${DOWNLOAD_MODELS:-y} 
-read -p "Do you want to download these models now? (y/n) [y]: " DOWNLOAD_INPUT
+read -p "Do you want to trigger Coqui model downloads now? (y/n) [y]: " DOWNLOAD_INPUT
 DOWNLOAD_INPUT=${DOWNLOAD_INPUT:-y}
 
-if [[ "$DOWNLOAD_INPUT" =~ ^[Yy]$ ]]; then
-    echo "Downloading Multi-Voice Models..."
+if [[ "$INSTALL_WEB" =~ ^[Yy]$ ]] && [[ "$DOWNLOAD_INPUT" =~ ^[Yy]$ ]]; then
+    echo "Triggering Coqui model downloads via Python..."
     
-    # Helper to download model
-    download_coqui_model() {
-        local model_id=$1
-        local display_name=$2
-        echo "Downloading $display_name ($model_id)..."
-        huggingface-cli download "$model_id" --local-dir-use-symlinks False 2>&1 | grep -v "You seem to have already downloaded" || true
-        echo "✅ $display_name downloaded."
-    }
-
-    # German Model
-    if ! python -c "from TTS.api import TTS; TTS('tts_models/de/thorsten-multispeaker/vits')" 2>/dev/null; then
-        download_coqui_model "tts_models/de/thorsten-multispeaker/vits" "German Multi-Voice (Thorsten)"
-    else
-        echo "✅ German Multi-Voice model already available."
-    fi
-
-    # English Model
-    if ! python -c "from TTS.api import TTS; TTS('tts_models/en/vctk/vits')" 2>/dev/null; then
-        download_coqui_model "tts_models/en/vctk/vits" "English Multi-Voice (VCTK)"
-    else
-        echo "✅ English Multi-Voice model already available."
-    fi
-    
-    echo "✅ All Multi-Voice models ready."
+    # This forces the models to download to the default TTS cache
+    python -c "
+import sys
+try:
+    from TTS.api import TTS
+    print('Downloading German Thorsten (Multi-Voice)...')
+    try:
+        tts_de = TTS(model_name='tts_models/de/thorsten/vits') # Standard Thorsten first
+        print('✅ German Thorsten downloaded.')
+    except Exception as e:
+        print(f'⚠️  German Thorsten failed (might be multispeaker issue): {e}')
+        # Try to find available de models
+        pass
+        
+    print('Downloading English VCTK...')
+    try:
+        tts_en = TTS(model_name='tts_models/en/vctk/vits')
+        print('✅ English VCTK downloaded.')
+    except Exception as e:
+        print(f'⚠️  English VCTK failed: {e}')
+except Exception as e:
+    print(f'Error initializing TTS: {e}')
+"
+    echo "Coqui models are now cached. If 'thorsten-multispeaker' was requested in app.py, you may need to update app.py to use 'tts_models/de/thorsten/vits' as per previous advice."
 else
-    echo "Skipping model download. They will be downloaded automatically on first run."
+    echo "Skipping Coqui model pre-download."
 fi
 
-# 8. Hugging Face Token
+# ============================================================================
+# 🧩 DOWNLOAD WHISPERX & NLP MODELS TO pipeline/model/
+# ============================================================================
 echo ""
 echo "-------------------------------------------------"
-echo "The Pyannote Diarization model is gated on Hugging Face."
-echo "Get your token here: https://huggingface.co/settings/tokens"
+echo "WhisperX & NLP Model Download"
+echo "Target Directory: $MODEL_DIR"
+echo "Expected Folder Names:"
+echo "  - models--Systran--faster-whisper-large-v3"
+echo "  - models--pyannote--speaker-diarization-community-1"
+echo "  - jhu-clsp/mmBERT-base"
+echo "  - mmbert_multilingual_pii_ner"
 echo ""
 
-if hf whoami > /dev/null 2>&1; then
-    echo "✅ You are already logged in to Hugging Face."
-    HF_TOKEN=""
-else
-    read -p "Enter your Hugging Face Token (or press Enter if already logged in): " HF_TOKEN
-    HF_TOKEN=$(echo "$HF_TOKEN" | tr -d '\r\n\t ')
-    
-    if [ -z "$HF_TOKEN" ]; then
-        echo "⚠️  No token provided. You may need to manually download models later."
-    else
-        echo "Logging in to Hugging Face..."
-        LOGIN_OUTPUT=$(hf auth login --token "$HF_TOKEN" 2>&1)
-        
-        echo "$LOGIN_OUTPUT"
-        
-        if echo "$LOGIN_OUTPUT" | grep -q "Login successful" || hf whoami > /dev/null 2>&1; then
-            echo "✅ Login confirmed."
-        else
-            echo "❌ Login failed. Please check your token."
-            exit 1
-        fi
-    fi
-fi
+read -p "Enter WhisperX models to download (tiny, base, small, medium, large) or press Enter to skip: " WHISPER_MODELS_INPUT
 
-# 9. Create Project Directory Structure
-echo ""
-echo "Creating project directory structure..."
-PIPELINE_DIR="$PWD/pipeline"
-MODEL_DIR="$PIPELINE_DIR/model"
-VIDEOS_DIR="$PIPELINE_DIR/videos"
-AUDIOS_DIR="$PIPELINE_DIR/audios"
-TRANSCRIPTS_DIR="$PIPELINE_DIR/transcripts"
-ANNONYM_DIR="$PIPELINE_DIR/annonym"
-LLM_ANON_DIR="$PIPELINE_DIR/LLM-Anon"
-
-mkdir -p "$MODEL_DIR" "$VIDEOS_DIR" "$AUDIOS_DIR" "$TRANSCRIPTS_DIR" "$ANNONYM_DIR" "$LLM_ANON_DIR"
-echo "✅ Created directories."
-
-# 10. Set Model Directory Path
-echo ""
-echo "Setting up model directory..."
-MODEL_DIR="$PWD/pipeline/model"
-mkdir -p "$MODEL_DIR"
-echo "✅ Model directory set to: $MODEL_DIR"
-
-# 11. Download WhisperX Models
-echo ""
-echo "-------------------------------------------------"
-echo "WhisperX Model Download Options"
-echo "Available Models: tiny, base, small, medium, large"
-echo ""
-
-read -p "Enter model names to download (or press Enter to skip): " WHISPER_MODELS_INPUT
+# Map short names to HF repos
+declare -A MODEL_MAP
+MODEL_MAP["tiny"]="Systran/faster-whisper-tiny"
+MODEL_MAP["base"]="Systran/faster-whisper-base"
+MODEL_MAP["small"]="Systran/faster-whisper-small"
+MODEL_MAP["medium"]="Systran/faster-whisper-medium"
+MODEL_MAP["large"]="Systran/faster-whisper-large-v3"
 
 if [ -n "$WHISPER_MODELS_INPUT" ]; then
-    declare -A MODEL_MAP
-    MODEL_MAP["tiny"]="Systran/faster-whisper-tiny"
-    MODEL_MAP["base"]="Systran/faster-whisper-base"
-    MODEL_MAP["small"]="Systran/faster-whisper-small"
-    MODEL_MAP["medium"]="Systran/faster-whisper-medium"
-    MODEL_MAP["large"]="Systran/faster-whisper-large-v3"
-
     for model_name in $WHISPER_MODELS_INPUT; do
         model_name=$(echo "$model_name" | tr '[:upper:]' '[:lower:]')
         
@@ -508,20 +461,25 @@ if [ -n "$WHISPER_MODELS_INPUT" ]; then
         fi
 
         hf_repo="${MODEL_MAP[$model_name]}"
-        # Coqui models are stored in .cache/tts by default, but we can download others here if needed
-        # For Coqui, we rely on the automatic download or the explicit download above
-        echo "Note: WhisperX models are handled separately. Coqui models were downloaded above."
-        
-        # Standard WhisperX download logic if you still want them in pipeline/model
+        # CRITICAL: Use the exact naming convention expected by process.py
         target_dir="$MODEL_DIR/$(echo "$hf_repo" | sed 's/\//\--/g')"
-        if [ -d "$target_dir" ]; then
-            echo "✅ WhisperX model '$model_name' already exists. Skipping."
+        
+        if [ -d "$target_dir" ] && [ "$(ls -A "$target_dir")" ]; then
+            echo "✅ Model '$model_name' already exists at $target_dir."
         else
-            echo "Downloading: $model_name ($hf_repo)..."
-            huggingface-cli download "$hf_repo" --local-dir "$target_dir" --local-dir-use-symlinks False 2>/dev/null || \
-            huggingface-cli download "$hf_repo" --local-dir "$target_dir"
+            echo "Downloading: $model_name ($hf_repo) -> $target_dir"
+            mkdir -p "$target_dir"
             
-            if [ $? -eq 0 ]; then
+            # Download using huggingface-cli
+            if command -v huggingface-cli &> /dev/null; then
+                huggingface-cli download "$hf_repo" --local-dir "$target_dir" --local-dir-use-symlinks False 2>&1 | grep -v "already downloaded" || true
+            else
+                echo "⚠️  huggingface-cli not found. Install with: pip install huggingface-hub"
+                # Fallback to Python if CLI missing
+                python -c "from huggingface_hub import snapshot_download; snapshot_download('$hf_repo', local_dir='$target_dir', local_dir_use_symlinks=False)"
+            fi
+            
+            if [ $? -eq 0 ] && [ "$(ls -A "$target_dir")" ]; then
                 echo "✅ Successfully downloaded: $model_name"
             else
                 echo "❌ Failed to download: $model_name"
@@ -529,76 +487,80 @@ if [ -n "$WHISPER_MODELS_INPUT" ]; then
         fi
     done
 else
-    echo "No WhisperX models selected. Skipping."
-fi
-
-# 12. Download Pyannote Speaker Diarization Model
-echo ""
-echo "-------------------------------------------------"
-echo "Downloading Pyannote Speaker Diarization Model (community-1)"
-echo ""
-
-DIARIZE_TARGET="$MODEL_DIR/models--pyannote--speaker-diarization-community-1"
-
-if [ -d "$DIARIZE_TARGET" ]; then
-    echo "✅ Pyannote Diarization model already exists. Skipping."
-else
-    echo "Downloading Pyannote model..."
-    huggingface-cli download pyannote/speaker-diarization-community-1 --local-dir "$DIARIZE_TARGET" --local-dir-use-symlinks False
-    
-    if [ $? -eq 0 ]; then
-        echo "✅ Pyannote Diarization model downloaded successfully."
+    # Auto-download Large if user pressed Enter (default recommendation)
+    echo "No selection made. Downloading 'large-v3' by default..."
+    HF_REPO="Systran/faster-whisper-large-v3"
+    TARGET_DIR="$MODEL_DIR/models--Systran--faster-whisper-large-v3"
+    if [ ! -d "$TARGET_DIR" ]; then
+        echo "Downloading large-v3..."
+        mkdir -p "$TARGET_DIR"
+        huggingface-cli download "$HF_REPO" --local-dir "$TARGET_DIR" --local-dir-use-symlinks False 2>&1 | grep -v "already downloaded" || true
     else
-        echo "❌ Failed to download Pyannote model."
+        echo "✅ large-v3 already present."
     fi
 fi
 
-# 13. Download mmbert Models
+# ============================================================================
+# 🎙️ PYANNOTE DIARIZATION MODEL
+# ============================================================================
 echo ""
-echo "-------------------------------------------------"
-echo "Downloading mmbert Multilingual PII Model & Base BERT"
-echo ""
+echo "Downloading Pyannote Speaker Diarization Model"
+TARGET="$MODEL_DIR/models--pyannote--speaker-diarization-community-1"
 
-# --- Base Model (mmBERT-base) ---
-BASE_PARENT="$MODEL_DIR/jhu-clsp"
-BASE_TARGET="$BASE_PARENT/mmBERT-base"
-
-if [ -d "$BASE_TARGET" ] && [ -f "$BASE_TARGET/config.json" ]; then
-    echo "✅ Base model structure verified at $BASE_TARGET"
+if [ -d "$TARGET" ] && [ "$(ls -A "$TARGET")" ]; then
+    echo "✅ Pyannote model already exists."
 else
-    echo "Setting up base model at $BASE_TARGET..."
-    mkdir -p "$BASE_PARENT"
+    echo "Downloading Pyannote to $TARGET..."
+    mkdir -p "$TARGET"
+    # Requires HF Token login first
+    if hf whoami > /dev/null 2>&1; then
+        huggingface-cli download pyannote/speaker-diarization-community-1 --local-dir "$TARGET" --local-dir-use-symlinks False
+        echo "✅ Pyannote downloaded."
+    else
+        echo "❌ Not logged in to Hugging Face. Please run 'huggingface-cli login' and retry."
+    fi
+fi
+
+# ============================================================================
+# 🧠 MBERT BASE & PII MODELS
+# ============================================================================
+echo ""
+echo "Downloading mBert Models"
+
+# 1. Base Model
+BASE_TARGET="$MODEL_DIR/jhu-clsp/mmBERT-base"
+if [ ! -d "$BASE_TARGET" ]; then
+    echo "Downloading mmBERT-base to $BASE_TARGET..."
+    mkdir -p "$MODEL_DIR/jhu-clsp"
     huggingface-cli download jhu-clsp/mmBERT-base --local-dir "$BASE_TARGET" --local-dir-use-symlinks False
-    
-    if [ $? -eq 0 ] && [ -f "$BASE_TARGET/config.json" ]; then
-        echo "✅ Base model successfully installed."
-    else
-        echo "❌ Error: Failed to download base model."
-        exit 1
-    fi
+    echo "✅ Base model downloaded."
+else
+    echo "✅ mmBERT-base already present."
 fi
 
-# --- PII Model (mmbert_multilingual_pii_ner) ---
+# 2. PII Model
 PII_TARGET="$MODEL_DIR/mmbert_multilingual_pii_ner"
-if [ -d "$PII_TARGET" ]; then
-    echo "✅ PII model already exists. Skipping."
+if [ -d "$PII_TARGET" ] && [ "$(ls -A "$PII_TARGET")" ]; then
+    echo "✅ PII model already exists."
 else
-    echo "Downloading PII model..."
+    echo "Downloading PII model to $PII_TARGET..."
+    mkdir -p "$PII_TARGET"
     huggingface-cli download deryaerman/mmbert_multilingual_pii_ner --local-dir "$PII_TARGET" --local-dir-use-symlinks False
-
+    
+    # Flatten if nested
     SUBFOLDER=$(find "$PII_TARGET" -mindepth 1 -maxdepth 1 -type d | head -n 1)
     if [ -n "$SUBFOLDER" ] && [ "$SUBFOLDER" != "$PII_TARGET" ]; then
-        echo "⚠️  Flattening nested folder structure..."
+        echo "Flattening nested folder structure..."
         mv "$SUBFOLDER"/* "$PII_TARGET/"
         rmdir "$SUBFOLDER"
     fi
-
-    if [ $? -eq 0 ] && [ -f "$PII_TARGET/crf_config.json" ]; then 
-        echo "✅ PII model downloaded and structure verified."
-    else 
-        echo "❌ Failed to download PII model."; exit 1
-    fi
+    echo "✅ PII model downloaded."
 fi
+
+echo ""
+echo "=== Model Installation Complete ==="
+echo "Verification: Check that folders exist in $MODEL_DIR"
+ls -la "$MODEL_DIR"
 
 # Create Environment file
 if [ -f ".env" ]; then

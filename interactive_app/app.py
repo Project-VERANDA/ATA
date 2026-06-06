@@ -24,34 +24,26 @@ CHAT_AI_API_KEY = os.getenv('CHAT_AI_API_KEY')
 CHAT_AI_ENDPOINT = os.getenv('CHAT_AI_ENDPOINT', 'https://llm.cloud.cci.charite.de/v1')
 
 # --- Path Configuration ---
+
+load_dotenv()
+
 # Determine the directory containing this script (interactive_app/)
 current_script_dir = Path(__file__).resolve().parent
 
 # Determine the project root (ATA/)
 project_root = current_script_dir.parent
 
-# Determine the path to the pipeline folder (ATA/pipeline/)
+# CRITICAL: Define Pipeline and Model paths EXACTLY as process.py does
 pipeline_path = project_root / "pipeline"
+MODEL_FOLDER = pipeline_path / "model"
 
-# Add the pipeline directory to sys.path to allow importing 'process'
+# Add paths to sys.path
 if str(pipeline_path) not in sys.path:
     sys.path.insert(0, str(pipeline_path))
-
-# Add the project root as well for any other potential imports
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-# --- Shared Module Imports ---
-# Import shared constants and folders from process.py
-try:
-    from process import ANNONYM_FOLDER, LLM_ANONNYM_FOLDER, TRANSCRIPTS_FOLDER
-except ImportError as e:
-    logging.critical(f"Failed to import shared constants from process.py: {e}")
-    logging.critical(f"Expected path: {pipeline_path}")
-    logging.critical(f"Current sys.path: {sys.path}")
-    sys.exit(1)
-
-# Import shared functions from process.py
+# Import from process.py
 try:
     from process import (
         transcribe_audio_locally, 
@@ -61,11 +53,22 @@ try:
         AVAILABLE_LLM_MODELS, 
         CHAT_AI_API_KEY, 
         CHAT_AI_ENDPOINT,
-        anonymize_text_locally
+        anonymize_text_locally,
+        MODEL_FOLDER as PROCESS_MODEL_FOLDER # Verify they match
     )
 except ImportError as e:
-    logging.critical(f"Failed to import shared functions from process.py: {e}")
+    logging.critical(f"Failed to import from process.py: {e}")
+    logging.critical(f"Looking in pipeline: {pipeline_path}")
     sys.exit(1)
+
+# Verify model path consistency
+if MODEL_FOLDER != PROCESS_MODEL_FOLDER:
+    logging.warning(f"⚠️  Path mismatch detected! app.py: {MODEL_FOLDER}, process.py: {PROCESS_MODEL_FOLDER}")
+    # Force alignment (process.py usually wins, but we align)
+    MODEL_FOLDER = PROCESS_MODEL_FOLDER
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 # --- Logging Configuration ---
 logging.basicConfig(
@@ -149,10 +152,10 @@ CHAT_AI_ENDPOINT = os.getenv('CHAT_AI_ENDPOINT', 'https://llm.cloud.cci.charite.
 # Model mappings for the UI
 
 AVAILABLE_MODELS = {
-    'medgemma': 'medgemma',            # Try this first (matches 'medgemma' working hint)
-    'medgemma27b': 'medgemma27b',      # Try 'medgemma27b' instead of 'medgemma-27b-it'
-    'gpt-oss-120b': 'gpt-oss-120b',    # This one definitely works
-    'Qwen3.6-27B': 'Qwen3.6-27B',      # Match the table name exactly, no prefix
+    'medgemma': 'medgemma',
+    'medgemma27b': 'medgemma27b',
+    'gpt-oss-120b': 'gpt-oss-120b',
+    'Qwen3.6-27B': 'Qwen3.6-27B',
     'Qwen3.5-27B': 'Qwen3.5-27B',      
     'qwen3-asr-1.7b': 'qwen3-asr-1.7b',
     'cle-Kimi-K2.6': 'cle-Kimi-K2.6',  
