@@ -418,15 +418,16 @@ LLM_REWRITE_SYSTEM_PROMPT = (
 )
 
 
-AVAILABLE_LLM_MODELS = {
-    'medgemma': 'medgemma',
-    'medgemma27b': 'medgemma27b',
-    'gpt-oss-120b': 'gpt-oss-120b',
-    'Qwen3.5-27B': 'Qwen3.5-27B',
-    'Qwen3.5-397B-A17B': 'Qwen3.5-397B-A17B',
-    'qwen3-asr-1.7b': 'qwen3-asr-1.7b',
-    'cle-Kimi-K2.5': 'cle-Kimi-K2.5',
-    'cle-Qwen3.5-397B-A17B-FP8': 'cle-Qwen3.5-397B-A17B-FP8'
+AVAILABLE_MODELS = {
+    'medgemma': 'google/medgemma-1.5-4b-it',      # Working? If "medgemma" works, ensure value matches
+    'medgemma27b': 'google/medgemma-27b-it',      # Fixed: Added "google/" prefix if required by server
+    'gpt-oss-120b': 'openai/gpt-oss-120b',        # Fixed: Added "openai/" prefix
+    'Qwen3.6-27B': 'Qwen/Qwen3.6-27B',            # Updated key to match table
+    'Qwen3.5-27B': 'Qwen/Qwen3.5-27B',            # Added if available
+    'qwen3-asr-1.7b': 'Qwen/Qwen3-ASR-1.7B',      # Fixed: Case sensitivity matters
+    'cle-Kimi-K2.6': 'moonshotai/Kimi-K2.6',      # Updated to K2.6
+    'cle-Qwen3-Coder-Next-FP8': 'Qwen/Qwen3-Coder-Next-FP8',
+    'cle-Qwen3.5-397B-A17B-FP8': 'Qwen/Qwen3.5-397B-A17B-FP8'
 }
 
 
