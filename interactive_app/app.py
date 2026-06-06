@@ -581,7 +581,7 @@ def _synthesize_segment(text, language='de', speaker_id=0):
         _coqui_tts.tts_to_file(
             text=text, 
             file_path=temp_file,
-            speaker_id=effective_speaker_id
+            speaker=str(effective_speaker_id)
         )
         
         audio_segment = AudioSegment.from_wav(temp_file)
