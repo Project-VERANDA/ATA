@@ -148,7 +148,7 @@ CHAT_AI_ENDPOINT = os.getenv('CHAT_AI_ENDPOINT', 'https://llm.cloud.cci.charite.
 
 # Model mappings for the UI
 
-AVAILABLE_LLM_MODELS = {
+AVAILABLE_MODELS = {
     'medgemma': 'medgemma',            # Try this first (matches 'medgemma' working hint)
     'medgemma27b': 'medgemma27b',      # Try 'medgemma27b' instead of 'medgemma-27b-it'
     'gpt-oss-120b': 'gpt-oss-120b',    # This one definitely works
