@@ -551,42 +551,47 @@ def _synthesize_segment(text, language='de', speaker_id=0):
     try:
         temp_file = f"/tmp/coqui_multi_output_{int(time.time() * 1000)}_{random.randint(1000, 9999)}.wav"
         
-        # Determine valid speaker range - FIXED for TTS >= 0.22
-        # Get model name from different possible attributes based on TTS version
+        # Determine speaker name mapping based on loaded model
         model_identifier = ""
         if hasattr(_coqui_tts, 'model_name'):
             model_identifier = _coqui_tts.model_name.lower()
         elif hasattr(_coqui_tts, '_models') and len(_coqui_tts._models) > 0:
             model_identifier = list(_coqui_tts._models.keys())[0].lower()
-        elif hasattr(_coqui_tts, 'synthesizer') and hasattr(_coqui_tts.synthesizer, 'tts_model'):
-            model_identifier = str(type(_coqui_tts.synthesizer.tts_model).__name__).lower()
-        else:
-            model_identifier = str(_coqui_tts).lower()
         
-        logger.debug(f"Model identifier: {model_identifier}")
+        target_speaker_name = None
         
-        # Determine max speakers based on model type
-        if 'thorsten' in model_identifier or 'multispeaker' in model_identifier:
-            max_speakers = 4
-        elif 'vctk' in model_identifier:
-            max_speakers = 109
-        elif 'multidataset' in model_identifier:  # Spanish multi-device
-            max_speakers = 3
-        else:
-            max_speakers = 1
+        # MAP integer speaker_id to actual speaker names
+        if 'vctk' in model_identifier:
+            # English VCTK speakers are named p225, p226, p227, ... p333
+            # We map 0->p225, 1->p226, etc.
+            base_id = 225
+            target_speaker_name = f"p{base_id + int(speaker_id)}"
             
-        effective_speaker_id = int(speaker_id) % max_speakers
+            # Safety check: VCTK has ~109 speakers (p225 to p333)
+            max_speakers = 109
+            if int(speaker_id) >= max_speakers:
+                target_speaker_name = "p225" # Fallback to first speaker
+                
+        elif 'thorsten' in model_identifier or 'multispeaker' in model_identifier:
+            # German Thorsten uses "speaker_0", "speaker_1", etc.
+            target_speaker_name = f"speaker_{int(speaker_id)}"
+            
+        else:
+            # Fallback for unknown models - just try the ID
+            target_speaker_name = str(int(speaker_id))
+            logger.warning(f"Unknown model '{model_identifier}'. Trying generic speaker ID.")
+
+        logger.debug(f"Mapped speaker_id {speaker_id} to name '{target_speaker_name}'")
         
-        # Call TTS with speaker_id
+        # Call TTS with the correct SPEAKER NAME
         _coqui_tts.tts_to_file(
             text=text, 
             file_path=temp_file,
-            speaker=str(effective_speaker_id)
+            speaker=target_speaker_name
         )
         
         audio_segment = AudioSegment.from_wav(temp_file)
         
-        # Cleanup
         if os.path.exists(temp_file):
             os.remove(temp_file)
         
