@@ -418,7 +418,7 @@ LLM_REWRITE_SYSTEM_PROMPT = (
 )
 
 
-AVAILABLE_MODELS = {
+AVAILABLE_LLM_MODELS = {
     'medgemma': 'google/medgemma-1.5-4b-it',      # Working? If "medgemma" works, ensure value matches
     'medgemma27b': 'google/medgemma-27b-it',      # Fixed: Added "google/" prefix if required by server
     'gpt-oss-120b': 'openai/gpt-oss-120b',        # Fixed: Added "openai/" prefix
