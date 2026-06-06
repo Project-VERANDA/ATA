@@ -1731,7 +1731,6 @@ def call_llm_rewriter(text, model_id, system_prompt=None):
 
     try:
         client = OpenAI(api_key=CHAT_AI_API_KEY, base_url=CHAT_AI_ENDPOINT)
-        client = OpenAI(base_url="http://localhost:1234/v1", api_key="lm-studio")
         
         # Resolve model ID
         final_model = model_id
