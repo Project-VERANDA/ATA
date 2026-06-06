@@ -1103,9 +1103,17 @@ def llm_rewrite_route():
             return jsonify({'error': 'LLM API Key not configured on server'}), 500
 
         model_id = AVAILABLE_MODELS.get(model_key, model_key)
-        logger.info(f"Web Interface: Requesting LLM rewrite with model {model_id}")
-
+        
+        # DEBUG: Log what we're actually sending
+        logger.info(f"Web Interface: Model key={model_key}")
+        logger.info(f"Web Interface: Mapped model_id={model_id}")
+        logger.info(f"Web Interface: Endpoint={CHAT_AI_ENDPOINT}")
+        logger.info(f"Web Interface: API Key length={len(CHAT_AI_API_KEY) if CHAT_AI_API_KEY else 0}")
+        logger.info(f"Web Interface: Text length={len(text)}")
+        
         rewritten_text, status = call_llm_rewriter(text, model_id)
+        
+        logger.info(f"DEBUG: call_llm_rewriter returned: status={status}, len(text)={len(rewritten_text) if rewritten_text else 0}")
         
         if not rewritten_text:
             return jsonify({'error': f'LLM rewrite failed: {status}'}), 500
@@ -1118,6 +1126,8 @@ def llm_rewrite_route():
 
     except Exception as e:
         logger.error(f"Error in LLM rewrite route: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
         return jsonify({'error': f'Error rewriting text: {str(e)}'}), 500
 
 # --- NEW ROUTES FOR EDITING & BULK UPLOAD ---
