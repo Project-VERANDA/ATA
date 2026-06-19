@@ -653,32 +653,15 @@ def process_videos():
 
 def process_audios(enable_diarization=True, lang_code=None, file_list=None):
     """
-    Process audio files with optional diarization control.
-    
-    Args:
-        enable_diarization: If False, skip speaker diarization.
-        lang_code: Language code from main args.
-        file_list: List of specific files to process (from --file/--files).
+    Process audio files. Handles both raw .wav files AND video files (.mp4, .m4a, etc).
+    If a video file is provided, it extracts audio to .wav first, then transcribes.
     """
-    global args  # Keep this, but now you might not need it if you use the params!
-    
+    global args
     check_gpu_resources() 
-    
-    # Use the passed arguments, falling back to global args if None provided
+
+    # Determine language
     force_language = lang_code if lang_code is not None else getattr(args, 'lang', None)
     
-    # Determine which files to process
-    if file_list:
-        files = [Path(f) for f in file_list]
-    elif getattr(args, 'file', None):
-        files = [Path(args.file)]
-    elif getattr(args, 'files', None):
-        files = [Path(f) for f in args.files]
-    else:
-        # Default: scan folder
-        files = [f for f in AUDIOS_FOLDER.iterdir() if f.is_file() and f.suffix.lower() == ".wav"]
-    
-    # Normalize language code
     whisper_code = None
     if force_language:
         whisper_code = WHISPER_LANG_MAP.get(force_language)
@@ -689,20 +672,15 @@ def process_audios(enable_diarization=True, lang_code=None, file_list=None):
     else:
         logger.info("Language set to Auto-Detect.")
     
-    # Log diarization status
     if not enable_diarization:
         logger.info("⚠️  Speaker diarization DISABLED. Using generic speaker labels.")
-        diarize_model = None
     else:
         logger.info("✅ Speaker diarization ENABLED.")
-    
-    # --- 1. LOAD MODELS ONCE ---
-    # Load WhisperX Model (Direct Path)
+
+    # Load Models (Unchanged)
     try:
-        logger.info(f"Loading WhisperX model directly from: {WHISPERX_MODEL_PATH}...")
         device = "cuda" if torch.cuda.is_available() else "cpu"
         compute_type = "float16" if device == "cuda" else "float32"
-        
         model = whisperx.load_model(
             str(WHISPERX_MODEL_PATH), 
             device, 
@@ -710,61 +688,96 @@ def process_audios(enable_diarization=True, lang_code=None, file_list=None):
             local_files_only=True
         )
         logger.info("WhisperX model loaded successfully (Direct Path).")
-        
     except Exception as e:
         logger.critical(f"Failed to load WhisperX model: {e}")
         return
 
-    # Load Diarization Pipeline (Only if enabled)
     if enable_diarization:
         try:
-            logger.info(f"Loading Diarization Pipeline directly from: {DIARIZATION_MODEL_PATH}...")
             from pyannote.audio import Pipeline
-            
-            try:
-                diarize_pipeline = Pipeline.from_pretrained(str(DIARIZATION_MODEL_PATH))
-            except TypeError:
-                logger.warning("Standard load failed. Trying fallback with use_auth_token=None...")
-                diarize_pipeline = Pipeline.from_pretrained(str(DIARIZATION_MODEL_PATH), use_auth_token=None)
-            
+            diarize_pipeline = Pipeline.from_pretrained(str(DIARIZATION_MODEL_PATH))
             diarize_model = diarize_pipeline
             logger.info("Diarization Pipeline loaded successfully (Direct Path).")
-            
         except Exception as e:
-            logger.critical(f"Failed to load Diarization Pipeline: {e}")
-            logger.critical("Diarization will be skipped. Using generic speaker labels.")
+            logger.critical(f"Failed to load Diarization Pipeline: {e}. Disabling diarization.")
             diarize_model = None
     else:
         diarize_model = None
 
-    # --- 2. PROCESS FILES ONE BY ONE ---
-    if args.file:
-        files = [Path(args.file)]
-    elif args.files:
-        files = [Path(f) for f in args.files]
+    # Determine Files to Process
+    files_to_process = []
+    if file_list:
+        files_to_process = [Path(f) for f in file_list]
+    elif getattr(args, 'file', None):
+        files_to_process = [Path(args.file)]
+    elif getattr(args, 'files', None):
+        files_to_process = [Path(f) for f in args.files]
     else:
-        # Default behavior: process all .wav files in the folder
-        files = [f for f in AUDIOS_FOLDER.iterdir() if f.is_file() and f.suffix.lower() == ".wav"]
-    total_files = len(files)
-    
-    if total_files == 0:
-        logger.info("No .wav files found in audios folder.")
+        # Default: scan audio folder for .wav
+        files_to_process = [f for f in AUDIOS_FOLDER.iterdir() if f.is_file() and f.suffix.lower() == ".wav"]
+
+    if not files_to_process:
+        logger.info("No files found to process.")
         return
 
-    logger.info(f"Found {total_files} files to process. Starting stream...")
+    logger.info(f"Found {len(files_to_process)} files to process. Starting stream...")
 
-    for idx, file in enumerate(files, 1):
-        if not validate_path(file, AUDIOS_FOLDER):
-            logger.error(f"Security Alert: Skipping {file.name} (path traversal).")
+    for idx, input_file in enumerate(files_to_process, 1):
+        # --- VALIDATION LOGIC UPDATE ---
+        # Validate based on file type: Video -> VIDEOS_FOLDER, Audio -> AUDIOS_FOLDER
+        if input_file.suffix.lower() in SUPPORTED_EXTENSIONS and input_file.suffix.lower() != '.wav':
+            # It's a video/audio source file
+            if not validate_path(input_file, VIDEOS_FOLDER):
+                logger.error(f"Security Alert: Skipping {input_file.name} (path traversal in videos folder).")
+                continue
+            source_folder = VIDEOS_FOLDER
+        elif input_file.suffix.lower() == '.wav':
+            # It's a ready-to-go WAV file
+            if not validate_path(input_file, AUDIOS_FOLDER):
+                logger.error(f"Security Alert: Skipping {input_file.name} (path traversal in audios folder).")
+                continue
+            source_folder = AUDIOS_FOLDER
+        else:
+            logger.warning(f"Skipping unsupported file format: {input_file.suffix}")
             continue
 
-        logger.info(f"[{idx}/{total_files}] Processing: {file.name}")
+        logger.info(f"[{idx}/{len(files_to_process)}] Processing: {input_file.name}")
 
-        try:
-            # --- STEP A: Transcribe ---
-            audio = whisperx.load_audio(str(file))
+        # --- CONVERSION LOGIC ---
+        actual_audio_path = input_file
+        
+        # If it's a video/source file, convert to WAV first
+        if input_file.suffix.lower() != '.wav':
+            base_name = sanitize_filename(input_file.stem)
+            actual_audio_path = AUDIOS_FOLDER / f"{base_name}.wav"
             
-            # Prepare transcription arguments
+            if not actual_audio_path.exists():
+                logger.info(f"   Converting {input_file.name} -> {actual_audio_path.name}")
+                try:
+                    subprocess.run([
+                        'ffmpeg', '-i', str(input_file),
+                        '-acodec', 'pcm_s16le',
+                        '-ar', '16000',
+                        '-ac', '1',
+                        '-y',
+                        str(actual_audio_path)
+                    ], check=True, capture_output=True, text=True)
+                    logger.info(f"   Conversion successful.")
+                except subprocess.CalledProcessError as e:
+                    logger.error(f"   FFmpeg error: {e.stderr}")
+                    continue
+                except Exception as e:
+                    logger.error(f"   Unexpected conversion error: {e}")
+                    continue
+            else:
+                logger.info(f"   Audio file already exists: {actual_audio_path.name}")
+        
+        # Now process the .wav file (actual_audio_path)
+        try:
+            # Step A: Load Audio
+            audio = whisperx.load_audio(str(actual_audio_path))
+            
+            # Step B: Transcribe
             transcribe_kwargs = {
                 "audio": audio,
                 "batch_size": BATCH_SIZE,
@@ -772,63 +785,53 @@ def process_audios(enable_diarization=True, lang_code=None, file_list=None):
                 "print_progress": False,
                 "task": "transcribe"
             }
-            
             if whisper_code:
                 transcribe_kwargs["language"] = whisper_code
-                logger.info(f"  -> Forced Language: {whisper_code}")
-            else:
-                logger.info(f"  -> Language: Auto-Detect")
-
+            
             result = model.transcribe(**transcribe_kwargs)
             
-            # --- STEP B: Align ---
+            # Step C: Align
             if result.get("language"):
                 try:
                     align_device = "cuda" if torch.cuda.is_available() else "cpu"
                     model_a, metadata = whisperx.load_align_model(language_code=result["language"], device=align_device)
                     result = whisperx.align(result["segments"], model_a, metadata, audio, align_device, return_char_alignments=False)
                 except Exception as e:
-                    logger.warning(f"Alignment failed for {file.name}: {e}")
-            else:
-                logger.warning(f"No language detected for {file.name}.")
+                    logger.warning(f"Alignment failed: {e}")
 
-            # --- STEP C: Diarize (Conditional) ---
+            # Step D: Diarize
             if enable_diarization and diarize_model:
                 try:
-                    logger.info(f"  -> Running local diarization...")
-                    diarize_output = diarize_model(str(file))
-                    
+                    diarize_output = diarize_model(str(actual_audio_path))
                     speaker_diarization = diarize_output.speaker_diarization
                     
                     segments_list = []
                     for turn, _, speaker in speaker_diarization.itertracks(yield_label=True):
                         duration = turn.end - turn.start
                         if duration < 0.5: continue
-                        
                         segments_list.append({'start': turn.start, 'end': turn.end, 'speaker': speaker})
                     
-                    if not segments_list:
-                        logger.warning(f"  -> No valid speakers found. Using fallback.")
-                        for i, seg in enumerate(result["segments"]):
-                            seg["speaker"] = f"SPEAKER_{i%2:02d}"
-                    else:
+                    if segments_list:
                         import pandas as pd
                         diarize_df = pd.DataFrame(segments_list)
                         result = whisperx.assign_word_speakers(diarize_df, result)
-                        
+                    else:
+                        logger.warning(f"   No valid speakers found. Using fallback.")
+                        for i, seg in enumerate(result["segments"]):
+                            seg["speaker"] = f"SPEAKER_{i%2:02d}"
                 except Exception as e:
-                    logger.error(f"  -> Diarization failed: {e}. Using fallback.")
+                    logger.error(f"   Diarization failed: {e}. Using fallback.")
                     for i, seg in enumerate(result["segments"]):
                         seg["speaker"] = f"SPEAKER_{i%2:02d}"
             else:
-                logger.info(f"  -> Skipping diarization (disabled or model unavailable).")
                 for i, seg in enumerate(result["segments"]):
                     seg["speaker"] = f"SPEAKER_{i%2:02d}"
 
-            # --- STEP D: Merge & Save ---
+            # Step E: Merge & Save
             result["segments"] = merge_consecutive_speaker_segments(result["segments"])
             
-            base_name = sanitize_filename(file.stem)
+            # Use the original filename stem for the transcript
+            base_name = sanitize_filename(input_file.stem)
             transcript_file = TRANSCRIPTS_FOLDER / f"{base_name}.txt"
             
             with open(transcript_file, "w", encoding="utf-8") as f:
@@ -837,29 +840,23 @@ def process_audios(enable_diarization=True, lang_code=None, file_list=None):
                     if text:
                         f.write(f"{segment.get('speaker', 'Unknown')}: {text}\n")
             
-            logger.info(f"✅ COMPLETED: {file.name} -> {transcript_file.name}")
+            logger.info(f"✅ COMPLETED: {input_file.name} -> {transcript_file.name}")
 
         except Exception as e:
-            logger.error(f"❌ FAILED: {file.name} - {e}")
+            logger.error(f"❌ FAILED: {input_file.name} - {e}")
             import traceback
             logger.error(traceback.format_exc())
         
         finally:
-            # Cleanup
-            for var in ['audio', 'result', 'model_a', 'metadata', 'diarize_output', 'speaker_diarization', 'segments_list', 'diarize_df']:
-                if var in locals(): del locals()[var]
-            
+            # Cleanup GPU memory for this file
             gc.collect()
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
             time.sleep(0.1)
 
-    # Final Cleanup
-    if 'model' in locals(): del model
-    if 'diarize_model' in locals(): del diarize_model
     cleanup_gpu_resources()
     logger.info("Stream processing finished.")
-    return total_files
+    return len(files_to_process)
 
 # Global variables to hold loaded models
 _loaded_whisper_model = None
