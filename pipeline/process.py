@@ -195,7 +195,7 @@ for folder in [TRANSCRIPTS_FOLDER, ANNONYM_FOLDER, MODEL_FOLDER,LLM_ANONNYM_FOLD
         logger.info(f"Created directory: {folder}")
 
 # Configuration
-SUPPORTED_EXTENSIONS = ('.mp4', '.mp3', '.mkv' '.m4a', '.m4p')
+SUPPORTED_EXTENSIONS = ('.mp4', '.mp3', '.mkv', '.m4a', '.m4p')
 DEVICE = "cuda"
 BATCH_SIZE = 32
 COMPUTE_TYPE = "float16"
