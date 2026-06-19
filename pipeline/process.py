@@ -339,13 +339,6 @@ WHISPER_LANG_MAP = {
     'TR': 'tr'
 }
 
-def parse_args():
-    parser = argparse.ArgumentParser(description="Batch Audio Processing Pipeline")
-    parser.add_argument('--lang', type=str, default=None, 
-                        choices=list(SUPPORTED_LANGUAGES.keys()),
-                        help=f"Force language (e.g., DE, EN, SP, ES). Default: Auto-detect.")
-    return parser.parse_args()
-
 # Anonymization Configuration
 ANONYMIZATION_ENABLED = True
 ANONYMIZATION_LEVEL = "standard"  # Options: 'basic', 'standard', 'strict'
@@ -658,19 +651,32 @@ def process_videos():
         logger.info("No new files processed.")
     return processed_count
 
-def process_audios(enable_diarization=True):
+def process_audios(enable_diarization=True, lang_code=None, file_list=None):
     """
     Process audio files with optional diarization control.
     
     Args:
-        enable_diarization: If False, skip speaker diarization and use generic labels.
+        enable_diarization: If False, skip speaker diarization.
+        lang_code: Language code from main args.
+        file_list: List of specific files to process (from --file/--files).
     """
-    # Parse command line args
-    args = parse_args()
+    global args  # Keep this, but now you might not need it if you use the params!
+    
     check_gpu_resources() 
-
-    # Normalize language code
-    force_language = args.lang
+    
+    # Use the passed arguments, falling back to global args if None provided
+    force_language = lang_code if lang_code is not None else getattr(args, 'lang', None)
+    
+    # Determine which files to process
+    if file_list:
+        files = [Path(f) for f in file_list]
+    elif getattr(args, 'file', None):
+        files = [Path(args.file)]
+    elif getattr(args, 'files', None):
+        files = [Path(f) for f in args.files]
+    else:
+        # Default: scan folder
+        files = [f for f in AUDIOS_FOLDER.iterdir() if f.is_file() and f.suffix.lower() == ".wav"]
     
     # Normalize language code
     whisper_code = None
@@ -2410,7 +2416,18 @@ Examples:
     
     # Step 2: Transcription & Diarization (WAV → Transcript)
     if run_transcription:
-        process_audios(enable_diarization=run_diarization)
+        # Handle --file and --files arguments specifically
+        target_files = []
+        if hasattr(args, 'file') and args.file:
+            target_files = [args.file]
+        elif hasattr(args, 'files') and args.files:
+            target_files = args.files
+            
+        process_audios(
+            enable_diarization=run_diarization, 
+            lang_code=args.lang,
+            file_list=target_files
+        )
     else:
         logger.info("⏭️  Skipping transcription (--disable-transcription)")
     
