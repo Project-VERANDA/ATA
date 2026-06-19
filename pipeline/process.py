@@ -732,7 +732,13 @@ def process_audios(enable_diarization=True):
         diarize_model = None
 
     # --- 2. PROCESS FILES ONE BY ONE ---
-    files = [f for f in AUDIOS_FOLDER.iterdir() if f.is_file() and f.suffix.lower() == ".wav"]
+    if args.file:
+        files = [Path(args.file)]
+    elif args.files:
+        files = [Path(f) for f in args.files]
+    else:
+        # Default behavior: process all .wav files in the folder
+        files = [f for f in AUDIOS_FOLDER.iterdir() if f.is_file() and f.suffix.lower() == ".wav"]
     total_files = len(files)
     
     if total_files == 0:
@@ -2352,6 +2358,9 @@ Examples:
                         help=f"Select specific tags to IGNORE (do not anonymize). "
                              f"Available tags: {', '.join(AVAILABLE_TAGS)}. "
                              f"Example: --exclude-tags PROFESSION QUANTITY")
+    
+    parser.add_argument('--file', type=str, help='Process a single .wav file')
+    parser.add_argument('--files', nargs='+', help='Process multiple .wav files')
     
     # 3. PARSE ARGUMENTS NOW (This handles --help correctly)
     args = parser.parse_args()
