@@ -596,39 +596,77 @@ def convert_numpy(obj):
         
 # --- Extract Audio ---
 
-def process_videos():
+def process_videos(file_list=None):
+    """
+    Extracts audio from video files in VIDEOS_FOLDER.
+    If file_list is provided, only processes those specific filenames.
+    Otherwise, scans the folder for all supported video formats.
+    """
     if not VIDEOS_FOLDER.exists():
         logger.warning(f"No 'videos' folder found at {VIDEOS_FOLDER}. Skipping audio extraction.")
-        return
+        return 0
 
-    logger.info(f"Found 'videos' folder at {VIDEOS_FOLDER}. Processing supported files...")
+    # Determine which files to process
+    files_to_process = []
     
+    if file_list:
+        # User specified files via --file or --files
+        logger.info(f"User specified {len(file_list)} video file(s). Targeting specific sources...")
+        for fname in file_list:
+            fpath = VIDEOS_FOLDER / fname
+            
+            # Check existence
+            if not fpath.exists():
+                logger.error(f"Requested video '{fname}' not found in {VIDEOS_FOLDER}. Skipping.")
+                continue
+            
+            # Validate path security
+            if not validate_path(fpath, VIDEOS_FOLDER):
+                logger.error(f"Security Alert: Path traversal detected for {fname}. Skipping.")
+                continue
+            
+            # Validate extension
+            if fpath.suffix.lower() not in SUPPORTED_EXTENSIONS:
+                logger.warning(f"Skipping unsupported format: {fname} ({fpath.suffix})")
+                continue
+                
+            files_to_process.append(fpath)
+        
+        if not files_to_process:
+            logger.warning("No valid video files found for the specified inputs.")
+            return 0
+            
+        logger.info(f"Processing {len(files_to_process)} specific video file(s).")
+    else:
+        # Default: scan folder for all supported videos
+        logger.info("Scanning 'videos' folder for supported files...")
+        files_to_process = [
+            f for f in VIDEOS_FOLDER.iterdir() 
+            if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS
+        ]
+        
+        if not files_to_process:
+            logger.info("No supported video files found in VIDEOS_FOLDER.")
+            return 0
+            
+        logger.info(f"Found {len(files_to_process)} video files to process.")
+
+    # Create audio output folder if it doesn't exist
     if not AUDIOS_FOLDER.exists():
         AUDIOS_FOLDER.mkdir(parents=True, exist_ok=True)
 
     processed_count = 0
 
-    for file in VIDEOS_FOLDER.iterdir():
-        if not file.is_file():
-            continue
-            
-        if file.suffix.lower() not in SUPPORTED_EXTENSIONS:
-            logger.debug(f"Skipping unsupported file: {file.name}")
-            continue
-
-        if not validate_path(file, VIDEOS_FOLDER):
-            logger.error(f"Security Alert: Attempted path traversal detected for {file.name}. Skipping.")
-            continue
-
+    for idx, file in enumerate(files_to_process, 1):
         base_name = sanitize_filename(file.stem)
         audio_filename = f"{base_name}.wav"
         audio_path = AUDIOS_FOLDER / audio_filename
 
         if audio_path.exists():
-            logger.info(f"Audio already exists: {audio_path}")
+            logger.info(f"[{idx}/{len(files_to_process)}] Audio already exists: {audio_filename}. Skipping.")
             continue
 
-        logger.info(f"Processing video: {file.name} -> {audio_filename}")
+        logger.info(f"[{idx}/{len(files_to_process)}] Processing video: {file.name} -> {audio_filename}")
         
         try:
             subprocess.run([
@@ -641,14 +679,17 @@ def process_videos():
             ], check=True, capture_output=True, text=True)
             
             processed_count += 1
-            logger.info(f"Successfully saved: {audio_path}")
+            logger.info(f"   ✅ Successfully saved: {audio_path}")
         except subprocess.CalledProcessError as e:
-            logger.error(f"FFmpeg error processing {file.name}: {e.stderr}")
+            logger.error(f"   ❌ FFmpeg error processing {file.name}: {e.stderr}")
         except Exception as e:
-            logger.error(f"Unexpected error processing {file.name}: {e}")
+            logger.error(f"   ❌ Unexpected error processing {file.name}: {e}")
 
     if processed_count == 0:
         logger.info("No new files processed.")
+    else:
+        logger.info(f"Audio extraction complete: {processed_count} file(s) processed.")
+        
     return processed_count
 
 def process_audios(enable_diarization=True, lang_code=None, file_list=None):
@@ -723,7 +764,9 @@ def process_audios(enable_diarization=True, lang_code=None, file_list=None):
     logger.info(f"Found {len(files_to_process)} files to process. Starting stream...")
 
     for idx, input_file in enumerate(files_to_process, 1):
-        # --- VALIDATION LOGIC UPDATE ---
+        if not input_file.exists():
+            logger.error(f"Requested file '{input_file.name}' not found at {input_file}. Skipping.")
+            continue
         # Validate based on file type: Video -> VIDEOS_FOLDER, Audio -> AUDIOS_FOLDER
         if input_file.suffix.lower() in SUPPORTED_EXTENSIONS and input_file.suffix.lower() != '.wav':
             # It's a video/audio source file
@@ -2058,7 +2101,7 @@ def normalize_punctuation(text):
 # --- Step 3: Anonymize Existing Transcripts ---
 
 def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert=False, adversarial_mode=False,
-                          include_tags=None, exclude_tags=None):
+                          include_tags=None, exclude_tags=None, file_list=None):
     """
     Reads raw transcripts, anonymizes them with BERT, and optionally rewrites with LLM.
     Supports a new 'adversarial_mode' which runs a 3-iteration Red Team vs. Blue Team loop.
@@ -2109,31 +2152,63 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
     source_folder = TRANSCRIPTS_FOLDER if not skip_bert else ANNONYM_FOLDER
     source_suffix = ".txt"
     
-    if skip_bert:
-        logger.info("Skipping BERT anonymization. Processing existing files in 'annonym' folder for LLM rewrite.")
-        # Filter for files that haven't been processed by LLM yet
-        # Exclude: _llm.txt, _adversarial_*.txt
-        files = []
-        for f in source_folder.iterdir():
-            if f.is_file() and f.suffix.lower() == source_suffix:
-                name = f.name
-                if "_llm" in name or "_adversarial_" in name:
+    # Check for user-specified files first ---
+    files_to_process = []
+    
+    if file_list:
+        logger.info(f"User specified {len(file_list)} file(s). Targeting specific transcripts...")
+        for fname in file_list:
+            # Handle both .wav inputs (from args.file) and .txt inputs (direct transcript names)
+            base_name = Path(fname).stem
+            target_name = f"{base_name}.txt"
+            fpath = source_folder / target_name
+            
+            if not fpath.exists():
+                logger.error(f"Requested transcript '{target_name}' not found in {source_folder}. Skipping.")
+                continue
+            if not validate_path(fpath, source_folder):
+                logger.error(f"Security Alert: Path traversal detected for {target_name}. Skipping.")
+                continue
+            
+            # Apply filters if relevant (e.g., if running LLM-only, ensure we aren't double-processing)
+            if skip_bert:
+                if "_llm" in target_name or "_adversarial_" in target_name:
+                    logger.info(f"Skipping {target_name} as it appears already processed by LLM.")
                     continue
-                files.append(f)
+            
+            files_to_process.append(fpath)
+        
+        if not files_to_process:
+            logger.warning("No valid transcripts found for the specified input files.")
+            return {"success": 0, "failed": 0, "llm_success": 0, "llm_failed": 0}
+            
+        logger.info(f"Processing {len(files_to_process)} specific file(s) as requested.")
+
     else:
-        logger.info("Processing raw transcripts for BERT anonymization.")
-        files = [f for f in source_folder.iterdir() 
-                 if f.is_file() and f.suffix.lower() == source_suffix and "_anon" not in f.name]
+        # Default behavior: Scan folder
+        logger.info("No specific files requested. Scanning folder for eligible files...")
+        if skip_bert:
+            for f in source_folder.iterdir():
+                if f.is_file() and f.suffix.lower() == source_suffix:
+                    name = f.name
+                    if "_llm" in name or "_adversarial_" in name:
+                        continue
+                    files_to_process.append(f)
+        else:
+            for f in source_folder.iterdir():
+                if f.is_file() and f.suffix.lower() == source_suffix and "_anon" not in f.name:
+                    files_to_process.append(f)
+        
+        if not files_to_process:
+            logger.info(f"No files found to process in {source_folder}.")
+            return {"success": 0, "failed": 0, "llm_success": 0, "llm_failed": 0}
+            
+        logger.info(f"Found {len(files_to_process)} files to process.")
 
-    if not files:
-        logger.info(f"No files found to process in {source_folder}.")
-        return {"success": processed_count, "failed": failed_count, "llm_success": llm_processed_count, "llm_failed": llm_failed_count}
-
-    logger.info(f"Found {len(files)} files to process.")
     if adversarial_mode:
         logger.info("⚠️  ADVERSARIAL MODE ENABLED: Running 3-iteration Red/Blue team loop.")
 
-    for file in files:
+    for file in files_to_process:
         # Validate that the file path is strictly within source_folder
         if not validate_path(file, source_folder):
             logger.error(f"Security Alert: Attempted path traversal detected for {file.name}. Skipping.")
@@ -2407,26 +2482,39 @@ Examples:
     
     # Step 1: Audio Extraction (Videos → WAV)
     if run_transcription:
-        process_videos()
+        # Determine target video files based on arguments
+        target_video_files = None
+        if hasattr(args, 'file') and args.file:
+            target_video_files = [args.file]
+        elif hasattr(args, 'files') and args.files:
+            target_video_files = args.files
+        
+        process_videos(file_list=target_video_files)
     else:
         logger.info("⏭️  Skipping audio extraction (--disable-transcription)")
     
     # Step 2: Transcription & Diarization (WAV → Transcript)
     if run_transcription:
-        # Handle --file and --files arguments specifically
-        target_files = []
+        target_video_files = None
         if hasattr(args, 'file') and args.file:
-            target_files = [args.file]
+            target_video_files = [args.file]
         elif hasattr(args, 'files') and args.files:
-            target_files = args.files
-            
+            target_video_files = args.files
+        
         process_audios(
             enable_diarization=run_diarization, 
             lang_code=args.lang,
-            file_list=target_files
+            file_list=target_video_files
         )
+        
+        # Set anon_file_list based on the same arguments
+        if target_video_files:
+            anon_file_list = target_video_files
+        else:
+            anon_file_list = None
     else:
         logger.info("⏭️  Skipping transcription (--disable-transcription)")
+        anon_file_list = None
     
     include_tags = args.include_tags
     exclude_tags = args.exclude_tags
@@ -2439,7 +2527,8 @@ Examples:
             skip_bert=skip_bert_for_llm,
             adversarial_mode=is_adversarial,
             include_tags=include_tags,
-            exclude_tags=exclude_tags
+            exclude_tags=exclude_tags,
+            file_list=anon_file_list
         )
     else:
         logger.info("⏭️  Skipping anonymization (--disable-anonymization)")
