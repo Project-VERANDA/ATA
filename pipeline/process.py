@@ -2480,46 +2480,32 @@ Examples:
     # Execute pipeline steps conditionally
     logger.info("Starting Audio Anonymizer full pipeline...")
     
+    input_file_list = []
+    if hasattr(args, 'file') and args.file:
+        input_file_list = [args.file]
+    elif hasattr(args, 'files') and args.files:
+        input_file_list = args.files
+    
     # Step 1: Audio Extraction (Videos → WAV)
     if run_transcription:
-        # Determine target video files based on arguments
-        target_video_files = None
-        if hasattr(args, 'file') and args.file:
-            target_video_files = [args.file]
-        elif hasattr(args, 'files') and args.files:
-            target_video_files = args.files
-        
-        process_videos(file_list=target_video_files)
+        process_videos(file_list=input_file_list if input_file_list else None)
     else:
         logger.info("⏭️  Skipping audio extraction (--disable-transcription)")
     
     # Step 2: Transcription & Diarization (WAV → Transcript)
     if run_transcription:
-        target_video_files = None
-        if hasattr(args, 'file') and args.file:
-            target_video_files = [args.file]
-        elif hasattr(args, 'files') and args.files:
-            target_video_files = args.files
-        
         process_audios(
             enable_diarization=run_diarization, 
             lang_code=args.lang,
-            file_list=target_video_files
+            file_list=input_file_list if input_file_list else None
         )
-        
-        # Set anon_file_list based on the same arguments
-        if target_video_files:
-            anon_file_list = target_video_files
-        else:
-            anon_file_list = None
-    else:
-        logger.info("⏭️  Skipping transcription (--disable-transcription)")
-        anon_file_list = None
     
     include_tags = args.include_tags
     exclude_tags = args.exclude_tags
     
     # Step 3: Anonymization (Transcript → Anonymized)
+    # Pass the SAME input_file_list here. 
+    # Note: If you used --file video.mp4, this will look for video.txt internally.
     if run_anonymization or args.llm_only:
         process_anonymization(
             llm_rewrite_enabled=run_llm,
@@ -2528,12 +2514,11 @@ Examples:
             adversarial_mode=is_adversarial,
             include_tags=include_tags,
             exclude_tags=exclude_tags,
-            file_list=anon_file_list
+            file_list=input_file_list if input_file_list else None  # <--- FORCE PASS THE LIST
         )
     else:
         logger.info("⏭️  Skipping anonymization (--disable-anonymization)")
         if run_llm and not args.llm_only:
-            logger.warning("⚠️  LLM rewrite requested but BERT anonymization is disabled and --llm-only not set. "
-                          "LLM step will be skipped as it depends on anonymized input.")
+            logger.warning("⚠️  LLM rewrite requested but BERT anonymization is disabled...")
     
     logger.info("Pipeline finished.")
