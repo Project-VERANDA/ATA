@@ -1584,126 +1584,162 @@ class AnonymizationEngine:
         logger.info(f"Built label mapping with {len(mapping)} entries.")
         return mapping
 
-def _load_model(self):
-    """Loads the multilingual_DialogPII_NER model with FLERT config support."""
-    if not self.model_path.exists():
-        logger.error(f"Model path not found: {self.model_path}")
-        self.method = None
-        return
-
-    try:
-        from transformers import AutoModel, AutoTokenizer
-        from torchcrf import CRF
-        import torch.nn as nn
-        import json
-        
-        # 1. Load CRF Config (required for this model)
-        crf_config_path = self.model_path / "crf_config.json"
-        if not crf_config_path.exists():
-            logger.error(f"crf_config.json not found at {crf_config_path}")
-            self.method = None
-            return
-        
-        with open(crf_config_path, "r") as f:
-            crf_config = json.load(f)
-        
-        # Validate required keys
-        required_keys = ["base_model_name", "num_labels", "id2label", "label2id"]
-        if not all(k in crf_config for k in required_keys):
-            logger.error(f"Missing required keys in crf_config.json: {required_keys}")
+    def _load_model(self):
+        """Loads the multilingual_DialogPII_NER model with FLERT config support."""
+        if not self.model_path.exists():
+            logger.error(f"Model path not found: {self.model_path}")
             self.method = None
             return
 
-        self.original_id2label = crf_config.get("id2label", {})
-        self.original_label2id = crf_config.get("label2id", {})
+        try:
+            from transformers import AutoModel, AutoTokenizer
+            from torchcrf import CRF
+            import torch.nn as nn
+            import json
+            
+            # 1. Load CRF Config (required for this model)
+            crf_config_path = self.model_path / "crf_config.json"
+            if not crf_config_path.exists():
+                logger.error(f"crf_config.json not found at {crf_config_path}")
+                self.method = None
+                return
+            
+            with open(crf_config_path, "r") as f:
+                crf_config = json.load(f)
+            
+            # Validate required keys
+            required_keys = ["base_model_name", "num_labels", "id2label", "label2id"]
+            if not all(k in crf_config for k in required_keys):
+                logger.error(f"Missing required keys in crf_config.json: {required_keys}")
+                self.method = None
+                return
+
+            self.original_id2label = crf_config.get("id2label", {})
+            self.original_label2id = crf_config.get("label2id", {})
+            
+            logger.info(f"Loaded {len(self.original_id2label)} original model labels from crf_config.json")
+
+            # 2. Try to load FLERT config if available (for context windowing)
+            flert_config_path = self.model_path / "flert_config.json"
+            flert_config = None
+            if flert_config_path.exists():
+                with open(flert_config_path, "r") as f:
+                    flert_config = json.load(f)
+                logger.info("FLERT config loaded successfully")
+
+            # 3. Define Model Architecture
+            class ModernBertCRF(nn.Module):
+                def __init__(self, base_model_name, num_labels, id2label, label2id, flert_config=None):
+                    super().__init__()
+                    self.num_labels = num_labels
+                    self.id2label = id2label
+                    self.label2id = label2id
+                    self.flert_config = flert_config
+                    
+                    try:
+                        self.transformer = AutoModel.from_pretrained(
+                            base_model_name, 
+                            local_files_only=True
+                        )
+                    except Exception as e:
+                        logger.warning(f"Could not load local base model '{base_model_name}', trying HF...")
+                        self.transformer = AutoModel.from_pretrained(base_model_name)
+                    
+                    hidden_size = self.transformer.config.hidden_size
+                    self.classifier = nn.Linear(hidden_size, num_labels)
+                    self.dropout = nn.Dropout(0.1)
+                    self.crf = CRF(num_labels, batch_first=True)
+
+                def forward(self, input_ids, attention_mask, labels=None, **kwargs):
+                    kwargs.pop("token_type_ids", None)
+                    outputs = self.transformer(input_ids=input_ids, attention_mask=attention_mask)
+                    sequence_output = self.dropout(outputs.last_hidden_state)
+                    emissions = self.classifier(sequence_output)
+                    
+                    if labels is not None:
+                        mask = attention_mask.bool()
+                        labels_for_crf = labels.clone()
+                        labels_for_crf[labels_for_crf == -100] = 0
+                        loss = -self.crf(emissions, labels_for_crf, mask=mask, reduction='mean')
+                        return {"loss": loss, "logits": emissions}
+                    else:
+                        return {"logits": emissions}
+
+                def decode(self, emissions, mask):
+
+                    return self.crf.decode(emissions, mask=mask)
+
+            # 4. Instantiate Model
+            local_base_model_path = self.model_path / crf_config["base_model_name"]
+            if not local_base_model_path.exists():
+                logger.warning(f"Local base model not found at {local_base_model_path}. Trying HF name: {crf_config['base_model_name']}")
+                local_base_model_path = crf_config["base_model_name"]
+            
+            self.model = ModernBertCRF(
+                base_model_name=local_base_model_path,
+                num_labels=crf_config["num_labels"],
+                id2label=self.original_id2label,
+                label2id=self.original_label2id,
+                flert_config=flert_config
+            )
+            
+            model_weights_path = self.model_path / "pytorch_model.bin"
+            state_dict = torch.load(model_weights_path, map_location=self.device, weights_only=True)
+            self.model.load_state_dict(state_dict)
+            self.model.to(self.device)
+            self.model.eval()
+            
+            self.tokenizer = AutoTokenizer.from_pretrained(str(self.model_path), local_files_only=True)
+            
+            # 5. Build Dynamic Mapping (same as before)
+            self.label_mapping = self._build_safe_label_mapping()
+            logger.info("✅ New DFKI-SLT model loaded successfully with FLERT support")
+
+        except Exception as e:
+            import traceback
+            logger.error(f"Failed to load multilingual_DialogPII_NER model: {e}")
+            logger.error(traceback.format_exc())
+            self.method = None
+
+    def anonymize(self, text):
+        """Anonymizes text using FLERT-style context windowing."""
+        if not self.method or not self.model or not self.tokenizer:
+            return None, False, "Anonymization model not loaded"
+
+        logger.info("Running anonymization with FLERT context windowing...")
+
+        # 1. Split into Sentences (returns list of (speaker, tokens))
+        sentences_data = split_dialogue_into_sentences(text)
         
-        logger.info(f"Loaded {len(self.original_id2label)} original model labels from crf_config.json")
+        if not sentences_data:
+            return text, False, "No sentences detected"
 
-        # 2. Try to load FLERT config if available (for context windowing)
-        flert_config_path = self.model_path / "flert_config.json"
-        flert_config = None
-        if flert_config_path.exists():
-            with open(flert_config_path, "r") as f:
-                flert_config = json.load(f)
-            logger.info("FLERT config loaded successfully")
-
-        # 3. Define Model Architecture
-        class ModernBertCRF(nn.Module):
-            # (Same as shown above)
-            pass
-
-        # 4. Instantiate Model
-        local_base_model_path = self.model_path / crf_config["base_model_name"]
-        if not local_base_model_path.exists():
-            logger.warning(f"Local base model not found at {local_base_model_path}. Trying HF name: {crf_config['base_model_name']}")
-            local_base_model_path = crf_config["base_model_name"]
+        # Extract token lists for prediction
+        sentences_tokens = [tokens for _, tokens in sentences_data]
         
-        self.model = ModernBertCRF(
-            base_model_name=local_base_model_path,
-            num_labels=crf_config["num_labels"],
-            id2label=self.original_id2label,
-            label2id=self.original_label2id,
-            flert_config=flert_config
-        )
-        
-        model_weights_path = self.model_path / "pytorch_model.bin"
-        state_dict = torch.load(model_weights_path, map_location=self.device, weights_only=True)
-        self.model.load_state_dict(state_dict)
-        self.model.to(self.device)
-        self.model.eval()
-        
-        self.tokenizer = AutoTokenizer.from_pretrained(str(self.model_path), local_files_only=True)
-        
-        # 5. Build Dynamic Mapping (same as before)
-        self.label_mapping = self._build_safe_label_mapping()
-        logger.info("✅ New DFKI-SLT model loaded successfully with FLERT support")
+        # 2. Run Inference WITH CONTEXT WINDOWING
+        try:
+            # Use enhanced FLERT prediction with context
+            predictions = predict_dialogue_with_context(
+                sentences_tokens=sentences_tokens,
+                model=self.model,
+                tokenizer=self.tokenizer,
+                id_to_tag_map=self.label_mapping,
+                device=self.device,
+                context_window=1  # Include 1 sentence before/after
+            )
+        except Exception as e:
+            logger.error(f"Inference failed: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return text, False, str(e)
 
-    except Exception as e:
-        import traceback
-        logger.error(f"Failed to load multilingual_DialogPII_NER model: {e}")
-        logger.error(traceback.format_exc())
-        self.method = None
+        # 3. Reconstruct Text
+        reconstructed_text = reconstruct_text_from_predictions(sentences_data, predictions, {})
+        reconstructed_text = normalize_punctuation(reconstructed_text)
+        reconstructed_text = merge_adjacent_tags(reconstructed_text)
 
-def anonymize(self, text):
-    """Anonymizes text using FLERT-style context windowing."""
-    if not self.method or not self.model or not self.tokenizer:
-        return None, False, "Anonymization model not loaded"
-
-    logger.info("Running anonymization with FLERT context windowing...")
-
-    # 1. Split into Sentences (returns list of (speaker, tokens))
-    sentences_data = split_dialogue_into_sentences(text)
-    
-    if not sentences_data:
-        return text, False, "No sentences detected"
-
-    # Extract token lists for prediction
-    sentences_tokens = [tokens for _, tokens in sentences_data]
-    
-    # 2. Run Inference WITH CONTEXT WINDOWING
-    try:
-        # Use enhanced FLERT prediction with context
-        predictions = predict_dialogue_with_context(
-            sentences_tokens=sentences_tokens,
-            model=self.model,
-            tokenizer=self.tokenizer,
-            id_to_tag_map=self.label_mapping,
-            device=self.device,
-            context_window=1  # Include 1 sentence before/after
-        )
-    except Exception as e:
-        logger.error(f"Inference failed: {e}")
-        import traceback
-        logger.error(traceback.format_exc())
-        return text, False, str(e)
-
-    # 3. Reconstruct Text
-    reconstructed_text = reconstruct_text_from_predictions(sentences_data, predictions, {})
-    reconstructed_text = normalize_punctuation(reconstructed_text)
-    reconstructed_text = merge_adjacent_tags(reconstructed_text)
-
-    return reconstructed_text, True, "Success"
-
+        return reconstructed_text, True, "Success"
 
 def generate_paraphrase(raw_dialogue, lang='DE', model="gpt-oss-120b", temperature=0.3):
     """
@@ -2113,7 +2149,7 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
         anonymizer = AnonymizationEngine(
             method=ANONYMIZATION_METHOD,
             level=ANONYMIZATION_LEVEL,
-            model_path=MODEL_FOLDER / "mmbert_multilingual_pii_ner",
+            model_path=MODEL_FOLDER / "multilingual_DialogPII_NER",
             include_tags=include_tags,
             exclude_tags=exclude_tags
         )
@@ -2339,7 +2375,7 @@ def anonymize_text_locally(text):
         engine = AnonymizationEngine(
             method="local_mmbert", 
             level="standard", 
-            model_path=MODEL_FOLDER / "mmbert_multilingual_pii_ner"
+            model_path=MODEL_FOLDER / "multilingual_DialogPII_NER"
         )
         
         if not engine.method:
