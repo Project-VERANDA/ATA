@@ -246,6 +246,7 @@ STANDARD_PKGS=(
     "python-dotenv"
     "scipy"
     "numpy"
+    "huggingface-hub"
 )
 
 for pkg in "${STANDARD_PKGS[@]}"; do
@@ -308,7 +309,7 @@ echo "=== Verifying Critical Dependencies ==="
 if python -c "import click; from click import Choice; c = Choice(['a','b'])" 2>/dev/null; then
     echo "✅ click is compatible with Python 3.12"
 else
-    echo "❌ WARNING: click may not be incompatible."
+    echo "❌ WARNING: click may not be compatible."
 fi
 
 if python -c "import typer" 2>/dev/null; then
@@ -321,6 +322,12 @@ if python -c "import spacy" 2>/dev/null; then
     echo "✅ spacy imported successfully"
 else
     echo "❌ WARNING: spacy import failed"
+fi
+
+if python -c "from huggingface_hub import snapshot_download" 2>/dev/null; then
+    echo "✅ huggingface-hub imported successfully"
+else
+    echo "❌ WARNING: huggingface-hub import failed"
 fi
 
 # ============================================================================
@@ -437,9 +444,13 @@ echo "Target Directory: $MODEL_DIR"
 echo "Expected Folder Names:"
 echo "  - models--Systran--faster-whisper-large-v3"
 echo "  - models--pyannote--speaker-diarization-community-1"
-echo "  - jhu-clsp/mmBERT-base"
-echo "  - mmbert_multilingual_pii_ner"
+echo "  - jhu-clsp/mmBERT-base (Base model for PII NER)"
+echo "  - multilingual_DialogPII_NER (NEW: DFKI-SLT PII Detection Model)"
 echo ""
+
+# CRITICAL: Define MODEL_DIR relative to current directory
+MODEL_DIR="$CURRENT_DIR/pipeline/model"
+mkdir -p "$MODEL_DIR"
 
 read -p "Enter WhisperX models to download (tiny, base, small, medium, large) or press Enter to skip: " WHISPER_MODELS_INPUT
 
@@ -522,48 +533,138 @@ else
 fi
 
 # ============================================================================
-# 🧠 MBERT BASE & PII MODELS
+# 🧠 MBERT BASE & PII MODELS (UPDATED FOR DFKI-SLT MODEL)
 # ============================================================================
 echo ""
-echo "Downloading mBert Models"
+echo "=========================================================="
+echo "Downloading mBert Base & NEW DFKI-SLT PII NER Model"
+echo "=========================================================="
+echo ""
+echo "📝 IMPORTANT: The new model (DFKI-SLT/multilingual_DialogPII_NER)"
+echo "   requires these configuration files:"
+echo "   - crf_config.json"
+echo "   - flert_config.json"  
+echo "   - id2label.json"
+echo ""
 
-# 1. Base Model
+# 1. Base Model (mmBERT-base - still needed as foundation)
 BASE_TARGET="$MODEL_DIR/jhu-clsp/mmBERT-base"
 if [ ! -d "$BASE_TARGET" ]; then
     echo "Downloading mmBERT-base to $BASE_TARGET..."
-    mkdir -p "$MODEL_DIR/jhu-clsp"
-    huggingface-cli download jhu-clsp/mmBERT-base --local-dir "$BASE_TARGET" --local-dir-use-symlinks False
+    mkdir -p "$(dirname "$BASE_TARGET")"
+    if command -v huggingface-cli &> /dev/null; then
+        huggingface-cli download jhu-clsp/mmBERT-base --local-dir "$BASE_TARGET" --local-dir-use-symlinks False
+    else
+        python -c "from huggingface_hub import snapshot_download; snapshot_download('jhu-clsp/mmBERT-base', local_dir='$BASE_TARGET', local_dir_use_symlinks=False)"
+    fi
     echo "✅ Base model downloaded."
 else
     echo "✅ mmBERT-base already present."
 fi
 
-# 2. PII Model
-PII_TARGET="$MODEL_DIR/mmbert_multilingual_pii_ner"
+# 2. NEW: DFKI-SLT PII Model (Primary anonymization model)
+echo ""
+echo "📦 Downloading NEW DFKI-SLT Multilingual DialogPII NER Model"
+echo "   Repository: https://huggingface.co/DFKI-SLT/multilingual_DialogPII_NER"
+PII_TARGET="$MODEL_DIR/multilingual_DialogPII_NER"
+
 if [ -d "$PII_TARGET" ] && [ "$(ls -A "$PII_TARGET")" ]; then
-    echo "✅ PII model already exists."
-else
-    echo "Downloading PII model to $PII_TARGET..."
-    mkdir -p "$PII_TARGET"
-    huggingface-cli download deryaerman/mmbert_multilingual_pii_ner --local-dir "$PII_TARGET" --local-dir-use-symlinks False
+    echo "✅ DFKI-SLT PII model already exists at $PII_TARGET."
     
-    # Flatten if nested
-    SUBFOLDER=$(find "$PII_TARGET" -mindepth 1 -maxdepth 1 -type d | head -n 1)
-    if [ -n "$SUBFOLDER" ] && [ "$SUBFOLDER" != "$PII_TARGET" ]; then
-        echo "Flattening nested folder structure..."
-        mv "$SUBFOLDER"/* "$PII_TARGET/"
-        rmdir "$SUBFOLDER"
+    # Verify required config files exist
+    echo "   Verifying required configuration files..."
+    MISSING_CONFIG=false
+    
+    if [ ! -f "$PII_TARGET/crf_config.json" ]; then
+        echo "   ⚠️  Missing: crf_config.json"
+        MISSING_CONFIG=true
     fi
-    echo "✅ PII model downloaded."
+    
+    if [ ! -f "$PII_TARGET/id2label.json" ]; then
+        echo "   ⚠️  Missing: id2label.json"
+        MISSING_CONFIG=true
+    fi
+    
+    if [ "$MISSING_CONFIG" = true ]; then
+        echo "   ⚠️  Some config files are missing. Will attempt to re-download..."
+        rm -rf "$PII_TARGET"
+    else
+        echo "   ✅ All required config files present."
+    fi
+fi
+
+if [ ! -d "$PII_TARGET" ] || [ -z "$(ls -A "$PII_TARGET" 2>/dev/null)" ]; then
+    echo "Downloading DFKI-SLT PII model to $PII_TARGET..."
+    mkdir -p "$PII_TARGET"
+    
+    if command -v huggingface-cli &> /dev/null; then
+        echo "   Using huggingface-cli..."
+        huggingface-cli download DFKI-SLT/multilingual_DialogPII_NER \
+            --local-dir "$PII_TARGET" \
+            --local-dir-use-symlinks False \
+            2>&1 | grep -v "already downloaded" || true
+    else
+        echo "   Using Python fallback..."
+        python -c "
+from huggingface_hub import snapshot_download
+import sys
+try:
+    snapshot_download(
+        'DFKI-SLT/multilingual_DialogPII_NER',
+        local_dir='$PII_TARGET',
+        local_dir_use_symlinks=False
+    )
+    print('✅ Download complete')
+except Exception as e:
+    print(f'❌ Download failed: {e}', file=sys.stderr)
+    sys.exit(1)
+" || {
+        echo "❌ Failed to download DFKI-SLT PII model."
+        exit 1
+    }
+    fi
+    
+    # Verify the download succeeded
+    if [ "$(ls -A "$PII_TARGET" 2>/dev/null)" ]; then
+        echo "✅ DFKI-SLT PII model downloaded successfully."
+        
+        # List key files for verification
+        echo "   Key files found:"
+        ls -la "$PII_TARGET"/*.json 2>/dev/null | awk '{print "   - " $NF}' || echo "   (No .json files found - check manually)"
+    else
+        echo "❌ Download appeared to succeed but target directory is empty."
+        echo "   Please manually download from: https://huggingface.co/DFKI-SLT/multilingual_DialogPII_NER"
+    fi
+fi
+
+# 3. Old PII Model (Keep for backward compatibility - optional)
+OLD_PII_TARGET="$MODEL_DIR/mmbert_multilingual_pii_ner"
+if [ -d "$OLD_PII_TARGET" ] && [ "$(ls -A "$OLD_PII_TARGET")" ]; then
+    echo ""
+    echo "⚠️  Note: Old PII model (mmbert_multilingual_pii_ner) also exists."
+    echo "   The new DFKI-SLT model should be used for improved accuracy."
+    echo "   If you want to remove the old model, delete: $OLD_PII_TARGET"
+else
+    echo ""
+    echo "ℹ️  Old PII model (mmbert_multilingual_pii_ner) not found."
+    echo "   Only the new DFKI-SLT model is installed."
 fi
 
 echo ""
 echo "=== Model Installation Complete ==="
 echo "Verification: Check that folders exist in $MODEL_DIR"
-ls -la "$MODEL_DIR"
+echo ""
+echo "Installed Models:"
+echo "=================="
+if [ -d "$MODEL_DIR" ]; then
+    ls -la "$MODEL_DIR" | grep "^d" | awk '{print "  " $NF}'
+else
+    echo "  ❌ Model directory not found!"
+fi
 
 # Create Environment file
 if [ -f ".env" ]; then
+    echo ""
     echo "⚠️  Existing .env file found. Skipping creation to preserve your settings."
     echo "   Your current API keys and configurations are safe."
 else
@@ -583,7 +684,10 @@ fi
 
 # 14. Final Instructions
 echo ""
-echo "=== Setup Complete! ==="
+echo "=========================================================================="
+echo "===              SETUP COMPLETE!                           ==="
+echo "=========================================================================="
+echo ""
 echo "To use the environment:"
 echo "  source \$HOME/miniconda3/etc/profile.d/conda.sh"
 echo "  conda activate $ENV_NAME"
@@ -594,6 +698,10 @@ echo "    ├── .env"
 echo "    ├── ATA_SelfInstall.sh"
 echo "    └── pipeline/"
 echo "        ├── model/ (Models downloaded here)"
+echo "        │   ├── models--Systran--faster-whisper-*/"
+echo "        │   ├── models--pyannote--speaker-diarization-*/"
+echo "        │   ├── jhu-clsp/mmBERT-base"
+echo "        │   └── multilingual_DialogPII_NER ← NEW Model"
 echo "        ├── videos/ (Place input videos here)"
 echo "        ├── audios/ (Processed audio goes here)"
 echo "        ├── transcripts/ (Raw transcripts)"
@@ -608,7 +716,17 @@ echo "     python pipeline/process.py"
 echo "  4. (Optional) Run the Web Interface (with Offline Coqui TTS):"
 echo "     python interactive_app/app.py"
 echo ""
-echo "Note: Coqui Multi-Voice models (German/English) were downloaded automatically."
+echo "✨ NEW FEATURES:"
+echo "  • DFKI-SLT Multilingual DialogPII NER Model installed"
+echo "    - Improved accuracy for 11 languages"
+echo "    - FLERT-style context windowing"
+echo "    - Better dialogue-aware PII detection"
 echo ""
 echo "💡 IMPORTANT: You may see 'dependency conflict' warnings from pip regarding numpy/pandas."
 echo "   These are safe to ignore. As long as 'python -c \"import whisperx...\"' works, your system is fine."
+echo ""
+echo "📚 Documentation:"
+echo "  • Model details: https://huggingface.co/DFKI-SLT/multilingual_DialogPII_NER"
+echo "  • Support: https://proton.me/support/lumo"
+echo ""
+echo "=========================================================================="
