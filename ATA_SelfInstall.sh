@@ -165,6 +165,15 @@ pip install --upgrade pip -q
 
 echo "Installing core ML stack..."
 
+echo "  → transformers..."
+pip install "transformers>=4.40.0,<4.48.0" --no-cache-dir
+
+echo "  → accelerate..."
+pip install "accelerate>=0.20.0,<1.0.0" --no-cache-dir
+
+echo "  → sentencepiece..."
+pip install "sentencepiece>=0.1.99,<1.0.0" --no-cache-dir
+
 # 1. Install NumPy FIRST (lock it before anything else)
 echo "  → numpy==1.26.4 (locked for thinc/spacy compatibility)..."
 pip install "numpy==1.26.4" --no-cache-dir
@@ -228,9 +237,6 @@ pip install pytorch-crf --no-cache-dir
 
 echo "  → pyannote.audio..."
 pip install "pyannote.audio>=3.0.0" --no-cache-dir || echo "⚠️  Warning installing pyannote.audio"
-
-echo "  → transformers..."
-pip install "transformers>=4.48.0,<5.0.0" --no-cache-dir
 
 echo "✅ Base ML stack installation complete."
 
