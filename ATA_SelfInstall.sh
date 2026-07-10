@@ -333,14 +333,14 @@ STANDARD_PKGS=(
     "transformers>=4.35.0"
     "accelerate>=0.20.0"
     "sentencepiece"
-    "spacy>=3.7.0,<3.9.0"
+    "spacy==3.7.5"
     "torchcrf"
     "pandas>=2.2.0"
     "openai>=1.0.0"
     "python-dotenv"
     "scipy>=1.14.0"
     "numpy>=2.1.0"
-    "huggingface-hub>=0.20.0"
+    "huggingface-hub>=0.20.0,<1.0.0"
 )
 
 for pkg_spec in "${STANDARD_PKGS[@]}"; do
@@ -349,24 +349,33 @@ for pkg_spec in "${STANDARD_PKGS[@]}"; do
     smart_install "$pkg_spec" "$pkg_name" "$desired_version" "$FORCE_REFRESH"
 done
 
-# SpaCy Model Check & Dependency Fix
+# 3. Spacy Model Check & Dependency Fix
 echo "Checking spaCy multilingual model..."
 
-# Re-verify click + typer AFTER spacy installation (spacy can overwrite)
-typer_check_after=$(check_package_version "typer" "$TYPER_DESIRED")
-case $typer_check_after in
-    "MISMATCH:"*)
-        echo "⚠️  spaCy installation changed typer version. Restoring $TYPER_DESIRED..."
-        pip uninstall typer -y
-        pip install "typer==$TYPER_DESIRED" --force-reinstall --no-deps --no-cache-dir
-        ;;
-esac
+# Enforce typer BEFORE spaCy CLI (not just after package install)
+# (spacy can upgrade typer during pip install, breaking the CLI)
+echo "Enforcing typer $TYPER_DESIRED before spaCy CLI..."
+pip uninstall typer -y
+pip install "typer==$TYPER_DESIRED" --force-reinstall --no-deps --no-cache-dir
 
+# ALSO enforce click==8.1.7 (typer depends on this exact version)
+echo "Enforcing click==8.1.7..."
+pip uninstall click -y
+pip install "click==8.1.7" --force-reinstall --no-deps --no-cache-dir
+
+# Verify versions
+CLICK_VER=$(pip show click | grep Version | awk '{print $2}')
+TYPER_VER=$(pip show typer | grep Version | awk '{print $2}')
+echo "  click: $CLICK_VER | typer: $TYPER_VER"
+
+# NOW run spaCy CLI (dependencies guaranteed compatible)
 if python -m spacy check xx_ent_wiki_sm &> /dev/null; then
     echo "✅ spaCy multilingual model (xx_ent_wiki_sm) is already installed."
 else
     echo "Installing spaCy multilingual model (xx_ent_wiki_sm)..."
     python -m spacy download xx_ent_wiki_sm
+    
+    # Post-download verification
     if [ $? -eq 0 ]; then
         echo "✅ spaCy model downloaded successfully."
     else
