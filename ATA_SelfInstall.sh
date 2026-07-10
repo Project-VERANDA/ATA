@@ -315,7 +315,7 @@ pip install torch torchaudio torchvision --no-cache-dir
 
 # 2. NumPy
 echo "  → numpy..."
-pip install "numpy>=2.1.0,<3.0.0" --no-cache-dir
+pip install "numpy==1.26.4" --no-cache-dir
 
 # 3. Transformers
 echo "  → transformers..."
@@ -942,7 +942,7 @@ fi
 
 
 # Close remaining model download blocks
-    fi  # Close Pyannote auth check
+fi  # Close Pyannote auth check
 fi  # Close model download if
 
 # Enforce typer BEFORE spaCy CLI
