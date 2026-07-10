@@ -281,7 +281,7 @@ echo "Upgrading pip..."
 pip install --upgrade pip -q
 
 # ============================================================================
-# 🔧 CRITICAL: click + typer version enforcement
+# 🔧 Click + typer version enforcement
 # ============================================================================
 echo "Ensuring click==8.1.7 and compatible typer are installed..."
 
@@ -337,13 +337,13 @@ if pip show whisperx &> /dev/null; then
     if [ "$FORCE_REFRESH" = true ]; then
         echo "Reinstalling whisperx (--force-refresh)..."
         pip uninstall whisperx -y
-        pip install git+https://github.com/m-bain/whisperx.git --no-cache-dir
+        pip install git+https://github.com/m-bain/whisperx.git@3.6.0 --no-cache-dir
     else
         echo "✅ whisperx already installed. Skipping."
     fi
 else
     echo "Installing whisperx from source..."
-    pip install git+https://github.com/m-bain/whisperx.git --no-cache-dir
+    pip install git+https://github.com/m-bain/whisperx.git@3.6.0 --no-cache-dir
 fi
 
 # Standard packages with version checking
@@ -373,22 +373,6 @@ done
 
 # 3. Spacy Model Check & Dependency Fix
 echo "Checking spaCy multilingual model..."
-
-# Enforce typer BEFORE spaCy CLI (not just after package install)
-# (spacy can upgrade typer during pip install, breaking the CLI)
-echo "Enforcing typer $TYPER_DESIRED before spaCy CLI..."
-pip uninstall typer -y
-pip install "typer==$TYPER_DESIRED" --force-reinstall --no-deps --no-cache-dir
-
-# ALSO enforce click==8.1.7 (typer depends on this exact version)
-echo "Enforcing click==8.1.7..."
-pip uninstall click -y
-pip install "click==8.1.7" --force-reinstall --no-deps --no-cache-dir
-
-# Verify versions
-CLICK_VER=$(pip show click | grep Version | awk '{print $2}')
-TYPER_VER=$(pip show typer | grep Version | awk '{print $2}')
-echo "  click: $CLICK_VER | typer: $TYPER_VER"
 
 # NOW run spaCy CLI (dependencies guaranteed compatible)
 if python -m spacy check xx_ent_wiki_sm &> /dev/null; then
@@ -739,6 +723,22 @@ else
         echo "   New DFKI-SLT model is recommended for better accuracy."
     fi
 fi
+
+# Enforce typer BEFORE spaCy CLI (not just after package install)
+# (spacy can upgrade typer during pip install, breaking the CLI)
+echo "Enforcing typer $TYPER_DESIRED before spaCy CLI..."
+pip uninstall typer -y
+pip install "typer==$TYPER_DESIRED" --force-reinstall --no-deps --no-cache-dir
+
+# ALSO enforce click==8.1.7 (typer depends on this exact version)
+echo "Enforcing click==8.1.7..."
+pip uninstall click -y
+pip install "click==8.1.7" --force-reinstall --no-deps --no-cache-dir
+
+# Verify versions
+CLICK_VER=$(pip show click | grep Version | awk '{print $2}')
+TYPER_VER=$(pip show typer | grep Version | awk '{print $2}')
+echo "  click: $CLICK_VER | typer: $TYPER_VER"
 
 # ============================================================================
 # 📁 ENVIRONMENT FILE CREATION
