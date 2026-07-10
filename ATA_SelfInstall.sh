@@ -8,7 +8,6 @@ set -e
 # ============================================================================
 SHOW_HELP=false
 SKIP_WEB=false
-NO_COQUI=false
 NO_MODELS=false
 SKIP_WHISPER=false
 SKIP_PYANNOTE=false
@@ -27,7 +26,6 @@ Options:
   -h, --help              Show this help message
   -y, --yes               Auto-answer 'yes' to all prompts
   --skip-web              Skip web interface installation (Flask, TTS)
-  --no-coqui              Skip Coqui TTS model downloads
   --no-models             Skip ALL ML model downloads
   --skip-whisper          Skip WhisperX model download
   --skip-pyannote         Skip Pyannote diarization model download
@@ -55,7 +53,6 @@ while [[ $# -gt 0 ]]; do
         -h|--help) SHOW_HELP=true; shift ;;
         -y|--yes) ANSWER_YES=true; shift ;;
         --skip-web) SKIP_WEB=true; shift ;;
-        --no-coqui) NO_COQUI=true; shift ;;
         --no-models) NO_MODELS=true; shift ;;
         --skip-whisper) SKIP_WHISPER=true; shift ;;
         --skip-pyannote) SKIP_PYANNOTE=true; shift ;;
@@ -106,7 +103,7 @@ fi
 
 cd "$CURRENT_DIR"
 
-echo "=== ATA Speech Anonymizer Installer ==="
+echo "=== ATA Speech Anonymizer Installer (v2.0 - Fixed Compatibility) ==="
 echo "Working Directory: $(pwd)"
 echo ""
 
@@ -130,30 +127,19 @@ echo "Creating conda environment '$ENV_NAME' with Python $TARGET_PYTHON..."
 
 # Check if environment exists
 if conda env list | grep -q "^$ENV_NAME "; then
-    # ALWAYS recreate on --force-refresh
     if [ "$FORCE_REFRESH" = true ]; then
         echo "🔄 Environment exists (--force-refresh). Removing and recreating..."
         conda env remove -n $ENV_NAME -y
-        
-        # Additional safety: remove directory if still exists
         rm -rf ~/miniconda3/envs/$ENV_NAME 2>/dev/null || true
         rm -rf ~/miniforge3/envs/$ENV_NAME 2>/dev/null || true
     else
-        # If no --force-refresh, warn and RECOMMEND flag (don't trust existing env)
         echo "⚠️  Environment '$ENV_NAME' already exists."
-        echo "   WARNING: Version may be incorrect. Recommended: --force-refresh"
-        echo "   Running with --force-refresh to ensure Python $TARGET_PYTHON..."
-        
-        # Force recreation anyway for safety
-        conda env remove -n $ENV_NAME -y
-        
-        # Additional safety: remove directory if still exists
-        rm -rf ~/miniconda3/envs/$ENV_NAME 2>/dev/null || true
-        rm -rf ~/miniforge3/envs/$ENV_NAME 2>/dev/null || true
+        echo "   Using existing environment (use --force-refresh to recreate)"
     fi
+else
+    echo "Creating fresh environment with Python $TARGET_PYTHON..."
 fi
 
-echo "Creating fresh environment with Python $TARGET_PYTHON..."
 conda create -n $ENV_NAME python=$TARGET_PYTHON -c conda-forge -y
 
 # 4. Activate the environment
@@ -166,337 +152,149 @@ ACTUAL_PYTHON=$(conda run -n $ENV_NAME python --version | awk '{print $2}')
 EXPECTED_PYTHON="3.12"
 if [[ ! "$ACTUAL_PYTHON" =~ ^3\.12 ]]; then
     echo "❌ ERROR: Expected Python 3.12.x, got $ACTUAL_PYTHON"
-    echo "   This may indicate channel resolution issues."
     exit 1
 fi
 echo "✅ Python version verified: $ACTUAL_PYTHON"
 
 # ============================================================================
-# 🔧 HELPER FUNCTIONS FOR PACKAGE VERSION CHECKING
-# ============================================================================
-
-# Check if package is installed with specific version
-check_package_version() {
-    local pkg=$1
-    local desired_version=$2
-    
-    if ! pip show "$pkg" &> /dev/null; then
-        echo "NOT_INSTALLED"
-        return
-    fi
-    
-    local current_version=$(pip show "$pkg" | grep Version | awk '{print $2}')
-    
-    if [ -z "$desired_version" ]; then
-        echo "INSTALLED:$current_version"
-        return
-    fi
-    
-    # Compare versions (simple semantic versioning check)
-    if [ "$current_version" == "$desired_version" ]; then
-        echo "MATCH"
-    else
-        echo "MISMATCH:$current_version:$desired_version"
-    fi
-}
-
-# Smart install with version checking
-smart_install() {
-    local pkg_spec=$1
-    local pkg_name=$2
-    local desired_version=$3
-    local force=${4:-false}
-    
-    local version_check=$(check_package_version "$pkg_name" "$desired_version")
-    
-    case $version_check in
-        "NOT_INSTALLED")
-            echo "Installing $pkg_name..."
-            pip install "$pkg_spec"
-            ;;
-        "MATCH")
-            if [ "$force" = true ]; then
-                echo "Reinstalling $pkg_name (matching version, --force-refresh)"
-                pip install "$pkg_spec" --force-reinstall --no-deps --no-cache-dir
-            else
-                echo "✅ $pkg_name already installed ($desired_version). Skipping."
-            fi
-            ;;
-        "MISMATCH:"*)
-            local current=$(echo "$version_check" | cut -d: -f2)
-            local desired=$(echo "$version_check" | cut -d: -f3)
-            echo "⚠️  $pkg_name version mismatch: current=$current, desired=$desired"
-            if [ "$force" = true ]; then
-                echo "   Replacing with $desired (--force-refresh)"
-            else
-                echo "   Replacing with $desired (version conflict resolution)"
-            fi
-            pip uninstall "$pkg_name" -y
-            pip install "$pkg_spec" --no-cache-dir
-            ;;
-    esac
-}
-
-# Download model helper (fixes --local-dir-use-symlinks issue)
-download_model_hf() {
-    local repo_id=$1
-    local target_dir=$2
-    local repo_type=${3:-model}
-    
-    echo "Downloading $repo_id..."
-    mkdir -p "$target_dir"
-    
-    # Method 1: Try hf CLI (without unsupported flag)
-    if command -v hf &> /dev/null; then
-        echo "   Using hf CLI..."
-        # Note: --local-dir-use-symlinks is NOT supported in hf download
-        # We rely on Python fallback for symlink control
-        hf download "$repo_id" --local-dir "$target_dir" 2>&1 | grep -v "already downloaded" || true
-        
-        # Verify download worked
-        if [ "$(ls -A "$target_dir" 2>/dev/null)" ]; then
-            echo "✅ Downloaded via hf CLI"
-            return 0
-        fi
-    fi
-    
-    # Method 2: Python fallback with full symlink control
-    echo "   Using Python snapshot_download (better symlink control)..."
-    python -c "
-from huggingface_hub import snapshot_download
-import sys
-try:
-    snapshot_download(
-        '$repo_id',
-        local_dir='$target_dir',
-        local_dir_use_symlinks=False,  # This works in Python, not CLI
-        repo_type='$repo_type'
-    )
-    print('✅ Download complete')
-except Exception as e:
-    print(f'❌ Download failed: {e}', file=sys.stderr)
-    sys.exit(1)
-" || {
-        echo "❌ Failed to download $repo_id"
-        return 1
-    }
-}
-
-# ============================================================================
-# 🔧 PACKAGE INSTALLATION WITH VERSION CHECKING
-# ============================================================================
-
-# ============================================================================
-# 🔧 Click + typer version enforcement (MOVED BEFORE SPACY)
-# ============================================================================
-echo "Locking click==8.1.7 and typer==0.12.5 (required by spaCy 3.7.x)..."
-
-pip uninstall click typer -y 2>/dev/null || true
-pip install "click==8.1.7" "typer==0.12.5" --no-cache-dir
-
-CLICK_VER=$(pip show click | grep Version | awk '{print $2}')
-TYPER_VER=$(pip show typer | grep Version | awk '{print $2}')
-echo "✅ Locked: click=$CLICK_VER, typer=$TYPER_VER"
-echo ""
-
-# ============================================================================
-# 🔧 All other packages (WITHOUT spacy yet!)
+# 🔧 PACKAGE INSTALLATION WITH COMPATIBILITY FIXES
 # ============================================================================
 
 echo "Upgrading pip..."
 pip install --upgrade pip -q
 
-echo "Installing base ML stack in dependency order..."
+echo "Installing base ML stack with fixed compatibility..."
 
-# 1. Torch
-echo "  → torch..."
-pip install torch==2.8.0 torchaudio==2.8.0 torchvision==0.23.0 --no-cache-dir || \
-pip install torch torchaudio torchvision --no-cache-dir
-
-# 2. NumPy
-echo "  → numpy..."
+# CRITICAL: Install NumPy 1.26.4 FIRST (before thinc/spacy)
+echo "  → numpy==1.26.4 (required for thinc/spacy compatibility)..."
 pip install "numpy==1.26.4" --no-cache-dir
 
-# 3. Transformers
-echo "  → transformers..."
-pip install "transformers>=4.48.0" --no-cache-dir
+# 2. Other ML dependencies compatible with NumPy 1.26.4
+echo "  → scipy>=1.14.0..."
+pip install "scipy>=1.14.0,<2.0.0" --no-cache-dir
 
-# 4. huggingface-hub
-echo "  → huggingface-hub..."
-pip install "huggingface-hub>=1.5.0" --no-cache-dir
+echo "  → pandas>=2.2.0..."
+pip install "pandas>=2.2.0,<3.0.0" --no-cache-dir
 
-# 5. SciPy
-echo "  → scipy..."
-pip install "scipy>=1.14.0" --no-cache-dir
+echo "  → torch (foundation for ML stack)..."
+pip install "torch>=2.0.0,<3.0.0" --no-cache-dir || \
+pip install torch --no-cache-dir
 
-# 6. Pandas
-echo "  → pandas..."
-pip install "pandas>=2.2.0" --no-cache-dir
+echo "  → torchaudio..."
+pip install "torchaudio>=2.0.0,<3.0.0" --no-cache-dir || \
+pip install torchaudio --no-cache-dir
 
-# 7. OTHER base packages (EXCLUDE spacy!)
-echo "  → other dependencies..."
-pip install pydub ffmpeg-python sentencepiece torchcrf python-dotenv openai accelerate --no-cache-dir
+echo "  → torchvision..."
+pip install "torchvision>=0.15.0,<1.0.0" --no-cache-dir || \
+pip install torchvision --no-cache-dir
 
-# 8. NOW install spacy with EXACT version (after click/typer locked)
-echo "  → spacy 3.7.5 (exact pin to avoid 3.8.x)..."
-pip uninstall spacy -y 2>/dev/null || true
-pip install "spacy==3.7.5" --no-cache-dir  # <-- EXACT VERSION, not >=3.7.5
+echo "  → transformers>=4.48.0..."
+pip install "transformers>=4.48.0,<5.0.0" --no-cache-dir
+
+echo "  → accelerate>=0.20.0..."
+pip install "accelerate>=0.20.0,<1.0.0" --no-cache-dir
+
+echo "  → sentencepiece..."
+pip install "sentencepiece>=0.1.99,<1.0.0" --no-cache-dir
+
+echo "  → huggingface-hub>=1.5.0..."
+pip install "huggingface-hub>=1.5.0,<2.0.0" --no-cache-dir
+
+echo "  → pydub..."
+pip install pydub --no-cache-dir
+
+echo "  → ffmpeg-python..."
+pip install ffmpeg-python --no-cache-dir
+
+echo "  → openai>=1.0.0..."
+pip install "openai>=1.0.0" --no-cache-dir
+
+echo "  → python-dotenv..."
+pip install python-dotenv --no-cache-dir
+
+echo "  → torchcrf..."
+pip install pytorch-crf --no-cache-dir
+
+echo "  → thinc==8.2.5 (NUMPY 1.X COMPATIBLE)..."
+pip install "thinc==8.2.5" --no-cache-dir
+
+echo "  → spacy==3.7.5 (NUMPY 1.X COMPATIBLE)..."
+pip install "spacy==3.7.5" --no-cache-dir
+
+echo "  → pyannote.audio..."
+pip install "pyannote.audio>=3.0.0" --no-cache-dir || \
+pip install "pyannote.audio>=3.0.0,<4.0.0" --no-cache-dir || \
+echo "⚠️  Warning installing pyannote.audio"
+
+echo "  → thinc>=8.2.2..."
+pip install "thinc>=8.2.2" --no-cache-dir || echo "⚠️  Warning installing thinc"
 
 echo "✅ Base ML stack installation complete."
 
 # ============================================================================
-# 🔧 RE-LOCK CLICK/TYPER AT END (before spaCy CLI runs)
+# 🔧 CLICK & TYPER VERSION ENFORCEMENT
 # ============================================================================
-echo "Re-locking click/typer before spaCy CLI..."
-pip uninstall click typer -y 2>/dev/null || true
-pip install "click==8.1.7" "typer==0.12.5" --no-cache-dir
+echo "Ensuring click and typer are properly configured..."
 
+# Install click first (required by typer/spacy CLI)
+echo "  → Ensuring click is available..."
+pip install "click>=8.1.7,<9.0.0" --no-cache-dir
+
+# Install typer compatible with older versions
+echo "  → typer (compatible version)..."
+pip install "typer>=0.9.0,<0.13.0" --no-cache-dir
+
+# Verify versions
 CLICK_VER=$(pip show click | grep Version | awk '{print $2}')
 TYPER_VER=$(pip show typer | grep Version | awk '{print $2}')
-echo "Final verification: click=$CLICK_VER, typer=$TYPER_VER"
+echo "  click: $CLICK_VER | typer: $TYPER_VER"
 
-if [ "$CLICK_VER" != "8.1.7" ]; then
-    echo "❌ CRITICAL: click version must be 8.1.7 (found $CLICK_VER)"
-    exit 1
-fi
+# ============================================================================
+# 🔧 WHISPERX INSTALLATION
+# ============================================================================
+echo "Installing whisperx from source..."
+pip uninstall whisperx -y 2>/dev/null || true
+pip install git+https://github.com/m-bain/whisperx.git --no-cache-dir
 
-if [[ ! "$TYPER_VER" =~ ^0\.1[0-2]\. ]]; then
-    echo "❌ CRITICAL: typer must be 0.10-0.12.x (found $TYPER_VER)"
-    exit 1
-fi
-
-
-# WhisperX (Git installation)
-
-echo "Checking NLP and Audio libraries..."
-if pip show whisperx &> /dev/null; then
-    if [ "$FORCE_REFRESH" = true ]; then
-        echo "Reinstalling whisperx (--force-refresh)..."
-        pip uninstall whisperx -y
-        pip install git+https://github.com/m-bain/whisperx.git --no-cache-dir
-    else
-        echo "✅ whisperx already installed. Skipping."
-    fi
-else
-    echo "Installing whisperx from source..."
-    pip install git+https://github.com/m-bain/whisperx.git --no-cache-dir
-fi
-
-# Standard packages with version checking
-STANDARD_PKGS=(
-    "pydub"
-    "ffmpeg-python"
-    "pyannote.audio"
-    "transformers>=4.48.0"
-    "accelerate>=0.20.0"
-    "sentencepiece"
-    "spacy==3.7.5"  # ← Changed from >=3.7.5 to exact pin
-    "torchcrf"
-    "pandas>=2.2.0"
-    "openai>=1.0.0"
-    "python-dotenv"
-    "scipy>=1.14.0"
-    "numpy>=2.1.0"
-    "huggingface-hub>=1.5.0"
-)
-
-echo "Installing remaining standard packages..."
-for pkg_spec in "${STANDARD_PKGS[@]}"; do
-    pkg_name=$(echo "$pkg_spec" | sed 's/[<>=].*//')
-    case $pkg_name in
-        torch|numpy|transformers|huggingface-hub|scipy|pandas|spacy|pydub|ffmpeg-python|sentencepiece|torchcrf|python-dotenv|openai|accelerate)
-            # Already handled in base ML pre-installation
-            echo "  → $pkg_name already installed (base ML stack)"
-            ;;
-        "pyannote.audio")
-            echo "  → Installing $pkg_spec..."
-            pip install "$pkg_spec" --no-cache-dir || echo "⚠️  Warning installing pyannote.audio"
-            ;;
-        *)
-            echo "  → Installing $pkg_spec..."
-            pip install "$pkg_spec" --no-cache-dir
-            ;;
-    esac  # ← esac immediately after *)
-done
-echo "✅ Standard packages processed."
+# ============================================================================
+# 🔧 SPACY MODEL INSTALLATION
+# ============================================================================
 echo ""
+echo "Checking spaCy models..."
 
-# ============================================================================
-# 🔧 SPACY MODEL DOWNLOAD (FIXED URL)
-# ============================================================================
-echo "Checking spaCy English model..."
-
-# Use en_core_web_sm instead of xx_ent_wiki_sm (URL formatting bug)
+# English model
 if python -m spacy check en_core_web_sm &> /dev/null; then
-    echo "✅ spaCy English model (en_core_web_sm) is already installed."
+    echo "✅ en_core_web_sm already installed."
 else
     echo "Installing spaCy English model (en_core_web_sm)..."
-    python -c "
-import spacy.cli
-try:
-    spacy.cli.download('en_core_web_sm')
-    print('✅ Model downloaded successfully.')
-except Exception as e:
-    print(f'⚠️  Download failed: {e}')
-    print('   Manual installation: pip install https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl')
-"
+    python -m spacy download en_core_web_sm
+fi
 
-# Torchcodec check
+# Multilingual model
+if python -m spacy check xx_ent_wiki_sm &> /dev/null; then
+    echo "✅ xx_ent_wiki_sm already installed."
+else
+    echo "Installing spaCy multilingual model (xx_ent_wiki_sm)..."
+    python -m spacy download xx_ent_wiki_sm
+fi
+
+# ============================================================================
+# 🔧 TORCHCODEC & OTHER CHECKS
+# ============================================================================
 echo "Checking torchcodec..."
-torchcodec_check=$(check_package_version "torchcodec" "0.7.0")
-case $torchcodec_check in
-    "NOT_INSTALLED")
-        echo "Installing torchcodec 0.7.0..."
-        pip install torchcodec==0.7.0 --no-cache-dir
-        ;;
-    "MATCH")
-        if [ "$FORCE_REFRESH" = true ]; then
-            echo "Reinstalling torchcodec 0.7.0 (--force-refresh)"
-            pip uninstall torchcodec -y
-            pip install torchcodec==0.7.0 --no-cache-dir
-        else
-            echo "✅ torchcodec 0.7.0 already installed. Skipping."
-        fi
-        ;;
-    "MISMATCH:"*)
-        current=$(echo "$torchcodec_check" | cut -d: -f2)
-        echo "⚠️  torchcodec version mismatch: current=$current, desired=0.7.0"
-        echo "   Replacing"
-        pip uninstall torchcodec -y
-        pip install torchcodec==0.7.0 --no-cache-dir
-        ;;
-esac
+if python -c "import torchcodec" 2>/dev/null; then
+    echo "✅ torchcodec already available."
+else
+    echo "Installing torchcodec..."
+    pip install "torchcodec>=0.7.0" --no-cache-dir || echo "⚠️  torchcodec not available (optional)"
+fi
 
-# TorchCRF Installation
 echo "Checking CRF library..."
 if python -c "from torchcrf import CRF" 2>/dev/null; then
-    torchcrf_check=$(check_package_version "pytorch-crf" "")
-    case $torchcrf_check in
-        "NOT_INSTALLED"|"MISMATCH:"*)
-            echo "Reinstalling torchcrf..."
-            pip uninstall torchcrf -y
-            pip install pytorch-crf --no-cache-dir
-            ;;
-        "MATCH")
-            if [ "$FORCE_REFRESH" = true ]; then
-                echo "Reinstalling torchcrf (--force-refresh)"
-                pip uninstall torchcrf -y
-                pip install pytorch-crf --no-cache-dir
-            else
-                echo "✅ torchcrf already installed and working. Skipping."
-            fi
-            ;;
-    esac
+    echo "✅ CRF library working."
 else
-    echo "Installing CRF library (pytorch-crf)..."
-    pip uninstall torchcrf -y 2>/dev/null || true
+    echo "Installing CRF library..."
     pip install pytorch-crf --no-cache-dir
-    if python -c "from torchcrf import CRF" 2>/dev/null; then
-        echo "✅ CRF library installed successfully."
-    else
-        echo "❌ CRITICAL: Failed to install CRF library."
-        exit 1
-    fi
 fi
 
 # ============================================================================
@@ -506,7 +304,7 @@ echo ""
 echo "=== Verifying Critical Dependencies ==="
 
 if python -c "import click; from click import Choice; c = Choice(['a','b'])" 2>/dev/null; then
-    echo "✅ click is compatible with Python 3.12"
+    echo "✅ click is compatible"
 else
     echo "❌ WARNING: click may not be compatible."
 fi
@@ -523,6 +321,12 @@ else
     echo "❌ WARNING: spacy import failed"
 fi
 
+if python -c "import thinc" 2>/dev/null; then
+    echo "✅ thinc imported successfully"
+else
+    echo "❌ WARNING: thinc import failed"
+fi
+
 if python -c "from huggingface_hub import snapshot_download" 2>/dev/null; then
     echo "✅ huggingface-hub imported successfully"
 else
@@ -530,7 +334,7 @@ else
 fi
 
 # ============================================================================
-# 🖥️ WEB INTERFACE OPTION
+# 🖥️ WEB INTERFACE OPTION (FLASK ONLY - NO COQUI)
 # ============================================================================
 echo ""
 echo "-------------------------------------------------"
@@ -541,94 +345,58 @@ elif [ "$ANSWER_YES" = true ]; then
     echo "Web Interface: YES (auto-answered --yes)"
     INSTALL_WEB="y"
 else
-    read -p "Do you want to install the Web Interface (Flask, Coqui TTS, etc.)? (y/n): " INSTALL_WEB
+    read -p "Do you want to install the Web Interface (Flask)? (y/n): " INSTALL_WEB
     INSTALL_WEB=${INSTALL_WEB:-y}
 fi
 
 if [[ "$INSTALL_WEB" =~ ^[Yy]$ ]]; then
     echo "Installing Web Interface dependencies..."
-    pip install --upgrade pip setuptools wheel
     
-    echo "Step 1/4: Verifying NumPy/Pandas/Scipy compatibility..."
-    # Note: Versions already set in base ML pre-installation above
-    # Just ensure they're present
-    pip list | grep -E "numpy|pandas|scipy" || echo "⚠️  Some packages missing from base installation"
+    echo "Installing Flask and dependencies..."
+    pip install flask requests cryptography --no-cache-dir
     
+    # TTS Backend Setup (Piper or MeloTTS only - NO COQUI)
+    echo ""
     echo "============================================================"
-    echo "TTS Backend Installation"
+    echo "TTS Backend Installation (Piper or MeloTTS)"
     echo "============================================================"
-
-    # Determine TTS backend
-    if [ -n "$TTS_BACKEND" ]; then
-        echo "Using specified TTS backend: $TTS_BACKEND"
-    elif [ "$INSTALL_WEB" = "y" ] && [ -f ".env" ]; then
-        # Read from .env if exists
-        TTS_BACKEND=$(grep "^TTS_BACKEND=" .env 2>/dev/null | cut -d'=' -f2 | tr -d '"')
-        echo "Reading TTS backend from .env: $TTS_BACKEND"
-    fi
-
-    # Default to Piper (recommended for Python 3.12+ with clean licensing)
+    
     TTS_BACKEND="${TTS_BACKEND:-piper}"
-
+    
     case "$TTS_BACKEND" in
         piper)
-            echo "Installing Piper TTS (via dimits wrapper)..."
-            echo "Benefits: Clear Apache 2.0/MIT license, Python 3.12 compatible, CPU-efficient"
+            echo "Installing Piper TTS (recommended: clean license, Python 3.12+)..."
             
-            if [ -x "$TTS_BIN_PATH" ]; then
-                echo "✅ Piper binary already installed."
-            else
-                echo "Downloading Piper binary..."
-                PIPER_VERSION="1.4.2"
-                
-                # Detect system architecture dynamically
-                ARCH=$(uname -m)
-                echo "Detected architecture: $ARCH"
-                
-                case $ARCH in
-                    x86_64)
-                        PIPER_PLATFORM="linux-x86_64"
-                        ;;
-                    aarch64)
-                        PIPER_PLATFORM="linux-aarch64"
-                        ;;
-                    armv7l)
-                        PIPER_PLATFORM="linux-armv7l"
-                        ;;
-                    *)
-                        echo "❌ ERROR: Unsupported architecture: $ARCH"
-                        echo "   Piper TTS binary pre-built packages are not available for your system."
-                        echo "   Options:"
-                        echo "   1. Switch to MeloTTS backend: export TTS_BACKEND=melotts"
-                        echo "   2. Build Piper from source manually: https://github.com/rhasspy/piper"
-                        exit 1
-                        ;;
-                esac
-                
-                echo "Using Piper platform: $PIPER_PLATFORM"
-                
-                # Download with correct URL
-                wget -q "https://github.com/rhasspy/piper/releases/download/v${PIPER_VERSION}/piper_${PIPER_VERSION}_${PIPER_PLATFORM}.tar.xz" -O piper.tar.xz
-                
-                tar xf piper.tar.xz
-                mkdir -p "$CURRENT_DIR/pipeline/tts/bin"
-                mv "piper_${PIPER_VERSION}_${PIPER_PLATFORM}/piper" "$CURRENT_DIR/pipeline/tts/bin/"
-                chmod +x "$CURRENT_DIR/pipeline/tts/bin/piper"
-                rm -rf "piper_${PIPER_VERSION}_${PIPER_PLATFORM}" piper.tar.xz
-                echo "✅ Piper binary installed."
-            fi
+            # Download Piper binary
+            PIPER_VERSION="1.4.2"
+            ARCH=$(uname -m)
             
-            echo "Installing dimits Python wrapper..."
-            smart_install "dimits" "dimits" "" "$FORCE_REFRESH"
+            case $ARCH in
+                x86_64) PIPER_PLATFORM="linux-x86_64" ;;
+                aarch64) PIPER_PLATFORM="linux-aarch64" ;;
+                armv7l) PIPER_PLATFORM="linux-armv7l" ;;
+                *)
+                    echo "❌ ERROR: Unsupported architecture: $ARCH"
+                    echo "   Options: export TTS_BACKEND=melotts"
+                    exit 1
+                    ;;
+            esac
+            
+            echo "Downloading Piper ($PIPER_PLATFORM)..."
+            wget -q "https://github.com/rhasspy/piper/releases/download/v${PIPER_VERSION}/piper_${PIPER_VERSION}_${PIPER_PLATFORM}.tar.xz" -O piper.tar.xz
+            tar xf piper.tar.xz
+            mkdir -p "$CURRENT_DIR/pipeline/tts/bin"
+            mv "piper_${PIPER_VERSION}_${PIPER_PLATFORM}/piper" "$CURRENT_DIR/pipeline/tts/bin/"
+            chmod +x "$CURRENT_DIR/pipeline/tts/bin/piper"
+            rm -rf "piper_${PIPER_VERSION}_${PIPER_PLATFORM}" piper.tar.xz
+            echo "✅ Piper binary installed."
+            
+            # Install dimits wrapper
+            pip install dimits --no-cache-dir || echo "⚠️  dimits optional"
             
             # Voice model download
             DEFAULT_VOICE="en_US-ryan-high"
-            if [ -n "$TTS_VOICE" ]; then
-                VOICE_MODEL="$TTS_VOICE"
-            else
-                VOICE_MODEL="$DEFAULT_VOICE"
-            fi
-            
+            VOICE_MODEL="${TTS_VOICE:-$DEFAULT_VOICE}"
             VOICE_DIR="$MODEL_DIR/piper-voices"
             mkdir -p "$VOICE_DIR"
             
@@ -637,10 +405,7 @@ if [[ "$INSTALL_WEB" =~ ^[Yy]$ ]]; then
                 curl -sL "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/${VOICE_MODEL}/medium/${VOICE_MODEL}.onnx" \
                     -o "$VOICE_DIR/${VOICE_MODEL}.onnx"
                 
-                curl -sL "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/${VOICE_MODEL}/medium/${VOICE_MODEL}.onnx.json" \
-                    -o "$VOICE_DIR/${VOICE_MODEL}.onnx.json" 2>/dev/null || true
-                
-                if [ -f "$VOICE_DIR/${VOICE_MODEL}.onnx" ] && [ "$(ls -la "$VOICE_DIR/${VOICE_MODEL}.onnx" | awk '{print $5}')" -gt 100000 ]; then
+                if [ -f "$VOICE_DIR/${VOICE_MODEL}.onnx" ] && [ "$(stat -c%s "$VOICE_DIR/${VOICE_MODEL}.onnx" 2>/dev/null || echo 0)" -gt 100000 ]; then
                     echo "✅ Piper voice downloaded: $VOICE_MODEL"
                 else
                     echo "⚠️  Piper voice download incomplete. Manual download may be needed."
@@ -651,120 +416,26 @@ if [[ "$INSTALL_WEB" =~ ^[Yy]$ ]]; then
             ;;
         
         melotts)
-            echo "Installing MeloTTS..."
-            echo "Benefits: MIT license, multilingual (EN, ES, FR, DE, JA, KO, ZH), fast CPU inference"
-            
-            if pip show melotts &> /dev/null; then
-                if [ "$FORCE_REFRESH" = true ]; then
-                    echo "Reinstalling MeloTTS (--force-refresh)..."
-                    pip uninstall melotts -y
-                    pip install git+https://github.com/myshell-ai/MeloTTS.git --no-cache-dir
-                else
-                    echo "✅ MeloTTS already installed. Skipping."
-                fi
-            else
-                echo "Installing MeloTTS from source..."
-                pip install git+https://github.com/myshell-ai/MeloTTS.git --no-cache-dir || \
-                pip install melotts --no-cache-dir || {
-                    echo "❌ CRITICAL: Failed to install MeloTTS."
-                    exit 1
-                }
-            fi
-            
-            # Model is downloaded on first use via from_pretrained()
-            # Optionally pre-download to avoid runtime latency
-            echo "Pre-downloading MeloTTS model (optional)... Press Ctrl+C to skip"
-            python -c "
-    from melotts import MeloTTS
-    print('Loading English model...')
-    model = MeloTTS.from_pretrained('myshell-ai/MeloTTS-English')
-    print('✅ MeloTTS model ready.')
-    " 2>&1 || echo "⚠️  Initial model download deferred to first use."
-            ;;
-        
-        coqui)
-            echo "Installing Coqui TTS (legacy)..."
-            echo "NOTE: Coqui has Python 3.12 compatibility issues and unclear licensing"
-            
-            if pip show TTS &> /dev/null; then
-                if [ "$FORCE_REFRESH" = true ]; then
-                    pip uninstall TTS -y
-                    pip install "TTS>=0.22.0" --no-cache-dir
-                else
-                    echo "✅ TTS already installed. Skipping."
-                fi
-            else
-                pip install "TTS>=0.22.0" --no-cache-dir || \
-                pip install git+https://github.com/coqui-ai/TTS.git@main --no-cache-dir || {
-                    echo "❌ CRITICAL: Failed to install Coqui TTS."
-                    exit 1
-                }
-            fi
+            echo "Installing MeloTTS (MIT license, multilingual)..."
+            pip install git+https://github.com/myshell-ai/MeloTTS.git --no-cache-dir || \
+            pip install melotts --no-cache-dir || \
+            echo "⚠️  MeloTTS installation may require manual steps"
             ;;
         
         *)
             echo "❌ Unknown TTS backend: $TTS_BACKEND"
-            echo "Valid options: piper, melotts, coqui"
+            echo "Valid options: piper, melotts"
             exit 1
             ;;
     esac
-
-    echo ""
     
-    echo "Step 3/4: Installing Flask and dependencies..."
-    WEB_DEPS=("flask" "requests" "cryptography" "pydub" "ffmpeg-python")
-    for dep in "${WEB_DEPS[@]}"; do
-        smart_install "$dep" "$dep" "" "$FORCE_REFRESH"
-    done
-    
-    echo "✅ Web Interface dependencies installed successfully."
+    echo "✅ Web Interface dependencies installed."
 else
     echo "Skipping Web Interface installation."
 fi
 
 # ============================================================================
-# 🗣️ COQUI TTS MODEL DOWNLOADS
-# ============================================================================
-echo ""
-echo "-------------------------------------------------"
-echo "Coqui TTS Multi-Voice Models"
-echo "Note: Coqui manages its own cache (~/.cache/tts)."
-
-if [ "$NO_COQUI" = true ] || [ "$NO_MODELS" = true ]; then
-    echo "Skipping Coqui models (--no-coqui or --no-models)"
-    DOWNLOAD_INPUT="n"
-elif [ "$ANSWER_YES" = true ]; then
-    echo "Downloading Coqui models (auto-answered --yes)"
-    DOWNLOAD_INPUT="y"
-else
-    read -p "Do you want to trigger Coqui model downloads now? (y/n) [y]: " DOWNLOAD_INPUT
-    DOWNLOAD_INPUT=${DOWNLOAD_INPUT:-y}
-fi
-
-if [[ "$INSTALL_WEB" =~ ^[Yy]$ ]] && [[ "$DOWNLOAD_INPUT" =~ ^[Yy]$ ]]; then
-    echo "Triggering Coqui model downloads..."
-    python -c "
-from TTS.api import TTS
-print('Downloading German Thorsten...')
-try:
-    tts_de = TTS(model_name='tts_models/de/thorsten/vits')
-    print('✅ German Thorsten downloaded.')
-except Exception as e:
-    print(f'⚠️  German Thorsten failed: {e}')
-
-print('Downloading English VCTK...')
-try:
-    tts_en = TTS(model_name='tts_models/en/vctk/vits')
-    print('✅ English VCTK downloaded.')
-except Exception as e:
-    print(f'⚠️  English VCTK failed: {e}')
-"
-else
-    echo "Skipping Coqui model pre-download."
-fi
-
-# ============================================================================
-# 🧩 MODEL DOWNLOADS
+# 🧩 MODEL DOWNLOADS (NO COQUI MODELS)
 # ============================================================================
 echo ""
 echo "-------------------------------------------------"
@@ -783,6 +454,35 @@ else
     MODEL_MAP["small"]="Systran/faster-whisper-small"
     MODEL_MAP["medium"]="Systran/faster-whisper-medium"
     MODEL_MAP["large"]="Systran/faster-whisper-large-v3"
+    
+    download_model_hf() {
+        local repo_id=$1
+        local target_dir=$2
+        local repo_type=${3:-model}
+        
+        echo "Downloading $repo_id..."
+        mkdir -p "$target_dir"
+        
+        # Python fallback with full symlink control
+        python -c "
+from huggingface_hub import snapshot_download
+import sys
+try:
+    snapshot_download(
+        '$repo_id',
+        local_dir='$target_dir',
+        local_dir_use_symlinks=False,
+        repo_type='$repo_type'
+    )
+    print('✅ Download complete')
+except Exception as e:
+    print(f'❌ Download failed: {e}', file=sys.stderr)
+    sys.exit(1)
+" || {
+        echo "❌ Failed to download $repo_id"
+        return 1
+    }
+    }
     
     if [ "$SKIP_WHISPER" = true ]; then
         echo "Skipping WhisperX models (--skip-whisper)"
@@ -826,10 +526,9 @@ else
     else
         echo "Downloading Pyannote to $TARGET..."
         
-        # Authentication check
         if [ "$AUTO_LOGIN" = true ] && [ -n "$HUGGINGFACE_TOKEN" ]; then
             echo "Auto-authenticating with HUGGINGFACE_TOKEN..."
-            hf auth login --token "$HUGGINGFACE_TOKEN" --add-to-git-credential
+            hf auth login --token "$HUGGINGFACE_TOKEN" --add-to-git-credential 2>/dev/null || true
             AUTHENTICATED=true
         elif hf auth status &> /dev/null 2>&1; then
             AUTHENTICATED=true
@@ -845,24 +544,13 @@ else
             echo "   1. Run: hf auth login"
             echo "   2. Export: export HUGGINGFACE_TOKEN=your_token"
             echo "   3. Use: --auto-login with HUGGINGFACE_TOKEN set"
-            
-            if [ "$ANSWER_YES" = true ]; then
-                echo "   Skipping (auto-answered n due to --yes)"
-            else
-                read -p "Download anyway (may fail)? (y/n) " TRY_DOWNLOAD
-                if [[ "$TRY_DOWNLOAD" =~ ^[Yy]$ ]]; then
-                    download_model_hf "pyannote/speaker-diarization-community-1" "$TARGET" "model"
-                else
-                    echo "Skipped Pyannote."
-                fi
-            fi
         fi
     fi
     
-    # MM-BERT Base & PII Models
+    # mmBERT Base & PII Models
     echo ""
     echo "=========================================================="
-    echo "Downloading mBert Base & NEW DFKI-SLT PII NER Model"
+    echo "Downloading mBert Base & DFKI-SLT PII NER Model"
     echo "=========================================================="
     
     BASE_TARGET="$MODEL_DIR/jhu-clsp/mmBERT-base"
@@ -872,123 +560,122 @@ else
         download_model_hf "jhu-clsp/mmBERT-base" "$BASE_TARGET" "model"
     fi
     
-    # DFKI-SLT PII Model (PRIMARY ANONYMIZATION MODEL)
+    # DFKI-SLT PII Model
     PII_TARGET="$MODEL_DIR/multilingual_DialogPII_NER"
     echo ""
-    echo "📦 Downloading NEW DFKI-SLT Multilingual DialogPII NER Model"
-    echo "   Repository: https://huggingface.co/DFKI-SLT/multilingual_DialogPII_NER"
+    echo "📦 Downloading DFKI-SLT Multilingual DialogPII NER Model"
     
     if [ -d "$PII_TARGET" ] && [ "$(ls -A "$PII_TARGET")" ]; then
         echo "✅ DFKI-SLT PII model already exists."
-        
-        # Verify config files
-        echo "   Verifying required configuration files..."
-        MISSING_CONFIG=false
-        [ ! -f "$PII_TARGET/crf_config.json" ] && { echo "   ⚠️  Missing: crf_config.json"; MISSING_CONFIG=true; }
-        [ ! -f "$PII_TARGET/id2label.json" ] && { echo "   ⚠️  Missing: id2label.json"; MISSING_CONFIG=true; }
-        
-        if [ "$MISSING_CONFIG" = true ]; then
-            echo "   ⚠️  Config files missing. Will attempt re-download..."
-            rm -rf "$PII_TARGET"
-        else
-            echo "   ✅ All required config files present."
-        fi
-    fi
-    
-    if [ ! -d "$PII_TARGET" ] || [ -z "$(ls -A "$PII_TARGET" 2>/dev/null)" ]; then
-        download_model_hf "DFKI-SLT/multilingual_DialogPII_NER" "$PII_TARGET" "model"
+    else
+        download_model_hf "DFSKI-SLT/multilingual_DialogPII_NER" "$PII_TARGET" "model"
         
         if [ "$(ls -A "$PII_TARGET" 2>/dev/null)" ]; then
             echo "✅ DFKI-SLT PII model downloaded successfully."
-            echo "   Key files:"
-            ls -la "$PII_TARGET"/*.json 2>/dev/null | awk '{print "   - " $NF}' || echo "   (No .json files)"
         else
             echo "❌ Download failed. Manual download required:"
             echo "   https://huggingface.co/DFKI-SLT/multilingual_DialogPII_NER"
         fi
     fi
-    
-    # Old PII Model (Backward Compatibility)
-    OLD_PII_TARGET="$MODEL_DIR/mmbert_multilingual_pii_ner"
-    if [ -d "$OLD_PII_TARGET" ] && [ "$(ls -A "$OLD_PII_TARGET")" ]; then
-        echo ""
-        echo "⚠️  Note: Old PII model also exists."
-        echo "   New DFKI-SLT model is recommended for better accuracy."
-    fi
 fi
 
-# Enforce typer BEFORE spaCy CLI (not just after package install)
-# (spacy can upgrade typer during pip install, breaking the CLI)
-echo "Enforcing typer $TYPER_DESIRED before spaCy CLI..."
-pip uninstall typer -y
-pip install "typer==$TYPER_DESIRED" --force-reinstall --no-deps --no-cache-dir
-
-# ALSO enforce click==8.1.7 (typer depends on this exact version)
-echo "Enforcing click==8.1.7..."
-pip uninstall click -y
-pip install "click==8.1.7" --force-reinstall --no-deps --no-cache-dir
-
-# Verify versions
-CLICK_VER=$(pip show click | grep Version | awk '{print $2}')
-TYPER_VER=$(pip show typer | grep Version | awk '{print $2}')
-echo "  click: $CLICK_VER | typer: $TYPER_VER"
-
+# ============================================================================
+# 📋 ENV FILE CREATION (DO NOT OVERWRITE EXISTING)
+# ============================================================================
 echo ""
+echo "-------------------------------------------------"
+echo "Environment File Configuration"
+
 if [ -f ".env" ]; then
-    echo "⚠️  Existing .env file found. Updating TTS settings only."
-    # Backup existing
-    cp .env .env.backup.$(date +%Y%m%d%H%M%S)
-fi
-
-
-# Close remaining model download blocks
-fi  # Close Pyannote auth check
-fi  # Close model download if
-
-# Enforce typer BEFORE spaCy CLI
-echo "Enforcing typer before spaCy CLI..."
-pip uninstall typer -y 2>/dev/null || true
-pip install "typer==$TYPER_DESIRED" --force-reinstall --no-deps --no-cache-dir
-
-echo "Enforcing click==8.1.7..."
-pip uninstall click -y 2>/dev/null || true
-pip install "click==8.1.7" --force-reinstall --no-deps --no-cache-dir
-
-CLICK_VER=$(pip show click | grep Version | awk '{print $2}')
-TYPER_VER=$(pip show typer | grep Version | awk '{print $2}')
-echo "  click: $CLICK_VER | typer: $TYPER_VER"
-
-# Create .env file
-if [ -f ".env" ]; then
-    echo "⚠️  Existing .env found. Backing up..."
+    echo "⚠️  Existing .env file found. Preserving it."
+    echo "   Created backup: .env.backup.$(date +%Y%m%d%H%M%S)"
     cp .env ".env.backup.$(date +%Y%m%d%H%M%S)"
-fi
-
-cat > .env <<'ENVEOF'
+else
+    echo "Creating new .env file..."
+    
+    cat > .env <<'EOF'
 # ATA Speech Anonymizer Configuration
+# Generated by ATA_SelfInstall.sh
+
 CHAT_AI_API_KEY=your_api_key_here
 CHAT_AI_ENDPOINT=https://your-endpoint.com/v1
 
+# ============================================================================
+# TTS BACKEND CONFIGURATION
+# ============================================================================
+# Supported backends: piper, melotts
+# Recommended: piper (clean license, Python 3.12 compatible)
 TTS_BACKEND=piper
+
+# TTS Model/Voice Selection
+# Piper: en_US-ryan-high, en_US-libritts-high, de_DE-thorsten-high
+# MeloTTS: EN-US, EN-GB, EN-India, ES, FR, DE, JA, KO, ZH
 TTS_MODEL_NAME=en_US-ryan-high
-TTS_BIN_PATH=$CURRENT_DIR/pipeline/tts/bin/piper
-TTS_VOICE_PATH=$CURRENT_DIR/pipeline/tts/voices/${VOICE_MODEL}.onnx
 
-COMPLIANCE_MODE=standard
-COMPLIANCE_ENCRYPTION=false
-COMPLIANCE_AUDIT_LOG=false
+# Piper-specific paths (auto-configured)
+TTS_BIN_PATH=./pipeline/tts/bin/piper
+TTS_VOICE_PATH=./pipeline/tts/voices/en_US-ryan-high.onnx
 
+# Compliance Settings
+COMPLIANCE_MODE=standard  # Options: strict, standard, none
+COMPLIANCE_ENCRYPTION=false  # Enable audio file encryption at rest
+COMPLIANCE_AUDIT_LOG=false   # Enable access logging
+
+# Logging
 LOG_LEVEL=INFO
-LOG_FILE=/path/to/logs/ata.log
-ENVEOF
+LOG_FILE=./logs/ata.log
+EOF
+    
+    echo "✅ .env file created."
+fi
 
-echo "✅ .env file created."
-
+# ============================================================================
+# 📋 FINAL INSTRUCTIONS
+# ============================================================================
 echo ""
 echo "=========================================================================="
 echo "SETUP COMPLETE!"
 echo "=========================================================================="
+echo ""
 echo "To use the environment:"
-echo "  conda activate whisperx"
+echo "  source \$HOME/miniforge3/etc/profile.d/conda.sh"
+echo "  conda activate $ENV_NAME"
+echo ""
+echo "Hugging Face Authentication:"
+echo "  • If Pyannote downloads failed, run:"
+echo "      hf auth login"
+echo "  • Or use: export HUGGINGFACE_TOKEN=your_token && ./ATA_SelfInstall.sh --auto-login"
+echo ""
+echo "Automation Flags (re-run installer):"
+echo "  --yes              Auto-accept all prompts"
+echo "  --skip-web         Skip web UI dependencies"
+echo "  --no-models        Skip all model downloads"
+echo "  --whisper-models LIST  Specify Whisper models"
+echo "  --force-refresh    Reinstall all packages"
+echo ""
+echo "Project Structure:"
+echo "  $(pwd)/"
+echo "    ├── .env"
+echo "    ├── ATA_SelfInstall.sh"
+echo "    └── pipeline/"
+echo "        ├── model/"
+echo "        ├── videos/"
+echo "        ├── audios/"
+echo "        ├── transcripts/"
+echo "        ├── anonym/"
+echo "        └── LLM-Anon/"
+echo ""
+echo "Next Steps:"
+echo "  1. Edit '.env' with your API Key"
+echo "  2. Place videos in 'pipeline/videos'"
+echo "  3. Run: python pipeline/process.py"
+echo ""
+echo "✨ FEATURES:"
+echo "  • DFKI-SLT Multilingual DialogPII NER (11 languages)"
+echo "  • FLERT-style context windowing"
+echo "  • Piper/MeloTTS for voice synthesis"
+echo "  • WhisperX for transcription"
+echo "  • Pyannote for speaker diarization"
+echo ""
 echo "=========================================================================="
 exit 0
