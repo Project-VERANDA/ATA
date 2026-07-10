@@ -154,13 +154,22 @@ if conda env list | grep -q "^$ENV_NAME "; then
 fi
 
 echo "Creating fresh environment with Python $TARGET_PYTHON..."
-conda create -n $ENV_NAME python=$TARGET_PYTHON -y
+conda create -n $ENV_NAME python=$TARGET_PYTHON -c conda-forge -y
 
 # 4. Activate the environment
 echo "Activating environment..."
 conda activate $ENV_NAME
 MODEL_DIR="$CURRENT_DIR/pipeline/model"
 mkdir -p "$MODEL_DIR"
+
+ACTUAL_PYTHON=$(conda run -n $ENV_NAME python --version | awk '{print $2}')
+EXPECTED_PYTHON="3.12"
+if [[ ! "$ACTUAL_PYTHON" =~ ^3\.12 ]]; then
+    echo "❌ ERROR: Expected Python 3.12.x, got $ACTUAL_PYTHON"
+    echo "   This may indicate channel resolution issues."
+    exit 1
+fi
+echo "✅ Python version verified: $ACTUAL_PYTHON"
 
 # ============================================================================
 # 🔧 HELPER FUNCTIONS FOR PACKAGE VERSION CHECKING
