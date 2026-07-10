@@ -481,11 +481,11 @@ if [ -n "$WHISPER_MODELS_INPUT" ]; then
             echo "Downloading: $model_name ($hf_repo) -> $target_dir"
             mkdir -p "$target_dir"
             
-            # Download using huggingface-cli
-            if command -v huggingface-cli &> /dev/null; then
-                huggingface-cli download "$hf_repo" --local-dir "$target_dir" --local-dir-use-symlinks False 2>&1 | grep -v "already downloaded" || true
+            # Download using huggingface download
+            if command -v hf &> /dev/null; then
+                hf download "$hf_repo" --local-dir "$target_dir" --local-dir-use-symlinks False 2>&1 | grep -v "already downloaded" || true
             else
-                echo "⚠️  huggingface-cli not found. Install with: pip install huggingface-hub"
+                echo "⚠️  hf download not found. Install with: pip install huggingface-hub"
                 # Fallback to Python if CLI missing
                 python -c "from huggingface_hub import snapshot_download; snapshot_download('$hf_repo', local_dir='$target_dir', local_dir_use_symlinks=False)"
             fi
@@ -505,7 +505,7 @@ else
     if [ ! -d "$TARGET_DIR" ]; then
         echo "Downloading large-v3..."
         mkdir -p "$TARGET_DIR"
-        huggingface-cli download "$HF_REPO" --local-dir "$TARGET_DIR" --local-dir-use-symlinks False 2>&1 | grep -v "already downloaded" || true
+        hf download "$HF_REPO" --local-dir "$TARGET_DIR" --local-dir-use-symlinks False 2>&1 | grep -v "already downloaded" || true
     else
         echo "✅ large-v3 already present."
     fi
@@ -523,12 +523,41 @@ if [ -d "$TARGET" ] && [ "$(ls -A "$TARGET")" ]; then
 else
     echo "Downloading Pyannote to $TARGET..."
     mkdir -p "$TARGET"
-    # Requires HF Token login first
-    if hf whoami > /dev/null 2>&1; then
-        huggingface-cli download pyannote/speaker-diarization-community-1 --local-dir "$TARGET" --local-dir-use-symlinks False
+    
+    # Check if authenticated
+    if hf auth status &> /dev/null 2>&1; then
+        hf download pyannote/speaker-diarization-community-1 --local-dir "$TARGET" --local-dir-use-symlinks False
         echo "✅ Pyannote downloaded."
     else
-        echo "❌ Not logged in to Hugging Face. Please run 'huggingface-cli login' and retry."
+        echo "⚠️  Not logged in to Hugging Face Hub."
+        echo "   Pyannote requires authentication. Two options:"
+        echo ""
+        echo "   Option 1: Login interactively"
+        echo "     hf auth login"
+        echo ""
+        echo "   Option 2: Use token directly for this download"
+        echo "     export HUGGINGFACE_TOKEN=your_token_here"
+        echo "     hf download pyannote/speaker-diarization-community-1 --local-dir \"$TARGET\" --local-dir-use-symlinks False"
+        echo ""
+        echo "   Getting a token: https://huggingface.co/settings/tokens"
+        echo ""
+        echo "   If you login, please re-run this script."
+        echo ""
+        
+        # Try Python fallback (also needs auth for pyannote)
+        python -c "
+from huggingface_hub import snapshot_download
+try:
+    snapshot_download(
+        'pyannote/speaker-diarization-community-1',
+        local_dir='$TARGET',
+        local_dir_use_symlinks=False
+    )
+    print('✅ Pyannote downloaded (Python fallback).')
+except Exception as e:
+    print(f'⚠️  Download requires authentication: {e}')
+    print('   Run: hf auth login')
+"
     fi
 fi
 
@@ -552,8 +581,8 @@ BASE_TARGET="$MODEL_DIR/jhu-clsp/mmBERT-base"
 if [ ! -d "$BASE_TARGET" ]; then
     echo "Downloading mmBERT-base to $BASE_TARGET..."
     mkdir -p "$(dirname "$BASE_TARGET")"
-    if command -v huggingface-cli &> /dev/null; then
-        huggingface-cli download jhu-clsp/mmBERT-base --local-dir "$BASE_TARGET" --local-dir-use-symlinks False
+    if command -v hf &> /dev/null; then
+        hf download jhu-clsp/mmBERT-base --local-dir "$BASE_TARGET" --local-dir-use-symlinks False
     else
         python -c "from huggingface_hub import snapshot_download; snapshot_download('jhu-clsp/mmBERT-base', local_dir='$BASE_TARGET', local_dir_use_symlinks=False)"
     fi
@@ -597,9 +626,9 @@ if [ ! -d "$PII_TARGET" ] || [ -z "$(ls -A "$PII_TARGET" 2>/dev/null)" ]; then
     echo "Downloading DFKI-SLT PII model to $PII_TARGET..."
     mkdir -p "$PII_TARGET"
     
-    if command -v huggingface-cli &> /dev/null; then
-        echo "   Using huggingface-cli..."
-        huggingface-cli download DFKI-SLT/multilingual_DialogPII_NER \
+    if command -v hf &> /dev/null; then
+        echo "   Using huggingface download..."
+        hf download DFKI-SLT/multilingual_DialogPII_NER \
             --local-dir "$PII_TARGET" \
             --local-dir-use-symlinks False \
             2>&1 | grep -v "already downloaded" || true
@@ -689,8 +718,14 @@ echo "===              SETUP COMPLETE!                           ==="
 echo "=========================================================================="
 echo ""
 echo "To use the environment:"
-echo "  source \$HOME/miniconda3/etc/profile.d/conda.sh"
+echo "  source \$HOME/miniforge3/etc/profile.d/conda.sh"
 echo "  conda activate $ENV_NAME"
+echo ""
+echo "Hugging Face Authentication:"
+echo "  • If you see 'not logged in' errors for Pyannote, run:"
+echo "      hf auth login"
+echo "  • Get your token here: https://huggingface.co/settings/tokens"
+echo ""
 echo ""
 echo "Project Structure:"
 echo "  $(pwd)/"
