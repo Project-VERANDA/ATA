@@ -940,90 +940,55 @@ if [ -f ".env" ]; then
     cp .env .env.backup.$(date +%Y%m%d%H%M%S)
 fi
 
-cat > .env <<'EOF'
+
+# Close remaining model download blocks
+    fi  # Close Pyannote auth check
+fi  # Close model download if
+
+# Enforce typer BEFORE spaCy CLI
+echo "Enforcing typer before spaCy CLI..."
+pip uninstall typer -y 2>/dev/null || true
+pip install "typer==$TYPER_DESIRED" --force-reinstall --no-deps --no-cache-dir
+
+echo "Enforcing click==8.1.7..."
+pip uninstall click -y 2>/dev/null || true
+pip install "click==8.1.7" --force-reinstall --no-deps --no-cache-dir
+
+CLICK_VER=$(pip show click | grep Version | awk '{print $2}')
+TYPER_VER=$(pip show typer | grep Version | awk '{print $2}')
+echo "  click: $CLICK_VER | typer: $TYPER_VER"
+
+# Create .env file
+if [ -f ".env" ]; then
+    echo "⚠️  Existing .env found. Backing up..."
+    cp .env ".env.backup.$(date +%Y%m%d%H%M%S)"
+fi
+
+cat > .env <<'ENVEOF'
 # ATA Speech Anonymizer Configuration
 CHAT_AI_API_KEY=your_api_key_here
 CHAT_AI_ENDPOINT=https://your-endpoint.com/v1
 
-# ============================================================================
-# TTS BACKEND CONFIGURATION
-# ============================================================================
-# Supported backends: piper, melotts, coqui
-# Recommended: piper (clean license, Python 3.12 compatible)
 TTS_BACKEND=piper
-
-# TTS Model/Voice Selection
-# Piper: en_US-ryan-high, en_US-libritts-high, de_DE-thorsten-high
-# MeloTTS: EN-US, EN-GB, EN-India, ES, FR, DE, JA, KO, ZH
-# Coqui: tts_models/de/thorsten/vits, tts_models/en/vctk/vits
 TTS_MODEL_NAME=en_US-ryan-high
+TTS_BIN_PATH=$CURRENT_DIR/pipeline/tts/bin/piper
+TTS_VOICE_PATH=$CURRENT_DIR/pipeline/tts/voices/${VOICE_MODEL}.onnx
 
-# Piper-specific paths (optional, auto-detected if empty)
-TTS_BIN_ACTUAL="$CURRENT_DIR/pipeline/tts/bin/piper"
-TTS_VOICE_ACTUAL="$CURRENT_DIR/pipeline/tts/voices/${VOICE_MODEL}.onnx"
+COMPLIANCE_MODE=standard
+COMPLIANCE_ENCRYPTION=false
+COMPLIANCE_AUDIT_LOG=false
 
-# Piper-specific paths (auto-configured)
-TTS_BIN_PATH=${TTS_BIN_ACTUAL}
-TTS_VOICE_PATH=${TTS_VOICE_ACTUAL}
-
-# Compliance Settings
-COMPLIANCE_MODE=standard  # Options: strict, standard, none
-COMPLIANCE_ENCRYPTION=false  # Enable audio file encryption at rest
-COMPLIANCE_AUDIT_LOG=false   # Enable access logging
-
-# Logging
 LOG_LEVEL=INFO
 LOG_FILE=/path/to/logs/ata.log
-EOF
+ENVEOF
 
-echo "✅ .env file created. Review and customize TTS_BACKEND setting."
-echo "⚠️  For healthcare/PHI data: See COMPLIANCE_MODE recommendations below"
-echo ""
+echo "✅ .env file created."
 
-# ============================================================================
-# 📋 FINAL INSTRUCTIONS
-# ============================================================================
 echo ""
 echo "=========================================================================="
 echo "SETUP COMPLETE!"
 echo "=========================================================================="
-echo ""
 echo "To use the environment:"
-echo "  source \$HOME/miniforge3/etc/profile.d/conda.sh"
-echo "  conda activate $ENV_NAME"
-echo ""
-echo "Hugging Face Authentication:"
-echo "  • If Pyannote downloads failed, run:"
-echo "      hf auth login"
-echo "  • Or use: export HUGGINGFACE_TOKEN=your_token && ./ATA_SelfInstall.sh --auto-login"
-echo ""
-echo "Automation Flags (re-run installer):"
-echo "  --yes              Auto-accept all prompts"
-echo "  --skip-web         Skip web UI dependencies"
-echo "  --no-models        Skip all model downloads"
-echo "  --whisper-models LIST  Specify Whisper models"
-echo "  --force-refresh    Reinstall all packages"
-echo ""
-echo "Project Structure:"
-echo "  $(pwd)/"
-echo "    ├── .env"
-echo "    ├── ATA_SelfInstall.sh"
-echo "    └── pipeline/"
-echo "        ├── model/"
-echo "        ├── videos/"
-echo "        ├── audios/"
-echo "        ├── transcripts/"
-echo "        ├── anonym/"
-echo "        └── LLM-Anon/"
-echo ""
-echo "Next Steps:"
-echo "  1. Edit '.env' with your API Key"
-echo "  2. Place videos in 'pipeline/videos'"
-echo "  3. Run: python pipeline/process.py"
-echo ""
-echo "✨ FEATURES:"
-echo "  • DFKI-SLT Multilingual DialogPII NER (11 languages)"
-echo "  • FLERT-style context windowing"
-echo "  • Adversarial anonymization mode"
-echo ""
-echo "=========================================================================="EOF
+echo "  conda activate whisperx"
+echo "=========================================================================="
+exit 0
