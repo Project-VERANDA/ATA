@@ -181,10 +181,7 @@ check_git_installed() {
 echo "Upgrading pip..."
 pip install --upgrade pip -q
 
-# ============================================================================
-# 🔧 CRITICAL FIX: Install click==8.1.7 AND compatible typer EARLY
-# This prevents Python 3.12 TypeError with 'Choice' subscriptable conflicts.
-# ============================================================================
+
 echo "Ensuring click==8.1.7 and compatible typer are installed..."
 if ! check_pip_installed "click"; then
     echo "Installing click==8.1.7..."
@@ -209,6 +206,16 @@ else
     fi
 fi
 
+echo "Checking NLP and Audio libraries..."
+
+# 1. WhisperX (Special handling for Git)
+if check_git_installed "git+https://github.com/m-bain/whisperx.git" "whisperx"; then
+    echo "✅ whisperx is already installed. Skipping."
+else
+    echo "Installing whisperx from source..."
+    pip install git+https://github.com/m-bain/whisperx.git
+fi
+
 # Ensure typer is compatible
 if ! check_pip_installed "typer"; then
     echo "Installing compatible typer (0.9.0 - 0.12.x)..."
@@ -223,16 +230,6 @@ else
     else
         echo "✅ typer version is compatible ($TYPER_VERSION)."
     fi
-fi
-
-echo "Checking NLP and Audio libraries..."
-
-# 1. WhisperX (Special handling for Git)
-if check_git_installed "git+https://github.com/m-bain/whisperx.git" "whisperx"; then
-    echo "✅ whisperx is already installed. Skipping."
-else
-    echo "Installing whisperx from source..."
-    pip install git+https://github.com/m-bain/whisperx.git
 fi
 
 # 2. Define list of standard packages to check
