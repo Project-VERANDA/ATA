@@ -329,12 +329,12 @@ else
 fi
 
 # ============================================================================
-# 🖥️ WEB INTERFACE (FLASK + SIMPLIFIED TTS)
+# 🖥️ WEB INTERFACE & TTS BACKENDS
 # ============================================================================
 
 echo ""
 echo "============================================================"
-echo "Web Interface & TTS Installation"
+echo "Web Interface & TTS Backend Installation"
 echo "============================================================"
 
 if [ "$SKIP_WEB" = true ]; then
@@ -344,35 +344,91 @@ elif [ "$ANSWER_YES" = true ]; then
     echo "Web Interface: YES (auto-answered --yes)"
     INSTALL_WEB="y"
 else
-    read -p "Do you want to install the Web Interface (Flask, TTS)? (y/n): " INSTALL_WEB
+    read -p "Install Web Interface (Flask + TTS)? (y/n): " INSTALL_WEB
     INSTALL_WEB=${INSTALL_WEB:-y}
 fi
 
 if [[ "$INSTALL_WEB" =~ ^[Yy]$ ]]; then
-    echo "Installing Flask and dependencies..."
     pip install flask requests cryptography --no-cache-dir
     
-    # MeloTTS TTS Backend (no Japanese - MeCab not installed)
+    # TTS BACKEND SELECTION
     echo ""
-    echo "Installing TTS Backend (MeloTTS - No Japanese Support)..."
+    echo "Select TTS Backend:"
+    echo "  1. piper       - Fast offline neural TTS (recommended)"
+    echo "  2. coqui_xtts  - High-quality voice cloning (17 langs)"
     
-    # Install MeloTTS (Japanese support requires MeCab which we skip)
-    if command -v apt-get &> /dev/null && [ -w /etc ] && [ "$(id -u)" -eq 0 ]; then
-        echo "Installing MeCab (optional, for Japanese TTS)..."
-        sudo apt-get install -y mecab libmecab-dev mecab-ipadic-utf8 || \
-        echo "⚠️  MeCab install failed (non-blocking)"
-    fi
-    pip install git+https://github.com/myshell-ai/MeloTTS.git --no-cache-dir || \
-    echo "⚠️  MeloTTS install failed"
-    
-    if python -c "from melotts import MeloTTS; print('MeloTTS available')" 2>/dev/null; then echo "✅ MeloTTS installed successfully"
-        echo "   Languages: EN, ES, FR, DE, KO, ZH (Japanese disabled)"
+    if [ "$ANSWER_YES" = true ]; then
+        TTS_BACKEND_CHOICE="piper"
     else
-        echo "❌ CRITICAL: MeloTTS installation failed"
-        exit 1
+        read -p "Enter choice [1]: " TTS_CHOICE
+        TTS_BACKEND_CHOICE=${TTS_CHOICE:-piper}
+        [ "$TTS_CHOICE" = "2" ] && TTS_BACKEND_CHOICE="coqui_xtts"
+    fi
+    
+    MODEL_DIR="$CURRENT_DIR/pipeline/models"
+    mkdir -p "$MODEL_DIR"
+    
+    echo "Installing TTS Backend: $TTS_BACKEND_CHOICE..."
+    
+    if [ "$TTS_BACKEND_CHOICE" = "piper" ]; then
+        # PIPER TTS
+        pip install "piper-tts>=1.4.2" --no-cache-dir
+        
+        PIPER_VOICE_DIR="$MODEL_DIR/piper-voices"
+        mkdir -p "$PIPER_VOICE_DIR"
+        
+        echo "Downloading default voice (en_US-lessac-medium)..."
+        curl -sL "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx" \
+               -o "$PIPER_VOICE_DIR/en_US-lessac-medium.onnx"
+        curl -sL "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json" \
+               -o "$PIPER_VOICE_DIR/en_US-lessac-medium.onnx.json"
+        
+        if [ -s "$PIPER_VOICE_DIR/en_US-lessac-medium.onnx" ]; then
+            echo "✅ Piper TTS installed with voice model"
+            TTS_CONFIG="piper"
+            TTS_VOICE_PATH="$PIPER_VOICE_DIR/en_US-lessac-medium.onnx"
+            TTS_CONFIG_PATH="$PIPER_VOICE_DIR/en_US-lessac-medium.onnx.json"
+        else
+            echo "❌ Voice download failed"
+            exit 1
+        fi
+        
+    elif [ "$TTS_BACKEND_CHOICE" = "coqui_xtts" ]; then
+        # COQUI XTTS v2
+        echo "⚠️  CPML License: Non-commercial use only"
+        export COQUI_TOS_AGREED=1
+        
+        pip install "TTS>=0.27.0" --no-cache-dir
+        
+        COQUI_MODEL_DIR="$MODEL_DIR/coqui-xtts"
+        mkdir -p "$COQUI_MODEL_DIR"
+        
+        echo "Downloading XTTS v2 model (~2GB)..."
+        python <<EOF
+import os
+os.environ['COQUI_TOS_AGREED'] = '1'
+from TTS.api import TTS
+tts = TTS('tts_models/multilingual/multi-dataset/xtts_v2', gpu=False)
+import shutil
+for root, dirs, files in os.walk(tts.model_path):
+    for f in files:
+        shutil.copy2(os.path.join(root, f), "$COQUI_MODEL_DIR")
+print("Done")
+EOF
+        
+        if [ "$(ls -A "$COQUI_MODEL_DIR" 2>/dev/null)" ]; then
+            echo "✅ Coqui XTTS v2 installed"
+            TTS_CONFIG="coqui_xtts"
+            TTS_VOICE_PATH="$COQUI_MODEL_DIR"
+            TTS_CONFIG_PATH="$COQUI_MODEL_DIR"
+        else
+            echo "❌ Model download failed"
+            exit 1
+        fi
     fi
 else
-    echo "Skipping Web Interface installation."
+    echo "Skipping TTS installation"
+    TTS_CONFIG="none"
 fi
 
 # ============================================================================
@@ -527,53 +583,63 @@ except Exception as e:
 fi
 
 # ============================================================================
-# 📋 ENV FILE CREATION
+# 📋 ENV FILE CONFIGURATION
 # ============================================================================
 
-echo ""
-echo "============================================================"
-echo "Environment File Configuration"
-echo "============================================================"
-
 if [ -f ".env" ]; then
-    echo "⚠️  Existing .env file found. Preserving it."
-    echo "   Created backup: .env.backup.$(date +%Y%m%d%H%M%S)"
+    echo "⚠️  Backing up existing .env..."
     cp .env ".env.backup.$(date +%Y%m%d%H%M%S)"
-    sed -i 's/^TTS_BACKEND=.*/TTS_BACKEND=tts/' .env
-    echo "✅ Updated .env (TTS_BACKEND=tts)"
-else
-    echo "Creating new .env file..."
-    
-    cat > .env <<'EOF'
-# ATA Speech Anonymizer Configuration
-# Generated by ATA_SelfInstall.sh v3.2
+fi
 
+cat > .env <<EOF
+# ATA Speech Anonymizer Configuration
 CHAT_AI_API_KEY=your_api_key_here
 CHAT_AI_ENDPOINT=https://your-endpoint.com/v1
 
-# ============================================================================
-# TTS BACKEND CONFIGURATION
-# ============================================================================
-# TTS Backend: melotts (MeloTTS - English & European languages)
-# Note: Japanese support disabled (MeCab not installed)
-# DFKI-SLT PII Model supports 11 languages: AR, DE, EN, FI, FR, HI, IT, PL, PT, SP, TR
-TTS_BACKEND=melotts
+# TTS CONFIGURATION
+TTS_BACKEND=$TTS_CONFIG
+EOF
 
-# TTS Model/Voice Selection (MeloTTS)
-TTS_MODEL_NAME=EN-US
+# Add backend-specific paths
+case "$TTS_CONFIG" in
+    piper)
+        cat >> .env <<EOF
+Piper_Voice_Path=$TTS_VOICE_PATH
+Piper_Config_Path=$TTS_CONFIG_PATH
+EOF
+        ;;
+    coqui_xtts)
+        cat >> .env <<EOF
+XTTS_Model_Path=$TTS_CONFIG_PATH
+XTTS_Reference_Audio_Path=./reference_audio.wav
+EOF
+        ;;
+esac
 
-# Compliance Settings
-COMPLIANCE_MODE=standard  # Options: strict, standard, none
-COMPLIANCE_ENCRYPTION=false  # Enable audio file encryption at rest
-COMPLIANCE_AUDIT_LOG=false   # Enable access logging
+# Common config
+cat >> .env <<EOF
 
-# Logging
+# COMPLIANCE & LOGGING
+COMPLIANCE_MODE=standard
+COMPLIANCE_ENCRYPTION=false
+COMPLIANCE_AUDIT_LOG=false
 LOG_LEVEL=INFO
 LOG_FILE=./logs/ata.log
+
+# PII MODEL (DFKI-SLT - 11 languages)
+PII_Model_Path=pipeline/models/multilingual_DialogPII_NER
+PII_Languages=AR,DE,EN,FI,FR,H,I,IT,PL,PT,SP,TR
+
+# WHISPERX
+Whisper_Model_Path=pipeline/models/models--Systran--faster-whisper-large-v3
+Whisper_Device=cuda
+Whisper_Compute_Type=float16
+
+# PYANNOTE
+Pyannote_Model_Path=pipeline/models/models--pyannote--speaker-diarization-community-1
 EOF
-    
-    echo "✅ .env file created."
-fi
+
+echo "✅ .env configured (TTS_BACKEND=$TTS_CONFIG)"
 
 # ============================================================================
 # 📋 FINAL INSTRUCTIONS
@@ -581,59 +647,20 @@ fi
 
 echo ""
 echo "=========================================================================="
-echo "SETUP COMPLETE!"
+echo "✅ SETUP COMPLETE"
 echo "=========================================================================="
 echo ""
-echo "To use the environment:"
-echo "  source \$HOME/miniforge3/etc/profile.d/conda.sh"
-echo "  conda activate $ENV_NAME"
+echo "Activate environment:"
+echo "  conda activate whisperx"
 echo ""
-echo "Hugging Face Authentication:"
-echo "  • If Pyannote downloads failed, run:"
-echo "      hf auth login"
-echo "  • Or use: export HUGGINGFACE_TOKEN=your_token && ./ATA_SelfInstall.sh --auto-login"
+echo "TTS Backend: $TTS_CONFIG"
+echo "  Piper:    Offline, 30+ langs, GPL v3"
+echo "  Coqui:    Voice cloning, 17 langs, CPML (non-commercial)"
 echo ""
-echo "Automation Flags (re-run installer):"
-echo "  --yes              Auto-accept all prompts"
-echo "  --skip-web         Skip web UI dependencies"
-echo "  --no-models        Skip all model downloads"
-echo "  --whisper-models LIST  Specify Whisper models"
-echo "  --force-refresh    Reinstall all packages"
+echo "Model Location: pipeline/models/"
 echo ""
-echo "Project Structure:"
-echo "  $(pwd)/"
-echo "    ├── .env"
-echo "    ├── ATA_SelfInstall.sh"
-echo "    └── pipeline/"
-echo "        ├── model/"
-echo "        ├── videos/"
-echo "        ├── audios/"
-echo "        ├── transcripts/"
-echo "        ├── anonym/"
-echo "        └── LLM-Anon/"
-echo ""
-echo "Next Steps:"
-echo "  1. Edit '.env' with your API Key"
-echo "  2. Place videos in 'pipeline/videos'"
+echo "Next steps:"
+echo "  1. Edit .env with API key"
+echo "  2. Place videos in pipeline/videos/"
 echo "  3. Run: python pipeline/process.py"
-echo ""
-echo "✨ FEATURES (All Working with NumPy 2.x + PyTorch 2.8+):"
-echo "  • WhisperX speech transcription"
-echo "  • Pyannote speaker diarization"
-echo "  • DFKI-SLT Multilingual DialogPII NER (11 languages)"
-echo "    - AR Arabic, DE German, EN English, FI Finnish"
-echo "    - FR French, HI Hindi, IT Italian, PL Polish"
-echo "    - PT Portuguese, SP Spanish, TR Turkish"
-echo "  • FLERT-style context windowing"
-echo "  • MeloTTS for voice synthesis (EN, ES, FR, DE, KO, ZH)"
-echo "    - Note: Japanese disabled (MeCab not installed)"
-echo ""
-echo "Updated Dependencies:"
-echo "  • NumPy: 2.x (2.5.1+)"
-echo "  • PyTorch: 2.8.0+ (latest stable)"
-echo "  • torchcodec: 0.14.0 (latest)"
-echo "  • spaCy: 3.8.0+ (NumPy 2.x compatible)"
-echo "  • thinc: 8.3.0+ (NumPy 2.x compatible)"
-echo ""
 echo "=========================================================================="
-exit 0
