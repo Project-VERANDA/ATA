@@ -36,14 +36,6 @@ Options:
 
 Environment Variables:
   HUGGINGFACE_TOKEN       Used with --auto-login for Hugging Face auth
-
-Examples:
-  ./ATA_SelfInstall.sh                    # Interactive (default)
-  ./ATA_SelfInstall.sh --yes              # Auto-accept all prompts
-  ./ATA_SelfInstall.sh --yes --skip-web   # Auto, no web UI
-  ./ATA_SelfInstall.sh --yes --no-models  # Dependencies only
-  export HUGGINGFACE_TOKEN=your_token
-  ./ATA_SelfInstall.sh --yes --auto-login # Auto-auth with token
 EOF
 }
 
@@ -103,7 +95,7 @@ fi
 
 cd "$CURRENT_DIR"
 
-echo "=== ATA Speech Anonymizer Installer (v2.0 - Fixed Compatibility) ==="
+echo "=== ATA Speech Anonymizer Installer (v2.1 - NumPy 2.x Compatible) ==="
 echo "Working Directory: $(pwd)"
 echo ""
 
@@ -125,7 +117,6 @@ TARGET_PYTHON="3.12"
 
 echo "Creating conda environment '$ENV_NAME' with Python $TARGET_PYTHON..."
 
-# Check if environment exists
 if conda env list | grep -q "^$ENV_NAME "; then
     if [ "$FORCE_REFRESH" = true ]; then
         echo "🔄 Environment exists (--force-refresh). Removing and recreating..."
@@ -157,48 +148,44 @@ fi
 echo "✅ Python version verified: $ACTUAL_PYTHON"
 
 # ============================================================================
-# 🔧 PACKAGE INSTALLATION WITH COMPATIBILITY FIXES
+# 🔧 PACKAGE INSTALLATION (NUMPY 2.x COMPATIBLE STACK)
 # ============================================================================
 
 echo "Upgrading pip..."
 pip install --upgrade pip -q
 
-echo "Installing base ML stack with fixed compatibility..."
+echo "Installing base ML stack..."
 
-# CRITICAL: Install NumPy 1.26.4 FIRST (before thinc/spacy)
-echo "  → numpy==1.26.4 (required for thinc/spacy compatibility)..."
-pip install "numpy==1.26.4" --no-cache-dir
+# CORE: NumPy 2.x (required by whisperx/pyannote/thinc 8.3+)
+echo "  → numpy>=2.0.0 (NumPy 2.x compatible stack)..."
+pip install "numpy>=2.0.0,<3.0.0" --no-cache-dir
 
-# 2. Other ML dependencies compatible with NumPy 1.26.4
-echo "  → scipy>=1.14.0..."
-pip install "scipy>=1.14.0,<2.0.0" --no-cache-dir
+echo "  → scipy..."
+pip install scipy --no-cache-dir
 
-echo "  → pandas>=2.2.0..."
-pip install "pandas>=2.2.0,<3.0.0" --no-cache-dir
+echo "  → pandas..."
+pip install "pandas>=2.2.0" --no-cache-dir
 
-echo "  → torch (foundation for ML stack)..."
-pip install "torch>=2.0.0,<3.0.0" --no-cache-dir || \
-pip install torch --no-cache-dir
+echo "  → torch..."
+pip install torch --no-cache-dir || pip install torch torchvision torchaudio --no-cache-dir
 
 echo "  → torchaudio..."
-pip install "torchaudio>=2.0.0,<3.0.0" --no-cache-dir || \
 pip install torchaudio --no-cache-dir
 
 echo "  → torchvision..."
-pip install "torchvision>=0.15.0,<1.0.0" --no-cache-dir || \
 pip install torchvision --no-cache-dir
 
-echo "  → transformers>=4.48.0..."
-pip install "transformers>=4.48.0,<5.0.0" --no-cache-dir
+echo "  → transformers..."
+pip install "transformers>=4.48.0" --no-cache-dir
 
-echo "  → accelerate>=0.20.0..."
-pip install "accelerate>=0.20.0,<1.0.0" --no-cache-dir
+echo "  → accelerate..."
+pip install "accelerate>=0.20.0" --no-cache-dir
 
 echo "  → sentencepiece..."
-pip install "sentencepiece>=0.1.99,<1.0.0" --no-cache-dir
+pip install sentencepiece --no-cache-dir
 
-echo "  → huggingface-hub>=1.5.0..."
-pip install "huggingface-hub>=1.5.0,<2.0.0" --no-cache-dir
+echo "  → huggingface-hub..."
+pip install "huggingface-hub>=1.5.0" --no-cache-dir
 
 echo "  → pydub..."
 pip install pydub --no-cache-dir
@@ -206,7 +193,7 @@ pip install pydub --no-cache-dir
 echo "  → ffmpeg-python..."
 pip install ffmpeg-python --no-cache-dir
 
-echo "  → openai>=1.0.0..."
+echo "  → openai..."
 pip install "openai>=1.0.0" --no-cache-dir
 
 echo "  → python-dotenv..."
@@ -215,36 +202,25 @@ pip install python-dotenv --no-cache-dir
 echo "  → torchcrf..."
 pip install pytorch-crf --no-cache-dir
 
-echo "  → thinc==8.2.5 (NUMPY 1.X COMPATIBLE)..."
-pip install "thinc==8.2.5" --no-cache-dir
+# KEY FIX: thinc 8.3+ and spacy 3.8+ support NumPy 2.x
+echo "  → thinc>=8.3.0 (NumPy 2.x compatible)..."
+pip install "thinc>=8.3.0" --no-cache-dir
 
-echo "  → spacy==3.7.5 (NUMPY 1.X COMPATIBLE)..."
-pip install "spacy==3.7.5" --no-cache-dir
+echo "  → spacy>=3.8.0 (NumPy 2.x compatible)..."
+pip install "spacy>=3.8.0" --no-cache-dir
 
 echo "  → pyannote.audio..."
-pip install "pyannote.audio>=3.0.0" --no-cache-dir || \
-pip install "pyannote.audio>=3.0.0,<4.0.0" --no-cache-dir || \
-echo "⚠️  Warning installing pyannote.audio"
-
-echo "  → thinc>=8.2.2..."
-pip install "thinc>=8.2.2" --no-cache-dir || echo "⚠️  Warning installing thinc"
+pip install "pyannote.audio>=3.0.0" --no-cache-dir || echo "⚠️  Warning installing pyannote.audio"
 
 echo "✅ Base ML stack installation complete."
 
 # ============================================================================
 # 🔧 CLICK & TYPER VERSION ENFORCEMENT
 # ============================================================================
-echo "Ensuring click and typer are properly configured..."
+echo "Ensuring click and typer are configured..."
+pip install "click>=8.1.7" --no-cache-dir
+pip install "typer>=0.9.0" --no-cache-dir
 
-# Install click first (required by typer/spacy CLI)
-echo "  → Ensuring click is available..."
-pip install "click>=8.1.7,<9.0.0" --no-cache-dir
-
-# Install typer compatible with older versions
-echo "  → typer (compatible version)..."
-pip install "typer>=0.9.0,<0.13.0" --no-cache-dir
-
-# Verify versions
 CLICK_VER=$(pip show click | grep Version | awk '{print $2}')
 TYPER_VER=$(pip show typer | grep Version | awk '{print $2}')
 echo "  click: $CLICK_VER | typer: $TYPER_VER"
@@ -262,7 +238,6 @@ pip install git+https://github.com/m-bain/whisperx.git --no-cache-dir
 echo ""
 echo "Checking spaCy models..."
 
-# English model
 if python -m spacy check en_core_web_sm &> /dev/null; then
     echo "✅ en_core_web_sm already installed."
 else
@@ -270,7 +245,6 @@ else
     python -m spacy download en_core_web_sm
 fi
 
-# Multilingual model
 if python -m spacy check xx_ent_wiki_sm &> /dev/null; then
     echo "✅ xx_ent_wiki_sm already installed."
 else
@@ -315,22 +289,22 @@ else
     echo "❌ WARNING: typer import failed"
 fi
 
-if python -c "import spacy" 2>/dev/null; then
-    echo "✅ spacy imported successfully"
+if python -c "import spacy; import thinc; print('✅ OK')" 2>/dev/null; then
+    echo "✅ spacy and thinc work with NumPy 2.x"
 else
-    echo "❌ WARNING: spacy import failed"
+    echo "❌ WARNING: spacy/thinc import failed"
 fi
 
-if python -c "import thinc" 2>/dev/null; then
-    echo "✅ thinc imported successfully"
+if python -c "import whisperx; print('✅ whisperx OK')" 2>/dev/null; then
+    echo "✅ whisperx imported successfully"
 else
-    echo "❌ WARNING: thinc import failed"
+    echo "⚠️  whisperx may have issues"
 fi
 
-if python -c "from huggingface_hub import snapshot_download" 2>/dev/null; then
-    echo "✅ huggingface-hub imported successfully"
+if python -c "from pyannote.audio import Pipeline; print('✅ pyannote OK')" 2>/dev/null; then
+    echo "✅ pyannote imported successfully"
 else
-    echo "❌ WARNING: huggingface-hub import failed"
+    echo "⚠️  pyannote may have issues (may need HuggingFace auth)"
 fi
 
 # ============================================================================
@@ -351,11 +325,8 @@ fi
 
 if [[ "$INSTALL_WEB" =~ ^[Yy]$ ]]; then
     echo "Installing Web Interface dependencies..."
-    
-    echo "Installing Flask and dependencies..."
     pip install flask requests cryptography --no-cache-dir
     
-    # TTS Backend Setup (Piper or MeloTTS only - NO COQUI)
     echo ""
     echo "============================================================"
     echo "TTS Backend Installation (Piper or MeloTTS)"
@@ -365,9 +336,7 @@ if [[ "$INSTALL_WEB" =~ ^[Yy]$ ]]; then
     
     case "$TTS_BACKEND" in
         piper)
-            echo "Installing Piper TTS (recommended: clean license, Python 3.12+)..."
-            
-            # Download Piper binary
+            echo "Installing Piper TTS..."
             PIPER_VERSION="1.4.2"
             ARCH=$(uname -m)
             
@@ -377,12 +346,10 @@ if [[ "$INSTALL_WEB" =~ ^[Yy]$ ]]; then
                 armv7l) PIPER_PLATFORM="linux-armv7l" ;;
                 *)
                     echo "❌ ERROR: Unsupported architecture: $ARCH"
-                    echo "   Options: export TTS_BACKEND=melotts"
                     exit 1
                     ;;
             esac
             
-            echo "Downloading Piper ($PIPER_PLATFORM)..."
             wget -q "https://github.com/rhasspy/piper/releases/download/v${PIPER_VERSION}/piper_${PIPER_VERSION}_${PIPER_PLATFORM}.tar.xz" -O piper.tar.xz
             tar xf piper.tar.xz
             mkdir -p "$CURRENT_DIR/pipeline/tts/bin"
@@ -391,10 +358,8 @@ if [[ "$INSTALL_WEB" =~ ^[Yy]$ ]]; then
             rm -rf "piper_${PIPER_VERSION}_${PIPER_PLATFORM}" piper.tar.xz
             echo "✅ Piper binary installed."
             
-            # Install dimits wrapper
             pip install dimits --no-cache-dir || echo "⚠️  dimits optional"
             
-            # Voice model download
             DEFAULT_VOICE="en_US-ryan-high"
             VOICE_MODEL="${TTS_VOICE:-$DEFAULT_VOICE}"
             VOICE_DIR="$MODEL_DIR/piper-voices"
@@ -408,7 +373,7 @@ if [[ "$INSTALL_WEB" =~ ^[Yy]$ ]]; then
                 if [ -f "$VOICE_DIR/${VOICE_MODEL}.onnx" ] && [ "$(stat -c%s "$VOICE_DIR/${VOICE_MODEL}.onnx" 2>/dev/null || echo 0)" -gt 100000 ]; then
                     echo "✅ Piper voice downloaded: $VOICE_MODEL"
                 else
-                    echo "⚠️  Piper voice download incomplete. Manual download may be needed."
+                    echo "⚠️  Piper voice download incomplete."
                 fi
             else
                 echo "✅ Piper voice already exists: $VOICE_MODEL"
@@ -416,10 +381,9 @@ if [[ "$INSTALL_WEB" =~ ^[Yy]$ ]]; then
             ;;
         
         melotts)
-            echo "Installing MeloTTS (MIT license, multilingual)..."
+            echo "Installing MeloTTS..."
             pip install git+https://github.com/myshell-ai/MeloTTS.git --no-cache-dir || \
-            pip install melotts --no-cache-dir || \
-            echo "⚠️  MeloTTS installation may require manual steps"
+            pip install melotts --no-cache-dir || echo "⚠️  MeloTTS may require manual setup"
             ;;
         
         *)
@@ -435,7 +399,7 @@ else
 fi
 
 # ============================================================================
-# 🧩 MODEL DOWNLOADS (NO COQUI MODELS)
+# 🧩 MODEL DOWNLOADS
 # ============================================================================
 echo ""
 echo "-------------------------------------------------"
@@ -447,7 +411,6 @@ if [ "$NO_MODELS" = true ]; then
     SKIP_WHISPER=true
     SKIP_PYANNOTE=true
 else
-    # WhisperX Models
     declare -A MODEL_MAP
     MODEL_MAP["tiny"]="Systran/faster-whisper-tiny"
     MODEL_MAP["base"]="Systran/faster-whisper-base"
@@ -463,7 +426,6 @@ else
         echo "Downloading $repo_id..."
         mkdir -p "$target_dir"
         
-        # Python fallback with full symlink control
         python -c "
 from huggingface_hub import snapshot_download
 import sys
@@ -491,7 +453,7 @@ except Exception as e:
     elif [ "$ANSWER_YES" = true ]; then
         WHISPER_MODELS_INPUT="large"
     else
-        read -p "Enter WhisperX models to download (tiny, base, small, medium, large) or press Enter to skip: " WHISPER_MODELS_INPUT
+        read -p "Enter WhisperX models (tiny/base/small/medium/large) or press Enter to skip: " WHISPER_MODELS_INPUT
     fi
     
     if [ -n "$WHISPER_MODELS_INPUT" ]; then
@@ -512,11 +474,10 @@ except Exception as e:
             fi
         done
     elif [ "$ANSWER_YES" = true ]; then
-        echo "Downloading 'large-v3' by default (auto-answered --yes)..."
+        echo "Downloading 'large-v3' by default..."
         download_model_hf "Systran/faster-whisper-large-v3" "$MODEL_DIR/models--Systran--faster-whisper-large-v3"
     fi
     
-    # Pyannote Diarization Model
     TARGET="$MODEL_DIR/models--pyannote--speaker-diarization-community-1"
     
     if [ "$SKIP_PYANNOTE" = true ]; then
@@ -540,14 +501,10 @@ except Exception as e:
             download_model_hf "pyannote/speaker-diarization-community-1" "$TARGET" "model"
         else
             echo "⚠️  Not logged in to Hugging Face. Pyannote requires authentication."
-            echo "   Options:"
-            echo "   1. Run: hf auth login"
-            echo "   2. Export: export HUGGINGFACE_TOKEN=your_token"
-            echo "   3. Use: --auto-login with HUGGINGFACE_TOKEN set"
+            echo "   Options: hf auth login, export HUGGINGFACE_TOKEN, or --auto-login"
         fi
     fi
     
-    # mmBERT Base & PII Models
     echo ""
     echo "=========================================================="
     echo "Downloading mBert Base & DFKI-SLT PII NER Model"
@@ -560,7 +517,6 @@ except Exception as e:
         download_model_hf "jhu-clsp/mmBERT-base" "$BASE_TARGET" "model"
     fi
     
-    # DFKI-SLT PII Model
     PII_TARGET="$MODEL_DIR/multilingual_DialogPII_NER"
     echo ""
     echo "📦 Downloading DFKI-SLT Multilingual DialogPII NER Model"
@@ -568,7 +524,7 @@ except Exception as e:
     if [ -d "$PII_TARGET" ] && [ "$(ls -A "$PII_TARGET")" ]; then
         echo "✅ DFKI-SLT PII model already exists."
     else
-        download_model_hf "DFSKI-SLT/multilingual_DialogPII_NER" "$PII_TARGET" "model"
+        download_model_hf "DFKI-SLT/multilingual_DialogPII_NER" "$PII_TARGET" "model"
         
         if [ "$(ls -A "$PII_TARGET" 2>/dev/null)" ]; then
             echo "✅ DFKI-SLT PII model downloaded successfully."
@@ -603,23 +559,17 @@ CHAT_AI_ENDPOINT=https://your-endpoint.com/v1
 # ============================================================================
 # TTS BACKEND CONFIGURATION
 # ============================================================================
-# Supported backends: piper, melotts
-# Recommended: piper (clean license, Python 3.12 compatible)
 TTS_BACKEND=piper
 
-# TTS Model/Voice Selection
-# Piper: en_US-ryan-high, en_US-libritts-high, de_DE-thorsten-high
-# MeloTTS: EN-US, EN-GB, EN-India, ES, FR, DE, JA, KO, ZH
 TTS_MODEL_NAME=en_US-ryan-high
 
-# Piper-specific paths (auto-configured)
 TTS_BIN_PATH=./pipeline/tts/bin/piper
 TTS_VOICE_PATH=./pipeline/tts/voices/en_US-ryan-high.onnx
 
 # Compliance Settings
-COMPLIANCE_MODE=standard  # Options: strict, standard, none
-COMPLIANCE_ENCRYPTION=false  # Enable audio file encryption at rest
-COMPLIANCE_AUDIT_LOG=false   # Enable access logging
+COMPLIANCE_MODE=standard
+COMPLIANCE_ENCRYPTION=false
+COMPLIANCE_AUDIT_LOG=false
 
 # Logging
 LOG_LEVEL=INFO
@@ -642,11 +592,10 @@ echo "  source \$HOME/miniforge3/etc/profile.d/conda.sh"
 echo "  conda activate $ENV_NAME"
 echo ""
 echo "Hugging Face Authentication:"
-echo "  • If Pyannote downloads failed, run:"
-echo "      hf auth login"
-echo "  • Or use: export HUGGINGFACE_TOKEN=your_token && ./ATA_SelfInstall.sh --auto-login"
+echo "  • Run: hf auth login"
+echo "  • Or: export HUGGINGFACE_TOKEN=your_token && ./ATA_SelfInstall.sh --auto-login"
 echo ""
-echo "Automation Flags (re-run installer):"
+echo "Automation Flags:"
 echo "  --yes              Auto-accept all prompts"
 echo "  --skip-web         Skip web UI dependencies"
 echo "  --no-models        Skip all model downloads"
@@ -671,11 +620,11 @@ echo "  2. Place videos in 'pipeline/videos'"
 echo "  3. Run: python pipeline/process.py"
 echo ""
 echo "✨ FEATURES:"
+echo "  • NumPy 2.x compatible stack (thinc>=8.3, spacy>=3.8)"
 echo "  • DFKI-SLT Multilingual DialogPII NER (11 languages)"
 echo "  • FLERT-style context windowing"
 echo "  • Piper/MeloTTS for voice synthesis"
 echo "  • WhisperX for transcription"
 echo "  • Pyannote for speaker diarization"
-echo ""
 echo "=========================================================================="
 exit 0
