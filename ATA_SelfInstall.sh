@@ -340,8 +340,8 @@ echo "  → pandas..."
 pip install "pandas>=2.2.0" --no-cache-dir
 
 # 7. NOW spacy (won't override numpy/transformers)
-echo "  → spacy..."
-pip install "spacy>=3.7.5" --no-cache-dir
+echo "  → spacy (won't override click/typer)..."
+pip install "spacy>=3.7.5" --no-cache-dir --no-deps
 
 # 8. Other base packages
 echo "  → other dependencies..."
