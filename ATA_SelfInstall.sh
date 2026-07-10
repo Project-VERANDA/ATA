@@ -286,6 +286,29 @@ except Exception as e:
 # 🔧 PACKAGE INSTALLATION WITH VERSION CHECKING
 # ============================================================================
 
+# ============================================================================
+# 🔧 Click + typer version enforcement (MOVED BEFORE SPACY)
+# ============================================================================
+echo "Locking click==8.1.7 and typer==0.12.5 (required by spaCy)..."
+
+# Force click first (typer depends on this)
+pip uninstall click -y 2>/dev/null || true
+pip install "click==8.1.7" --no-cache-dir
+
+# Then typer (must match spaCy 3.7.x requirements)
+pip uninstall typer -y 2>/dev/null || true
+pip install "typer==0.12.5" --no-cache-dir
+
+# Verify before continuing
+CLICK_VER=$(pip show click | grep Version | awk '{print $2}')
+TYPER_VER=$(pip show typer | grep Version | awk '{print $2}')
+echo "✅ Locked: click=$CLICK_VER, typer=$TYPER_VER"
+echo ""
+
+# ============================================================================
+# 🔧 All other packages
+# ============================================================================
+
 echo "Upgrading pip..."
 pip install --upgrade pip -q
 
@@ -325,39 +348,6 @@ echo "  → other dependencies..."
 pip install pydub ffmpeg-python sentencepiece torchcrf python-dotenv openai accelerate --no-cache-dir
 
 echo "✅ Base ML stack installation complete."
-
-# ============================================================================
-# 🔧 Click + typer version enforcement
-# ============================================================================
-echo "Ensuring click==8.1.7 and compatible typer are installed..."
-
-# Install click first
-smart_install "click==8.1.7" "click" "8.1.7" "$FORCE_REFRESH"
-
-# Install typer (must be <=0.12.x)
-TYPER_DESIRED="0.12.5"
-typer_check=$(check_package_version "typer" "$TYPER_DESIRED")
-case $typer_check in
-    "NOT_INSTALLED")
-        echo "Installing typer $TYPER_DESIRED..."
-        pip install "typer==$TYPER_DESIRED" --no-cache-dir
-        ;;
-    "MATCH")
-        if [ "$FORCE_REFRESH" = true ]; then
-            echo "Reinstalling typer ($TYPER_DESIRED, --force-refresh)"
-            pip install "typer==$TYPER_DESIRED" --force-reinstall --no-deps --no-cache-dir
-        else
-            echo "✅ typer $TYPER_DESIRED already installed. Skipping."
-        fi
-        ;;
-    "MISMATCH:"*)
-        current=$(echo "$typer_check" | cut -d: -f2)
-        echo "⚠️  typer version mismatch: current=$current, desired=$TYPER_DESIRED"
-        echo "   Replacing (compatibility requirement)"
-        pip uninstall typer -y
-        pip install "typer==$TYPER_DESIRED" --force-reinstall --no-deps --no-cache-dir
-        ;;
-esac
 
 # Verify versions explicitly
 echo "Verifying installations..."
