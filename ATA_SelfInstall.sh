@@ -8,6 +8,8 @@ CURRENT_DIR="$(pwd)"
 SCRIPT_NAME="$(basename "$0")"
 MAIN_DIR_NAME="ATA"
 
+shopt -s nullglob
+
 if [ "$(basename "$CURRENT_DIR")" == "$MAIN_DIR_NAME" ]; then
     echo "✅ Already inside '$MAIN_DIR_NAME' folder. Proceeding..."
 else
@@ -64,6 +66,8 @@ conda create -n $ENV_NAME python=3.11 -y
 # 4. Activate the environment
 echo "Activating environment..."
 conda activate $ENV_NAME
+MODEL_DIR="$CURRENT_DIR/pipeline/model"
+mkdir -p "$MODEL_DIR"
 
 # --- HELPER FUNCTIONS ---
 
@@ -447,10 +451,6 @@ echo "  - models--pyannote--speaker-diarization-community-1"
 echo "  - jhu-clsp/mmBERT-base (Base model for PII NER)"
 echo "  - multilingual_DialogPII_NER (NEW: DFKI-SLT PII Detection Model)"
 echo ""
-
-# CRITICAL: Define MODEL_DIR relative to current directory
-MODEL_DIR="$CURRENT_DIR/pipeline/model"
-mkdir -p "$MODEL_DIR"
 
 read -p "Enter WhisperX models to download (tiny, base, small, medium, large) or press Enter to skip: " WHISPER_MODELS_INPUT
 
