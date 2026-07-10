@@ -163,15 +163,34 @@ echo "✅ Python version verified: $ACTUAL_PYTHON"
 echo "Upgrading pip..."
 pip install --upgrade pip -q
 
-echo "Installing base ML stack with strict NumPy 1.x compatibility..."
+echo "Installing core ML stack..."
 
-# STEP 1: Install NumPy FIRST and lock it (prevent pip from upgrading later)
-echo "  → numpy==1.26.4 (LOCKED FOR COMPATIBILITY)..."
-pip install "numpy==1.26.4" --no-cache-dir --no-deps
+# 1. Install NumPy FIRST (lock it before anything else)
+echo "  → numpy==1.26.4 (locked for thinc/spacy compatibility)..."
+pip install "numpy==1.26.4" --no-cache-dir
 
-# STEP 2: Install other dependencies (these don't affect NumPy)
-echo "  → scipy>=1.14.0..."
+# 2. Install thinc/spacy with EXACT pins (deps allowed - this is safe!)
+echo "  → thinc==8.2.5 (NumPy 1.x compatible)..."
+pip install "thinc==8.2.5" --no-cache-dir
+
+echo "  → spacy==3.7.5 (NumPy 1.x compatible)..."
+pip install "spacy==3.7.5" --no-cache-dir
+
+echo "  → blis>=0.7.0..."
+pip install "blis>=0.7.0,<0.8.0" --no-cache-dir
+
+echo "  → click (required by spacy CLI)..."
+pip install "click>=8.1.7,<9.0.0" --no-cache-dir
+
+echo "  → typer..."
+pip install "typer>=0.9.0,<1.0.0" --no-cache-dir
+
+# 3. Install other packages AFTER (they can have conflicting deps)
+echo "  → scipy..."
 pip install "scipy>=1.14.0,<2.0.0" --no-cache-dir
+
+echo "  → transformers..."
+pip install "transformers>=4.48.0,<5.0.0" --no-cache-dir
 
 echo "  → pandas>=2.2.0..."
 pip install "pandas>=2.2.0,<3.0.0" --no-cache-dir
@@ -184,9 +203,6 @@ pip install "torchaudio>=2.0.0" --no-cache-dir || pip install torchaudio --no-ca
 
 echo "  → torchvision..."
 pip install "torchvision>=0.15.0" --no-cache-dir || pip install torchvision --no-cache-dir
-
-echo "  → transformers>=4.48.0..."
-pip install "transformers>=4.48.0,<5.0.0" --no-cache-dir
 
 echo "  → accelerate>=0.20.0..."
 pip install "accelerate>=0.20.0,<1.0.0" --no-cache-dir
@@ -212,20 +228,10 @@ pip install python-dotenv --no-cache-dir
 echo "  → torchcrf..."
 pip install pytorch-crf --no-cache-dir
 
-# STEP 3: Install thinc/spacy with NO DEPENDENCIES to prevent NumPy upgrade
-echo "  → thinc==8.2.5 (NO DEPS - compiled against NumPy 1.26.4)..."
-pip install "thinc==8.2.5" --no-cache-dir --no-deps --no-binary=:all:
-
-echo "  → spacy==3.7.5 (NO DEPS - compiled against thinc 8.2.5)..."
-pip install "spacy==3.7.5" --no-cache-dir --no-deps --no-binary=:all:
-
 echo "  → pyannote.audio..."
 pip install "pyannote.audio>=3.0.0,<4.0.0" --no-cache-dir || \
 pip install "pyannote.audio>=3.0.0" --no-cache-dir || \
 echo "⚠️  Warning installing pyannote.audio"
-
-echo "  → blis>=0.7.0..."
-pip install "blis>=0.7.0,<0.8.0" --no-cache-dir
 
 echo "✅ Base ML stack installation complete."
 
@@ -334,6 +340,22 @@ if python -c "from huggingface_hub import snapshot_download" 2>/dev/null; then
 else
     echo "❌ WARNING: huggingface-hub import failed"
 fi
+
+NUMPY_VER=$(pip show numpy | grep Version | awk '{print $2}')
+THINC_VER=$(pip show thinc | grep Version | awk '{print $2}')
+SPACY_VER=$(pip show spacy | grep Version | awk '{print $2}')
+
+echo ""
+echo "Version Verification:"
+echo "  numpy: $NUMPY_VER"
+echo "  thinc: $THINC_VER"
+echo "  spacy: $SPACY_VER"
+
+if [[ ! "$NUMPY_VER" =~ ^1\. ]]; then
+    echo "❌ CRITICAL: NumPy was upgraded to $NUMPY_VER!"
+    exit 1
+fi
+echo "✅ NumPy verified: $NUMPY_VER (compatible with thinc/spacy)"
 
 # ============================================================================
 # 🖥️ WEB INTERFACE OPTION (FLASK + MELOTTS ONLY - NO PIPER)
