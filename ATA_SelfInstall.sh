@@ -157,36 +157,33 @@ fi
 echo "✅ Python version verified: $ACTUAL_PYTHON"
 
 # ============================================================================
-# 🔧 PACKAGE INSTALLATION WITH COMPATIBILITY FIXES
+# 🔧 PACKAGE INSTALLATION WITH STRICT COMPATIBILITY CONTROL
 # ============================================================================
 
 echo "Upgrading pip..."
 pip install --upgrade pip -q
 
-echo "Installing base ML stack with fixed compatibility..."
+echo "Installing base ML stack with strict NumPy 1.x compatibility..."
 
-# CRITICAL: Install NumPy 1.26.4 FIRST (before thinc/spacy)
-echo "  → numpy==1.26.4 (required for thinc/spacy compatibility)..."
-pip install "numpy==1.26.4" --no-cache-dir
+# STEP 1: Install NumPy FIRST and lock it (prevent pip from upgrading later)
+echo "  → numpy==1.26.4 (LOCKED FOR COMPATIBILITY)..."
+pip install "numpy==1.26.4" --no-cache-dir --no-deps
 
-# 2. Other ML dependencies compatible with NumPy 1.26.4
+# STEP 2: Install other dependencies (these don't affect NumPy)
 echo "  → scipy>=1.14.0..."
 pip install "scipy>=1.14.0,<2.0.0" --no-cache-dir
 
 echo "  → pandas>=2.2.0..."
 pip install "pandas>=2.2.0,<3.0.0" --no-cache-dir
 
-echo "  → torch (foundation for ML stack)..."
-pip install "torch>=2.0.0,<3.0.0" --no-cache-dir || \
-pip install torch --no-cache-dir
+echo "  → torch..."
+pip install "torch>=2.0.0,<3.0.0" --no-cache-dir || pip install torch --no-cache-dir
 
 echo "  → torchaudio..."
-pip install "torchaudio>=2.0.0,<3.0.0" --no-cache-dir || \
-pip install torchaudio --no-cache-dir
+pip install "torchaudio>=2.0.0" --no-cache-dir || pip install torchaudio --no-cache-dir
 
 echo "  → torchvision..."
-pip install "torchvision>=0.15.0,<1.0.0" --no-cache-dir || \
-pip install torchvision --no-cache-dir
+pip install "torchvision>=0.15.0" --no-cache-dir || pip install torchvision --no-cache-dir
 
 echo "  → transformers>=4.48.0..."
 pip install "transformers>=4.48.0,<5.0.0" --no-cache-dir
@@ -215,39 +212,44 @@ pip install python-dotenv --no-cache-dir
 echo "  → torchcrf..."
 pip install pytorch-crf --no-cache-dir
 
-echo "  → thinc==8.2.5 (NUMPY 1.X COMPATIBLE)..."
-pip install "thinc==8.2.5" --no-cache-dir
+# STEP 3: Install thinc/spacy with NO DEPENDENCIES to prevent NumPy upgrade
+echo "  → thinc==8.2.5 (NO DEPS - compiled against NumPy 1.26.4)..."
+pip install "thinc==8.2.5" --no-cache-dir --no-deps --no-binary=:all:
 
-echo "  → spacy==3.7.5 (NUMPY 1.X COMPATIBLE)..."
-pip install "spacy==3.7.5" --no-cache-dir
+echo "  → spacy==3.7.5 (NO DEPS - compiled against thinc 8.2.5)..."
+pip install "spacy==3.7.5" --no-cache-dir --no-deps --no-binary=:all:
 
 echo "  → pyannote.audio..."
 pip install "pyannote.audio>=3.0.0,<4.0.0" --no-cache-dir || \
 pip install "pyannote.audio>=3.0.0" --no-cache-dir || \
 echo "⚠️  Warning installing pyannote.audio"
 
-echo "  → thinc>=8.2.2..."
-pip install "thinc>=8.2.2" --no-cache-dir || echo "⚠️  Warning installing thinc"
+echo "  → blis>=0.7.0..."
+pip install "blis>=0.7.0,<0.8.0" --no-cache-dir
 
 echo "✅ Base ML stack installation complete."
 
-# ============================================================================
-# 🔧 CLICK & TYPER VERSION ENFORCEMENT
-# ============================================================================
-echo "Ensuring click and typer are properly configured..."
+# STEP 4: Verify NumPy was NOT upgraded
+NUMPY_VER=$(pip show numpy | grep Version | awk '{print $2}')
+THINC_VER=$(pip show thinc | grep Version | awk '{print $2}')
+SPACY_VER=$(pip show spacy | grep Version | awk '{print $2}')
 
-# Install click first (required by typer/spacy CLI)
-echo "  → Ensuring click is available..."
-pip install "click>=8.1.7,<9.0.0" --no-cache-dir
+echo ""
+echo "Version Verification:"
+echo "  numpy: $NUMPY_VER"
+echo "  thinc: $THINC_VER"
+echo "  spacy: $SPACY_VER"
 
-# Install typer compatible with older versions
-echo "  → typer (compatible version)..."
-pip install "typer>=0.9.0,<0.13.0" --no-cache-dir
+if [[ ! "$NUMPY_VER" =~ ^1\. ]]; then
+    echo "❌ CRITICAL: NumPy was upgraded to $NUMPY_VER! This will break thinc/spacy."
+    exit 1
+fi
 
-# Verify versions
-CLICK_VER=$(pip show click | grep Version | awk '{print $2}')
-TYPER_VER=$(pip show typer | grep Version | awk '{print $2}')
-echo "  click: $CLICK_VER | typer: $TYPER_VER"
+if [ "$NUMPY_VER" == "1.26.4" ] && [ "$THINC_VER" == "8.2.5" ] && [ "$SPACY_VER" == "3.7.5" ]; then
+    echo "✅ All versions locked correctly for NumPy 1.x compatibility"
+else
+    echo "⚠️  Warning: Some versions don't match expected (continuing anyway)"
+fi
 
 # ============================================================================
 # 🔧 WHISPERX INSTALLATION
