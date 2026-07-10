@@ -634,16 +634,16 @@ LOG_LEVEL=INFO
 LOG_FILE=./logs/ata.log
 
 # PII MODEL (DFKI-SLT - 11 languages)
-PII_Model_Path=pipeline/models/multilingual_DialogPII_NER
+PII_Model_Path=pipeline/model/multilingual_DialogPII_NER
 PII_Languages=AR,DE,EN,FI,FR,H,I,IT,PL,PT,SP,TR
 
 # WHISPERX
-Whisper_Model_Path=pipeline/models/models--Systran--faster-whisper-large-v3
+Whisper_Model_Path=pipeline/model/models--Systran--faster-whisper-large-v3
 Whisper_Device=cuda
 Whisper_Compute_Type=float16
 
 # PYANNOTE
-Pyannote_Model_Path=pipeline/models/models--pyannote--speaker-diarization-community-1
+Pyannote_Model_Path=pipeline/model/models--pyannote--speaker-diarization-community-1
 EOF
 
 echo "✅ .env configured (TTS_BACKEND=$TTS_CONFIG)"
