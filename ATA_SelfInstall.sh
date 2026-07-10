@@ -157,7 +157,7 @@ fi
 echo "✅ Python version verified: $ACTUAL_PYTHON"
 
 # ============================================================================
-# 🔧 PACKAGE INSTALLATION WITH STRICT COMPATIBILITY CONTROL
+# 🔧 PACKAGE INSTALLATION WITH STRIPED COMPATIBILITY CONTROL
 # ============================================================================
 
 echo "Upgrading pip..."
@@ -169,14 +169,18 @@ echo "Installing core ML stack..."
 echo "  → numpy==1.26.4 (locked for thinc/spacy compatibility)..."
 pip install "numpy==1.26.4" --no-cache-dir
 
-# 2. Install thinc/spacy with EXACT pins (deps allowed - this is safe!)
+# 2. Install scipy BEFORE thinc/spacy (scipy 1.18.x forces NumPy 2.x!)
+echo "  → scipy (NumPy 1.x compatible version)..."
+pip install "scipy>=1.11.0,<1.15.0" --no-cache-dir
+
+# 3. NOW install thinc/spacy with EXACT pins
 echo "  → thinc==8.2.5 (NumPy 1.x compatible)..."
 pip install "thinc==8.2.5" --no-cache-dir
 
 echo "  → spacy==3.7.5 (NumPy 1.x compatible)..."
 pip install "spacy==3.7.5" --no-cache-dir
 
-echo "  → blis>=0.7.0..."
+echo "  → blis>=0.7.0,<0.8.0..."
 pip install "blis>=0.7.0,<0.8.0" --no-cache-dir
 
 echo "  → click (required by spacy CLI)..."
@@ -185,14 +189,8 @@ pip install "click>=8.1.7,<9.0.0" --no-cache-dir
 echo "  → typer..."
 pip install "typer>=0.9.0,<1.0.0" --no-cache-dir
 
-# 3. Install other packages AFTER (they can have conflicting deps)
-echo "  → scipy..."
-pip install "scipy>=1.14.0,<2.0.0" --no-cache-dir
-
-echo "  → transformers..."
-pip install "transformers>=4.48.0,<5.0.0" --no-cache-dir
-
-echo "  → pandas>=2.2.0..."
+# 4. Install other packages AFTER (conflicting deps tolerated)
+echo "  → pandas..."
 pip install "pandas>=2.2.0,<3.0.0" --no-cache-dir
 
 echo "  → torch..."
@@ -204,13 +202,13 @@ pip install "torchaudio>=2.0.0" --no-cache-dir || pip install torchaudio --no-ca
 echo "  → torchvision..."
 pip install "torchvision>=0.15.0" --no-cache-dir || pip install torchvision --no-cache-dir
 
-echo "  → accelerate>=0.20.0..."
+echo "  → accelerate..."
 pip install "accelerate>=0.20.0,<1.0.0" --no-cache-dir
 
 echo "  → sentencepiece..."
 pip install "sentencepiece>=0.1.99,<1.0.0" --no-cache-dir
 
-echo "  → huggingface-hub>=1.5.0..."
+echo "  → huggingface-hub..."
 pip install "huggingface-hub>=1.5.0,<2.0.0" --no-cache-dir
 
 echo "  → pydub..."
@@ -219,7 +217,7 @@ pip install pydub --no-cache-dir
 echo "  → ffmpeg-python..."
 pip install ffmpeg-python --no-cache-dir
 
-echo "  → openai>=1.0.0..."
+echo "  → openai..."
 pip install "openai>=1.0.0" --no-cache-dir
 
 echo "  → python-dotenv..."
@@ -229,13 +227,14 @@ echo "  → torchcrf..."
 pip install pytorch-crf --no-cache-dir
 
 echo "  → pyannote.audio..."
-pip install "pyannote.audio>=3.0.0,<4.0.0" --no-cache-dir || \
-pip install "pyannote.audio>=3.0.0" --no-cache-dir || \
-echo "⚠️  Warning installing pyannote.audio"
+pip install "pyannote.audio>=3.0.0" --no-cache-dir || echo "⚠️  Warning installing pyannote.audio"
+
+echo "  → transformers..."
+pip install "transformers>=4.48.0,<5.0.0" --no-cache-dir
 
 echo "✅ Base ML stack installation complete."
 
-# STEP 4: Verify NumPy was NOT upgraded
+# 5. Verify NumPy was NOT upgraded
 NUMPY_VER=$(pip show numpy | grep Version | awk '{print $2}')
 THINC_VER=$(pip show thinc | grep Version | awk '{print $2}')
 SPACY_VER=$(pip show spacy | grep Version | awk '{print $2}')
@@ -247,14 +246,24 @@ echo "  thinc: $THINC_VER"
 echo "  spacy: $SPACY_VER"
 
 if [[ ! "$NUMPY_VER" =~ ^1\. ]]; then
-    echo "❌ CRITICAL: NumPy was upgraded to $NUMPY_VER! This will break thinc/spacy."
+    echo "❌ CRITICAL: NumPy was upgraded to $NUMPY_VER!"
     exit 1
 fi
 
 if [ "$NUMPY_VER" == "1.26.4" ] && [ "$THINC_VER" == "8.2.5" ] && [ "$SPACY_VER" == "3.7.5" ]; then
     echo "✅ All versions locked correctly for NumPy 1.x compatibility"
 else
-    echo "⚠️  Warning: Some versions don't match expected (continuing anyway)"
+    echo "⚠️  Warning: Some versions differ from expected (continuing anyway)"
+fi
+
+# 6. Import test to verify everything works
+echo ""
+echo "Testing imports..."
+if python -c "import spacy; import thinc; import numpy; print('✅ Core imports OK')" 2>/dev/null; then
+    echo "✅ All core packages imported successfully"
+else
+    echo "❌ CRITICAL: Import test failed"
+    exit 1
 fi
 
 # ============================================================================
