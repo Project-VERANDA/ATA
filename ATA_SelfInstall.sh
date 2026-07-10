@@ -240,36 +240,35 @@ for pkg in "${STANDARD_PKGS[@]}"; do
     fi
 done
 
-# 3. Spacy Model Check
+# 3. Spacy Model Check & Dependency Fix
 echo "Checking spaCy multilingual model..."
 
-# Re-verify typer compatibility AFTER spacy installation
-# (spacy can upgrade typer to incompatible versions during install)
-TYPER_VERSION=$(pip show typer 2>/dev/null | grep Version | awk '{print $2}')
-if [ -n "$TYPER_VERSION" ]; then
-    MAJOR=$(echo $TYPER_VERSION | cut -d. -f1)
-    MINOR=$(echo $TYPER_VERSION | cut -d. -f2)
-    
-    # If typer >= 0.13, force downgrade BEFORE running spaCy CLI
-    if [ "$MAJOR" -eq 0 ] && [ "$MINOR" -ge 13 ]; then
-        echo "⚠️  Detected typer $TYPER_VERSION (incompatible after spacy install)."
-        echo "   Forcing downgrade to 0.12.5 before spaCy CLI..."
-        pip uninstall typer -y
-        pip install "typer==0.12.5" --force-reinstall --no-deps --no-cache-dir
-    else
-        echo "✅ typer version is compatible ($TYPER_VERSION)."
-    fi
-else
-    echo "⚠️  typer not found. Installing compatible version..."
-    pip install "typer==0.12.5" --no-cache-dir
-fi
+# Force reinstall click + typer AFTER spacy installation
+# (spacy often overwrites these with incompatible versions)
+echo "Enforcing compatible click + typer versions after spacy install..."
+pip uninstall click typer -y
+pip install "click==8.1.7" "typer==0.12.5" --force-reinstall --no-deps --no-cache-dir
 
-# NOW run spaCy CLI (typer is guaranteed compatible)
+# Verify versions explicitly
+echo "Verifying installations..."
+CLICK_VER=$(pip show click | grep Version | awk '{print $2}')
+TYPER_VER=$(pip show typer | grep Version | awk '{print $2}')
+echo "  click: $CLICK_VER"
+echo "  typer: $TYPER_VER"
+
+# NOW run spaCy CLI (dependencies guaranteed compatible)
 if python -m spacy check xx_ent_wiki_sm &> /dev/null; then
     echo "✅ spaCy multilingual model (xx_ent_wiki_sm) is already installed."
 else
     echo "Installing spaCy multilingual model (xx_ent_wiki_sm)..."
     python -m spacy download xx_ent_wiki_sm
+    
+    # Post-download verification
+    if [ $? -eq 0 ]; then
+        echo "✅ spaCy model downloaded successfully."
+    else
+        echo "⚠️  spaCy model download failed. Continuing without sentence splitting..."
+    fi
 fi
 
 # 4. Torchcodec check
