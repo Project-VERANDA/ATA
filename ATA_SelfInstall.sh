@@ -1,11 +1,11 @@
 #!/usr/bin/bash
 
-# Exit immediately if a command exits with a non-zero status
+# ============================================================================
+# ATA Speech Anonymizer Installer (v3.0 - NUMPY 2.x SUPPORT)
+# ============================================================================
+
 set -e
 
-# ============================================================================
-# 🔧 COMMAND-LINE ARGUMENT PARSING (AUTOMATION)
-# ============================================================================
 SHOW_HELP=false
 SKIP_WEB=false
 NO_MODELS=false
@@ -33,17 +33,6 @@ Options:
   --auto-login            Auto-authenticate with HUGGINGFACE_TOKEN env var
   -q, --quiet             Minimal output mode
   --force-refresh         Unconditionally reinstall all packages
-
-Environment Variables:
-  HUGGINGFACE_TOKEN       Used with --auto-login for Hugging Face auth
-
-Examples:
-  ./ATA_SelfInstall.sh                    # Interactive (default)
-  ./ATA_SelfInstall.sh --yes              # Auto-accept all prompts
-  ./ATA_SelfInstall.sh --yes --skip-web   # Auto, no web UI
-  ./ATA_SelfInstall.sh --yes --no-models  # Dependencies only
-  export HUGGINGFACE_TOKEN=your_token
-  ./ATA_SelfInstall.sh --yes --auto-login # Auto-auth with token
 EOF
 }
 
@@ -103,7 +92,7 @@ fi
 
 cd "$CURRENT_DIR"
 
-echo "=== ATA Speech Anonymizer Installer (v2.1 - MeloTTS Only) ==="
+echo "=== ATA Speech Anonymizer Installer (v3.0 - NumPy 2.x Support) ==="
 echo "Working Directory: $(pwd)"
 echo ""
 
@@ -125,7 +114,6 @@ TARGET_PYTHON="3.12"
 
 echo "Creating conda environment '$ENV_NAME' with Python $TARGET_PYTHON..."
 
-# Check if environment exists
 if conda env list | grep -q "^$ENV_NAME "; then
     if [ "$FORCE_REFRESH" = true ]; then
         echo "🔄 Environment exists (--force-refresh). Removing and recreating..."
@@ -157,54 +145,47 @@ fi
 echo "✅ Python version verified: $ACTUAL_PYTHON"
 
 # ============================================================================
-# CORE PACKAGES (Must work with NumPy 1.26.4)
+# 🔧 NUMPY 2.x COMPATIBLE PACKAGE INSTALLATION
 # ============================================================================
-echo "Installing core ML stack (NumPy 1.x compatible)..."
 
-echo "  → transformers (NumPy 1.x compatible)..."
-pip install "transformers>=4.40.0,<4.48.0" --no-cache-dir
+echo "Upgrading pip..."
+pip install --upgrade pip -q
 
-echo "  → accelerate..."
-pip install "accelerate>=0.20.0,<1.0.0" --no-cache-dir
+echo "Installing ML stack with NumPy 2.x support..."
 
-echo "  → sentencepiece..."
-pip install "sentencepiece>=0.1.99,<1.0.0" --no-cache-dir
+# Install NumPy 2.x FIRST
+echo "  → numpy>=2.0.0 (NumPy 2.x series)..."
+pip install "numpy>=2.0.0,<3.0.0" --no-cache-dir
 
-echo "  → numpy==1.26.4 (LOCK FIRST)..."
-pip install "numpy==1.26.4" --no-cache-dir
+# scipy compatible with NumPy 2.x
+echo "  → scipy..."
+pip install "scipy>=1.18.0" --no-cache-dir
 
-echo "  → scipy (NumPy 1.x compatible)..."
-pip install "scipy>=1.11.0,<1.15.0" --no-cache-dir
-
-echo "  → thinc==8.2.5..."
-pip install "thinc==8.2.5" --no-cache-dir
-
-echo "  → spacy==3.7.5..."
-pip install "spacy==3.7.5" --no-cache-dir
-
-echo "  → blis>=0.7.0,<0.8.0..."
-pip install "blis>=0.7.0,<0.8.0" --no-cache-dir
-
-echo "  → click..."
-pip install "click>=8.1.7,<9.0.0" --no-cache-dir
-
-echo "  → typer..."
-pip install "typer>=0.9.0,<1.0.0" --no-cache-dir
-
+# torch/torchaudio
 echo "  → torch..."
 pip install "torch>=2.0.0,<3.0.0" --no-cache-dir || pip install torch --no-cache-dir
 
 echo "  → torchaudio..."
-pip install "torchaudio>=2.0.0" --no-cache-dir
+pip install "torchaudio>=2.0.0" --no-cache-dir || pip install torchaudio --no-cache-dir
 
 echo "  → torchvision..."
-pip install "torchvision>=0.15.0" --no-cache-dir
+pip install "torchvision>=0.15.0" --no-cache-dir || pip install torchvision --no-cache-dir
 
-echo "  → pandas..."
-pip install "pandas>=2.2.0,<3.0.0" --no-cache-dir
+# transformers (NumPy 2.x compatible)
+echo "  → transformers..."
+pip install "transformers>=4.50.0" --no-cache-dir
+
+echo "  → accelerate..."
+pip install "accelerate>=0.20.0" --no-cache-dir
+
+echo "  → sentencepiece..."
+pip install "sentencepiece>=0.1.99" --no-cache-dir
 
 echo "  → huggingface-hub..."
-pip install "huggingface-hub>=0.24.0,<1.0.0" --no-cache-dir
+pip install "huggingface-hub>=0.24.0" --no-cache-dir
+
+echo "  → pandas..."
+pip install "pandas>=2.2.0" --no-cache-dir
 
 echo "  → pydub..."
 pip install pydub --no-cache-dir
@@ -221,73 +202,73 @@ pip install python-dotenv --no-cache-dir
 echo "  → torchcrf..."
 pip install pytorch-crf --no-cache-dir
 
-# VERIFY CORE PACKAGES BEFORE pyannote.audio
-NUMPY_VER=$(pip show numpy | grep Version | awk '{print $2}')
-THINC_VER=$(pip show thinc | grep Version | awk '{print $2}')
-SPACY_VER=$(pip show spacy | grep Version | awk '{print $2}')
+# CRITICAL: spaCy 3.8+ + thinc 8.3+ (NumPy 2.x compatible)
+echo "  → thinc>=8.3.0 (NumPy 2.x compatible)..."
+pip install "thinc>=8.3.0" --no-cache-dir
 
-echo ""
-echo "=== Core Package Verification ==="
-echo "  numpy: $NUMPY_VER"
-echo "  thinc: $THINC_VER"
-echo "  spacy: $SPACY_VER"
+echo "  → spacy>=3.8.0 (NumPy 2.x compatible)..."
+pip install "spacy>=3.8.0" --no-cache-dir
 
-if [[ ! "$NUMPY_VER" =~ ^1\. ]]; then
-    echo "❌ CRITICAL: NumPy was upgraded to $NUMPY_VER!"
-    exit 1
-fi
+echo "  → blis..."
+pip install "blis>=0.7.0" --no-cache-dir
 
-if python -c "import spacy; import thinc; import numpy" 2>/dev/null; then
-    echo "✅ Core packages OK"
-else
-    echo "❌ CRITICAL: Core imports failed"
-    exit 1
-fi
+echo "  → click..."
+pip install "click>=8.1.7" --no-cache-dir
 
-# ============================================================================
-# OPTIONAL: pyannote.audio (May upgrade NumPy to 2.x)
-# ============================================================================
-echo ""
-echo "============================================================"
-echo "Optional: Installing pyannote.audio"
-echo "Note: May conflict with NumPy 1.x requirement"
-echo "============================================================"
+echo "  → typer..."
+pip install "typer>=0.9.0" --no-cache-dir
 
-if [ "$SKIP_PYANNOTE" != true ]; then
-    # Try older version that may work with NumPy 1.x
-    pip install "pyannote.audio>=3.0.0,<4.0.0" --no-cache-dir || \
-    pip install "pyannote.audio>=3.0.0" --no-cache-dir || \
-    echo "⚠️  pyannote.audio installation failed (optional feature)"
-fi
+# pyannote.audio (NumPy 2.x, requires diarization)
+echo "  → pyannote.audio (speaker diarization)..."
+pip install "pyannote.audio>=4.0.0" --no-cache-dir || \
+pip install "pyannote.audio>=4.0.0,<5.0.0" --no-cache-dir || \
+echo "⚠️  Warning installing pyannote.audio"
+
+# whisperx
+echo "  → whisperx..."
+pip uninstall whisperx -y 2>/dev/null || true
+pip install git+https://github.com/m-bain/whisperx.git --no-cache-dir || \
+pip install whisperx --no-cache-dir || \
+echo "⚠️  Warning installing whisperx"
 
 echo "✅ Base ML stack installation complete."
 
-# Final verification
-NUMPY_VER=$(pip show numpy | grep Version | awk '{print $2}')
-echo ""
-echo "Final NumPy version: $NUMPY_VER"
+# ============================================================================
+# 🔧 VERSION VERIFICATION
+# ============================================================================
 
-if [[ ! "$NUMPY_VER" =~ ^1\. ]]; then
-    echo "⚠️  WARNING: NumPy was upgraded to $NUMPY_VER by optional packages"
-    echo "   Core spacy/thinc functionality may still work, but is not guaranteed"
+echo ""
+echo "=== Version Verification ==="
+NUMPY_VER=$(pip show numpy | grep Version | awk '{print $2}')
+THINC_VER=$(pip show thinc | grep Version | awk '{print $2}')
+SPACY_VER=$(pip show spacy | grep Version | awk '{print $2}')
+PYANNOTE_VER=$(pip show pyannote.audio | grep Version | awk '{print $2}')
+
+echo "  numpy: $NUMPY_VER"
+echo "  thinc: $THINC_VER"
+echo "  spacy: $SPACY_VER"
+echo "  pyannote.audio: ${PYANNOTE_VER:-installed}"
+
+if [[ ! "$NUMPY_VER" =~ ^2\. ]]; then
+    echo "⚠️  WARNING: NumPy $NUMPY_VER (expected 2.x)"
 else
-    echo "✅ NumPy 1.x maintained throughout installation"
+    echo "✅ NumPy $NUMPY_VER confirmed (2.x series)"
 fi
 
-# ============================================================================
-# 🔧 WHISPERX INSTALLATION
-# ============================================================================
-echo "Installing whisperx from source..."
-pip uninstall whisperx -y 2>/dev/null || true
-pip install git+https://github.com/m-bain/whisperx.git --no-cache-dir
+if python -c "import spacy; import thinc; import pyannote.audio; import whisperx" 2>/dev/null; then
+    echo "✅ All core packages imported successfully"
+else
+    echo "❌ CRITICAL: Import test failed"
+    exit 1
+fi
 
 # ============================================================================
 # 🔧 SPACY MODEL INSTALLATION
 # ============================================================================
+
 echo ""
 echo "Checking spaCy models..."
 
-# English model
 if python -m spacy check en_core_web_sm &> /dev/null; then
     echo "✅ en_core_web_sm already installed."
 else
@@ -295,7 +276,6 @@ else
     python -m spacy download en_core_web_sm
 fi
 
-# Multilingual model
 if python -m spacy check xx_ent_wiki_sm &> /dev/null; then
     echo "✅ xx_ent_wiki_sm already installed."
 else
@@ -304,79 +284,9 @@ else
 fi
 
 # ============================================================================
-# 🔧 TORCHCODEC & OTHER CHECKS
+# 🖥️ WEB INTERFACE (FLASK + MELOTTS)
 # ============================================================================
-echo "Checking torchcodec..."
-if python -c "import torchcodec" 2>/dev/null; then
-    echo "✅ torchcodec already available."
-else
-    echo "Installing torchcodec..."
-    pip install "torchcodec>=0.7.0" --no-cache-dir || echo "⚠️  torchcodec not available (optional)"
-fi
 
-echo "Checking CRF library..."
-if python -c "from torchcrf import CRF" 2>/dev/null; then
-    echo "✅ CRF library working."
-else
-    echo "Installing CRF library..."
-    pip install pytorch-crf --no-cache-dir
-fi
-
-# ============================================================================
-# 🔧 POST-INSTALLATION VERIFICATION
-# ============================================================================
-echo ""
-echo "=== Verifying Critical Dependencies ==="
-
-if python -c "import click; from click import Choice; c = Choice(['a','b'])" 2>/dev/null; then
-    echo "✅ click is compatible"
-else
-    echo "❌ WARNING: click may not be compatible."
-fi
-
-if python -c "import typer" 2>/dev/null; then
-    echo "✅ typer imported successfully"
-else
-    echo "❌ WARNING: typer import failed"
-fi
-
-if python -c "import spacy" 2>/dev/null; then
-    echo "✅ spacy imported successfully"
-else
-    echo "❌ WARNING: spacy import failed"
-fi
-
-if python -c "import thinc" 2>/dev/null; then
-    echo "✅ thinc imported successfully"
-else
-    echo "❌ WARNING: thinc import failed"
-fi
-
-if python -c "from huggingface_hub import snapshot_download" 2>/dev/null; then
-    echo "✅ huggingface-hub imported successfully"
-else
-    echo "❌ WARNING: huggingface-hub import failed"
-fi
-
-NUMPY_VER=$(pip show numpy | grep Version | awk '{print $2}')
-THINC_VER=$(pip show thinc | grep Version | awk '{print $2}')
-SPACY_VER=$(pip show spacy | grep Version | awk '{print $2}')
-
-echo ""
-echo "Version Verification:"
-echo "  numpy: $NUMPY_VER"
-echo "  thinc: $THINC_VER"
-echo "  spacy: $SPACY_VER"
-
-if [[ ! "$NUMPY_VER" =~ ^1\. ]]; then
-    echo "❌ CRITICAL: NumPy was upgraded to $NUMPY_VER!"
-    exit 1
-fi
-echo "✅ NumPy verified: $NUMPY_VER (compatible with thinc/spacy)"
-
-# ============================================================================
-# 🖥️ WEB INTERFACE OPTION (FLASK + MELOTTS ONLY - NO PIPER)
-# ============================================================================
 echo ""
 echo "-------------------------------------------------"
 if [ "$SKIP_WEB" = true ]; then
@@ -392,20 +302,12 @@ fi
 
 if [[ "$INSTALL_WEB" =~ ^[Yy]$ ]]; then
     echo "Installing Web Interface dependencies..."
-    
-    echo "Installing Flask and dependencies..."
     pip install flask requests cryptography --no-cache-dir
     
-    # TTS Backend Setup (MeloTTS ONLY - No Piper)
-    echo ""
     echo "============================================================"
     echo "TTS Backend Installation (MeloTTS - Pure Python)"
     echo "============================================================"
-    echo "Installing MeloTTS (MIT license, multilingual, no binary downloads)..."
-    echo "Supported languages: EN, ES, FR, DE, JA, KO, ZH"
     
-    # Install MeloTTS
-    pip uninstall melotts -y 2>/dev/null || true
     pip install git+https://github.com/myshell-ai/MeloTTS.git --no-cache-dir
     
     if python -c "from melotts import MeloTTS" 2>/dev/null; then
@@ -414,29 +316,14 @@ if [[ "$INSTALL_WEB" =~ ^[Yy]$ ]]; then
         echo "❌ CRITICAL: MeloTTS installation failed."
         exit 1
     fi
-    
-    # Pre-download English model (optional - will download on first use if skipped)
-    echo "Pre-downloading MeloTTS English model (optional)..."
-    echo "Press Ctrl+C to skip pre-download (will download on first use)"
-    
-    python -c "
-from melotts import MeloTTS
-try:
-    print('Loading English model...')
-    model = MeloTTS.from_pretrained('EN')
-    print('✅ MeloTTS English model ready.')
-except Exception as e:
-    print(f'⚠️  Initial model download deferred to first use: {e}')
-" 2>&1 || echo "⚠️  Model download deferred to first use."
-    
-    echo "✅ Web Interface and MeloTTS dependencies installed."
 else
     echo "Skipping Web Interface installation."
 fi
 
 # ============================================================================
-# 🧩 MODEL DOWNLOADS (WhisperX, Pyannote, PII)
+# 🧩 MODEL DOWNLOADS
 # ============================================================================
+
 echo ""
 echo "-------------------------------------------------"
 echo "WhisperX & NLP Model Download"
@@ -456,7 +343,6 @@ else
         echo "Downloading $repo_id..."
         mkdir -p "$target_dir"
         
-        # Python fallback with full symlink control
         python -c "
 from huggingface_hub import snapshot_download
 import sys
@@ -527,7 +413,6 @@ except Exception as e:
     else
         echo "Downloading Pyannote to $TARGET..."
         
-        # Authentication check
         if [ "$AUTO_LOGIN" = true ] && [ -n "$HUGGINGFACE_TOKEN" ]; then
             echo "Auto-authenticating with HUGGINGFACE_TOKEN..."
             hf auth login --token "$HUGGINGFACE_TOKEN" --add-to-git-credential 2>/dev/null || true
@@ -542,11 +427,7 @@ except Exception as e:
             download_model_hf "pyannote/speaker-diarization-community-1" "$TARGET" "model"
         else
             echo "⚠️  Not logged in to Hugging Face. Pyannote requires authentication."
-            echo "   Options:"
-            echo "   1. Run: hf auth login"
-            echo "   2. Export: export HUGGINGFACE_TOKEN=your_token"
-            echo "   3. Use: --auto-login with HUGGINGFACE_TOKEN set"
-            echo "   Skipping Pyannote download."
+            echo "   Run: hf auth login OR export HUGGINGFACE_TOKEN=your_token"
         fi
     fi
     
@@ -563,7 +444,6 @@ except Exception as e:
         download_model_hf "jhu-clsp/mmBERT-base" "$BASE_TARGET" "model"
     fi
     
-    # DFKI-SLT PII Model
     PII_TARGET="$MODEL_DIR/multilingual_DialogPII_NER"
     echo ""
     echo "📦 Downloading DFKI-SLT Multilingual DialogPII NER Model"
@@ -583,8 +463,9 @@ except Exception as e:
 fi
 
 # ============================================================================
-# 📋 ENV FILE CREATION (DO NOT OVERWRITE EXISTING)
+# 📋 ENV FILE CREATION
 # ============================================================================
+
 echo ""
 echo "-------------------------------------------------"
 echo "Environment File Configuration"
@@ -593,8 +474,6 @@ if [ -f ".env" ]; then
     echo "⚠️  Existing .env file found. Preserving it."
     echo "   Created backup: .env.backup.$(date +%Y%m%d%H%M%S)"
     cp .env ".env.backup.$(date +%Y%m%d%H%M%S)"
-    
-    # Update TTS settings only
     sed -i 's/^TTS_BACKEND=.*/TTS_BACKEND=melotts/' .env
     echo "✅ Updated .env (TTS_BACKEND=melotts)"
 else
@@ -602,7 +481,7 @@ else
     
     cat > .env <<'EOF'
 # ATA Speech Anonymizer Configuration
-# Generated by ATA_SelfInstall.sh
+# Generated by ATA_SelfInstall.sh v3.0
 
 CHAT_AI_API_KEY=your_api_key_here
 CHAT_AI_ENDPOINT=https://your-endpoint.com/v1
@@ -634,6 +513,7 @@ fi
 # ============================================================================
 # 📋 FINAL INSTRUCTIONS
 # ============================================================================
+
 echo ""
 echo "=========================================================================="
 echo "SETUP COMPLETE!"
@@ -672,12 +552,12 @@ echo "  1. Edit '.env' with your API Key"
 echo "  2. Place videos in 'pipeline/videos'"
 echo "  3. Run: python pipeline/process.py"
 echo ""
-echo "✨ FEATURES:"
+echo "✨ FEATURES (All Working with NumPy 2.x):"
+echo "  • WhisperX speech transcription"
+echo "  • Pyannote speaker diarization"
 echo "  • DFKI-SLT Multilingual DialogPII NER (11 languages)"
 echo "  • FLERT-style context windowing"
-echo "  • MeloTTS for voice synthesis (EN, ES, FR, DE, JA, KO, ZH)"
-echo "  • WhisperX for transcription"
-echo "  • Pyannote for speaker diarization"
+echo "  • MeloTTS for voice synthesis"
 echo ""
 echo "=========================================================================="
 exit 0

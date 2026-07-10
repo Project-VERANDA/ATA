@@ -44,115 +44,116 @@ class TTSBackend(ABC):
         pass
 
 
-class PiperBackend(TTSBackend):
-    """Piper TTS via direct binary execution."""
 
-    # Voice model directory structure: {lang}_{region}-{voice}-{quality}
-    # e.g. en_US-ryan-high, de_DE-thorsten-high
-    DEFAULT_VOICES = {
-        'en': 'en_US-ryan-high',
-        'de': 'de_DE-thorsten-high',
-        'fr': 'fr_FR-siwis-medium',
-        'es': 'es_ES-carlfm-x_low',
-        'nl': 'nl_NL-mls-medium',
-        'it': 'it_IT-riccardo-x_low',
-        'pl': 'pl_PL-gosia-medium',
-        'pt': 'pt_BR-faber-medium',
-    }
+# class PiperBackend(TTSBackend):
+#     """Piper TTS via direct binary execution."""
 
-    def _initialize(self):
-        logger.info("Initializing Piper TTS backend...")
+#     # Voice model directory structure: {lang}_{region}-{voice}-{quality}
+#     # e.g. en_US-ryan-high, de_DE-thorsten-high
+#     DEFAULT_VOICES = {
+#         'en': 'en_US-ryan-high',
+#         'de': 'de_DE-thorsten-high',
+#         'fr': 'fr_FR-siwis-medium',
+#         'es': 'es_ES-carlfm-x_low',
+#         'nl': 'nl_NL-mls-medium',
+#         'it': 'it_IT-riccardo-x_low',
+#         'pl': 'pl_PL-gosia-medium',
+#         'pt': 'pt_BR-faber-medium',
+#     }
 
-        self.bin_path = Path(self.config.get(
-            'TTS_BIN_PATH',
-            './pipeline/tts/bin/piper'
-        ))
-        self.voice_dir = Path(self.config.get(
-            'TTS_VOICE_DIR',
-            './pipeline/tts/voices'
-        ))
-        self.sample_rate = int(self.config.get('TTS_SAMPLE_RATE', 22050))
+#     def _initialize(self):
+#         logger.info("Initializing Piper TTS backend...")
 
-        if not self.bin_path.exists():s
-            raise TTSError(f"Piper binary not found: {self.bin_path}")
+#         self.bin_path = Path(self.config.get(
+#             'TTS_BIN_PATH',
+#             './pipeline/tts/bin/piper'
+#         ))
+#         self.voice_dir = Path(self.config.get(
+#             'TTS_VOICE_DIR',
+#             './pipeline/tts/voices'
+#         ))
+#         self.sample_rate = int(self.config.get('TTS_SAMPLE_RATE', 22050))
 
-        # Resolve voice for default language
-        default_lang = self.config.get('TTS_DEFAULT_LANG', 'en')
-        self.switch_language(default_lang)
+#         if not self.bin_path.exists():s
+#             raise TTSError(f"Piper binary not found: {self.bin_path}")
 
-    def switch_language(self, language: str):
-        lang_key = language.lower()[:2]
-        voice_name = self.DEFAULT_VOICES.get(lang_key, self.DEFAULT_VOICES['en'])
-        voice_path = self.voice_dir / f"{voice_name}.onnx"
+#         # Resolve voice for default language
+#         default_lang = self.config.get('TTS_DEFAULT_LANG', 'en')
+#         self.switch_language(default_lang)
 
-        if not voice_path.exists():
-            # Try the config-specified voice as fallback
-            configured = Path(self.config.get('TTS_VOICE_PATH', ''))
-            if configured.exists():
-                voice_path = configured
-            else:
-                raise TTSError(
-                    f"Voice model not found: {voice_path}. "
-                    f"Download from https://huggingface.co/rhasspy/piper-voices"
-                )
+#     def switch_language(self, language: str):
+#         lang_key = language.lower()[:2]
+#         voice_name = self.DEFAULT_VOICES.get(lang_key, self.DEFAULT_VOICES['en'])
+#         voice_path = self.voice_dir / f"{voice_name}.onnx"
 
-        self._voice_path = voice_path
-        self._current_lang = lang_key
-        logger.info(f"Piper voice set: {voice_path.name} (lang={lang_key})")
+#         if not voice_path.exists():
+#             # Try the config-specified voice as fallback
+#             configured = Path(self.config.get('TTS_VOICE_PATH', ''))
+#             if configured.exists():
+#                 voice_path = configured
+#             else:
+#                 raise TTSError(
+#                     f"Voice model not found: {voice_path}. "
+#                     f"Download from https://huggingface.co/rhasspy/piper-voices"
+#                 )
 
-    def synthesize(self, text: str, output_path: str, speaker_id: int = 0,
-                   language: str = 'en', **kwargs) -> str:
-        import subprocess
+#         self._voice_path = voice_path
+#         self._current_lang = lang_key
+#         logger.info(f"Piper voice set: {voice_path.name} (lang={lang_key})")
 
-        # Switch language if needed
-        lang_key = language.lower()[:2]
-        if self._current_lang != lang_key:
-            try:
-                self.switch_language(lang_key)
-            except TTSError as e:
-                logger.warning(f"Language switch failed: {e}. Using current model ({self._current_lang}).")
+#     def synthesize(self, text: str, output_path: str, speaker_id: int = 0,
+#                    language: str = 'en', **kwargs) -> str:
+#         import subprocess
 
-        output_path = str(Path(output_path).absolute())
+#         # Switch language if needed
+#         lang_key = language.lower()[:2]
+#         if self._current_lang != lang_key:
+#             try:
+#                 self.switch_language(lang_key)
+#             except TTSError as e:
+#                 logger.warning(f"Language switch failed: {e}. Using current model ({self._current_lang}).")
 
-        cmd = [
-            str(self.bin_path),
-            '-m', str(self._voice_path),
-            '-o', output_path,
-            '--sample_rate', str(self.sample_rate),
-        ]
+#         output_path = str(Path(output_path).absolute())
 
-        try:
-            proc = subprocess.run(
-                cmd,
-                input=text.encode('utf-8'),
-                capture_output=True,
-                check=True
-            )
-            logger.debug(f"Piper synthesized: {text[:50]}... -> {output_path}")
-            return output_path
-        except subprocess.CalledProcessError as e:
-            raise TTSError(f"Piper error: {e.stderr.decode(errors='replace')}") from e
+#         cmd = [
+#             str(self.bin_path),
+#             '-m', str(self._voice_path),
+#             '-o', output_path,
+#             '--sample_rate', str(self.sample_rate),
+#         ]
 
-    def get_available_voices(self, language: str = 'en') -> List[Dict]:
-        lang_key = language.lower()[:2]
-        voices = []
-        for onnx_file in sorted(self.voice_dir.glob(f"{lang_key}_*.onnx")):
-            voices.append({
-                'id': onnx_file.stem,
-                'name': onnx_file.stem.replace('_', ' ').title(),
-                'language': [lang_key],
-                'engine': 'piper',
-            })
-        if not voices:
-            # Return default voice info
-            voice_name = self.DEFAULT_VOICES.get(lang_key, 'en_US-ryan-high')
-            voices.append({
-                'id': voice_name,
-                'name': f'{lang_key.upper()} Default (Piper)',
-                'language': [lang_key],
-                'engine': 'piper',
-            })
-        return voices
+#         try:
+#             proc = subprocess.run(
+#                 cmd,
+#                 input=text.encode('utf-8'),
+#                 capture_output=True,
+#                 check=True
+#             )
+#             logger.debug(f"Piper synthesized: {text[:50]}... -> {output_path}")
+#             return output_path
+#         except subprocess.CalledProcessError as e:
+#             raise TTSError(f"Piper error: {e.stderr.decode(errors='replace')}") from e
+
+#     def get_available_voices(self, language: str = 'en') -> List[Dict]:
+#         lang_key = language.lower()[:2]
+#         voices = []
+#         for onnx_file in sorted(self.voice_dir.glob(f"{lang_key}_*.onnx")):
+#             voices.append({
+#                 'id': onnx_file.stem,
+#                 'name': onnx_file.stem.replace('_', ' ').title(),
+#                 'language': [lang_key],
+#                 'engine': 'piper',
+#             })
+#         if not voices:
+#             # Return default voice info
+#             voice_name = self.DEFAULT_VOICES.get(lang_key, 'en_US-ryan-high')
+#             voices.append({
+#                 'id': voice_name,
+#                 'name': f'{lang_key.upper()} Default (Piper)',
+#                 'language': [lang_key],
+#                 'engine': 'piper',
+#             })
+#         return voices
 
 
 class MeloTTSBackend(TTSBackend):
