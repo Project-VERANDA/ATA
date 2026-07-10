@@ -432,16 +432,14 @@ if python -m spacy check en_core_web_sm &> /dev/null; then
 else
     echo "Installing spaCy English model (en_core_web_sm)..."
     python -c "
-    import spacy.cli
-    try:
-        spacy.cli.download('en_core_web_sm')
-        print('✅ Model downloaded successfully.')
-    except Exception as e:
-        print(f'⚠️  Download failed: {e}')
-        print('   Manual installation: pip install https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl')
-    )
-    "
-fi
+import spacy.cli
+try:
+    spacy.cli.download('en_core_web_sm')
+    print('✅ Model downloaded successfully.')
+except Exception as e:
+    print(f'⚠️  Download failed: {e}')
+    print('   Manual installation: pip install https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl')
+"
 
 # Torchcodec check
 echo "Checking torchcodec..."
