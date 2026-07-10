@@ -124,16 +124,31 @@ fi
 
 # 3. Create the environment
 ENV_NAME="whisperx"
-echo "Creating conda environment '$ENV_NAME' with Python 3.11..."
+TARGET_PYTHON="3.12"
+
+echo "Creating conda environment '$ENV_NAME' with Python $TARGET_PYTHON..."
+
+# Check if environment exists AND get its Python version
 if conda env list | grep -q "^$ENV_NAME "; then
-    if [ "$FORCE_REFRESH" = true ]; then
-        echo "Environment exists (--force-refresh). Removing and recreating..."
-        conda env remove -n $ENV_NAME -y
+    EXISTING_PYTHON=$(conda run -n $ENV_NAME python -c "import sys; print(sys.version.split()[0])" 2>/dev/null || echo "unknown")
+    
+    # Compare versions
+    if [ "$EXISTING_PYTHON" == "$TARGET_PYTHON" ]; then
+        if [ "$FORCE_REFRESH" = true ]; then
+            echo "Environment exists (--force-refresh). Removing and recreating..."
+            conda env remove -n $ENV_NAME -y
+        else
+            echo "✅ Environment '$ENV_NAME' already exists (Python $EXISTING_PYTHON). Skipping recreation."
+        fi
     else
-        echo "Environment '$ENV_NAME' already exists. Skipping recreation."
+        echo "⚠️  Environment exists with Python $EXISTING_PYTHON (needs $TARGET_PYTHON). Recreating..."
+        conda env remove -n $ENV_NAME -y
     fi
+else
+    echo "Creating new environment '$ENV_NAME'..."
 fi
-conda create -n $ENV_NAME python=3.12 -y
+
+conda create -n $ENV_NAME python=$TARGET_PYTHON -y
 
 # 4. Activate the environment
 echo "Activating environment..."
