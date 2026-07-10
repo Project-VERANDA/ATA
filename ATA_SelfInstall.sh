@@ -133,7 +133,7 @@ if conda env list | grep -q "^$ENV_NAME "; then
         echo "Environment '$ENV_NAME' already exists. Skipping recreation."
     fi
 fi
-conda create -n $ENV_NAME python=3.11 -y
+conda create -n $ENV_NAME python=3.12 -y
 
 # 4. Activate the environment
 echo "Activating environment..."
@@ -338,9 +338,10 @@ STANDARD_PKGS=(
     "pandas>=2.0.0,<3.0.0"
     "openai>=1.0.0"
     "python-dotenv"
-    "scipy>=1.11.0" 
+    "scipy>=1.11.0,<2.0.0" 
     "numpy>=1.24.0,<2.0.0"
     "huggingface-hub>=0.20.0,<1.0.0"
+    "thinc>=8.2.2,<8.3.0"
 )
 
 for pkg_spec in "${STANDARD_PKGS[@]}"; do
