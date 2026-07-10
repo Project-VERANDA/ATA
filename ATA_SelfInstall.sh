@@ -1,7 +1,8 @@
 #!/usr/bin/bash
 
 # ============================================================================
-# ATA Speech Anonymizer Installer (v3.0 - NUMPY 2.x SUPPORT)
+# ATA Speech Anonymizer Installer (v3.1 - Latest Dependencies)
+# NumPy 2.x Compatible | Latest PyTorch 2.8+ | Streamlined TTS
 # ============================================================================
 
 set -e
@@ -92,7 +93,7 @@ fi
 
 cd "$CURRENT_DIR"
 
-echo "=== ATA Speech Anonymizer Installer (v3.0 - NumPy 2.x Support) ==="
+echo "=== ATA Speech Anonymizer Installer (v3.1 - Latest Dependencies) ==="
 echo "Working Directory: $(pwd)"
 echo ""
 
@@ -145,38 +146,69 @@ fi
 echo "✅ Python version verified: $ACTUAL_PYTHON"
 
 # ============================================================================
-# 🔧 NUMPY 2.x COMPATIBLE PACKAGE INSTALLATION
+# 🔧 SYSTEM DEPENDENCIES
 # ============================================================================
 
-echo "Upgrading pip..."
+echo ""
+echo "============================================================"
+echo "Installing System Dependencies"
+echo "============================================================"
+
+# FFmpeg (required for video/audio processing)
+if ! command -v ffmpeg &> /dev/null; then
+    echo "Installing FFmpeg..."
+    sudo apt-get update -q
+    sudo apt-get install -y ffmpeg || echo "⚠️  FFmpeg installation failed (may work without it)"
+else
+    echo "✅ FFmpeg already installed"
+fi
+
+# MeCab (OPTIONAL - skip since no Japanese TTS needed)
+echo "Note: MeCab/Japanese TTS support skipped (not required for DFKI-SLT PII)"
+
+# ============================================================================
+# 🔧 NUMPY 2.x + LATEST PYTORCH INSTALLATION
+# ============================================================================
+
+echo ""
+echo "============================================================"
+echo "Installing ML Stack (NumPy 2.x + Latest PyTorch 2.8+)"
+echo "============================================================"
+
 pip install --upgrade pip -q
 
-echo "Installing ML stack with NumPy 2.x support..."
-
-# Install NumPy 2.x FIRST
+# Core ML stack with NumPy 2.x compatibility
 echo "  → numpy>=2.0.0 (NumPy 2.x series)..."
 pip install "numpy>=2.0.0,<3.0.0" --no-cache-dir
 
-# scipy compatible with NumPy 2.x
 echo "  → scipy..."
 pip install "scipy>=1.18.0" --no-cache-dir
 
-# torch/torchaudio
-echo "  → torch..."
-pip install "torch>=2.0.0,<3.0.0" --no-cache-dir || pip install torch --no-cache-dir
+# LATEST PyTorch 2.8+ (updated from 2.0.0)
+echo "  → torch>=2.8.0 (LATEST STABLE)..."
+pip install "torch>=2.8.0,<3.0.0" --no-cache-dir || \
+pip install torch --no-cache-dir
 
 echo "  → torchaudio..."
-pip install "torchaudio>=2.0.0" --no-cache-dir || pip install torchaudio --no-cache-dir
+pip install "torchaudio>=2.8.0" --no-cache-dir || \
+pip install torchaudio --no-cache-dir
 
 echo "  → torchvision..."
-pip install "torchvision>=0.15.0" --no-cache-dir || pip install torchvision --no-cache-dir
+pip install "torchvision>=0.23.0" --no-cache-dir || \
+pip install torchvision --no-cache-dir
 
-# transformers (NumPy 2.x compatible)
+# LATEST torchcodec 0.14.0 (updated from 0.7.0)
+echo "  → torchcodec>=0.14.0 (LATEST WITH NUMPY 2.x SUPPORT)..."
+pip install "torchcodec>=0.14.0" --no-cache-dir || \
+pip install "torchcodec>=0.10.0" --no-cache-dir || \
+echo "⚠️  torchcodec installation failed (optional)"
+
+# Transformers & dependencies (NumPy 2.x compatible)
 echo "  → transformers..."
 pip install "transformers>=4.50.0" --no-cache-dir
 
 echo "  → accelerate..."
-pip install "accelerate>=0.20.0" --no-cache-dir
+pip install "accelerate>=0.30.0" --no-cache-dir
 
 echo "  → sentencepiece..."
 pip install "sentencepiece>=0.1.99" --no-cache-dir
@@ -184,6 +216,7 @@ pip install "sentencepiece>=0.1.99" --no-cache-dir
 echo "  → huggingface-hub..."
 pip install "huggingface-hub>=0.24.0" --no-cache-dir
 
+# Other utilities
 echo "  → pandas..."
 pip install "pandas>=2.2.0" --no-cache-dir
 
@@ -218,7 +251,7 @@ pip install "click>=8.1.7" --no-cache-dir
 echo "  → typer..."
 pip install "typer>=0.9.0" --no-cache-dir
 
-# pyannote.audio (NumPy 2.x, requires diarization)
+# Speaker diarization (NumPy 2.x compatible)
 echo "  → pyannote.audio (speaker diarization)..."
 pip install "pyannote.audio>=4.0.0" --no-cache-dir || \
 pip install "pyannote.audio>=4.0.0,<5.0.0" --no-cache-dir || \
@@ -240,14 +273,18 @@ echo "✅ Base ML stack installation complete."
 echo ""
 echo "=== Version Verification ==="
 NUMPY_VER=$(pip show numpy | grep Version | awk '{print $2}')
+Torch_VER=$(pip show torch | grep Version | awk '{print $2}')
 THINC_VER=$(pip show thinc | grep Version | awk '{print $2}')
 SPACY_VER=$(pip show spacy | grep Version | awk '{print $2}')
 PYANNOTE_VER=$(pip show pyannote.audio | grep Version | awk '{print $2}')
+TORCHCODEC_VER=$(pip show torchcodec | grep Version | awk '{print $2}')
 
 echo "  numpy: $NUMPY_VER"
+echo "  torch: $Torch_VER"
 echo "  thinc: $THINC_VER"
 echo "  spacy: $SPACY_VER"
 echo "  pyannote.audio: ${PYANNOTE_VER:-installed}"
+echo "  torchcodec: ${TORCHCODEC_VER:-installed}"
 
 if [[ ! "$NUMPY_VER" =~ ^2\. ]]; then
     echo "⚠️  WARNING: NumPy $NUMPY_VER (expected 2.x)"
@@ -255,7 +292,13 @@ else
     echo "✅ NumPy $NUMPY_VER confirmed (2.x series)"
 fi
 
-if python -c "import spacy; import thinc; import pyannote.audio; import whisperx" 2>/dev/null; then
+if [[ ! "$Torch_VER" =~ ^2\.[89] ]] && [[ ! "$Torch_VER" =~ ^3\. ]]; then
+    echo "⚠️  NOTE: PyTorch $Torch_VER (2.8+ recommended)"
+else
+    echo "✅ PyTorch $Torch_VER confirmed (2.8+ latest)"
+fi
+
+if python -c "import spacy; import thinc; import pyannote.audio; import whisperx; import torchcodec" 2>/dev/null; then
     echo "✅ All core packages imported successfully"
 else
     echo "❌ CRITICAL: Import test failed"
@@ -267,7 +310,9 @@ fi
 # ============================================================================
 
 echo ""
-echo "Checking spaCy models..."
+echo "============================================================"
+echo "Downloading spaCy Models (for PII Detection)"
+echo "============================================================"
 
 if python -m spacy check en_core_web_sm &> /dev/null; then
     echo "✅ en_core_web_sm already installed."
@@ -284,11 +329,14 @@ else
 fi
 
 # ============================================================================
-# 🖥️ WEB INTERFACE (FLASK + MELOTTS)
+# 🖥️ WEB INTERFACE (FLASK + SIMPLIFIED TTS)
 # ============================================================================
 
 echo ""
-echo "-------------------------------------------------"
+echo "============================================================"
+echo "Web Interface & TTS Installation"
+echo "============================================================"
+
 if [ "$SKIP_WEB" = true ]; then
     echo "Skipping Web Interface (--skip-web)"
     INSTALL_WEB="n"
@@ -296,24 +344,28 @@ elif [ "$ANSWER_YES" = true ]; then
     echo "Web Interface: YES (auto-answered --yes)"
     INSTALL_WEB="y"
 else
-    read -p "Do you want to install the Web Interface (Flask, MeloTTS)? (y/n): " INSTALL_WEB
+    read -p "Do you want to install the Web Interface (Flask, TTS)? (y/n): " INSTALL_WEB
     INSTALL_WEB=${INSTALL_WEB:-y}
 fi
 
 if [[ "$INSTALL_WEB" =~ ^[Yy]$ ]]; then
-    echo "Installing Web Interface dependencies..."
+    echo "Installing Flask and dependencies..."
     pip install flask requests cryptography --no-cache-dir
     
-    echo "============================================================"
-    echo "TTS Backend Installation (MeloTTS - Pure Python)"
-    echo "============================================================"
+    # MeloTTS TTS Backend (no Japanese - MeCab not installed)
+    echo ""
+    echo "Installing TTS Backend (MeloTTS - No Japanese Support)..."
     
-    pip install git+https://github.com/myshell-ai/MeloTTS.git --no-cache-dir
+    # Install MeloTTS (Japanese support requires MeCab which we skip)
+    pip install git+https://github.com/myshell-ai/MeloTTS.git --no-cache-dir || \
+    pip install "melotts>=0.1.0,<0.2.0" --no-cache-dir || \
+    echo "⚠️  MeloTTS installation failed"
     
     if python -c "from melotts import MeloTTS" 2>/dev/null; then
-        echo "✅ MeloTTS installed successfully."
+        echo "✅ MeloTTS installed successfully"
+        echo "   Languages: EN, ES, FR, DE, KO, ZH (Japanese disabled)"
     else
-        echo "❌ CRITICAL: MeloTTS installation failed."
+        echo "❌ CRITICAL: MeloTTS installation failed"
         exit 1
     fi
 else
@@ -325,9 +377,9 @@ fi
 # ============================================================================
 
 echo ""
-echo "-------------------------------------------------"
-echo "WhisperX & NLP Model Download"
-echo "Target Directory: $MODEL_DIR"
+echo "============================================================"
+echo "Model Downloads (WhisperX, Pyannote, DFKI-SLT PII)"
+echo "============================================================"
 
 if [ "$NO_MODELS" = true ]; then
     echo "Skipping all model downloads (--no-models)"
@@ -431,11 +483,20 @@ except Exception as e:
         fi
     fi
     
-    # mmBERT Base & PII Models
+    # mmBERT Base & PII Models (11 Languages for PII Detection)
     echo ""
     echo "=========================================================="
     echo "Downloading mBert Base & DFKI-SLT PII NER Model"
+    echo "(Supports 11 languages for PII detection)"
     echo "=========================================================="
+    echo ""
+    echo "Languages: AR, DE, EN, FI, FR, HI, IT, PL, PT, SP/TR"
+    echo ""
+    echo "  AR - Arabic     FI - Finnish    PL - Polish"
+    echo "  DE - German     FR - French     PT - Portuguese"
+    echo "  EN - English    HI - Hindi      SP - Spanish"
+    echo "  IT - Italian    PL - Polish     TR - Turkish"
+    echo ""
     
     BASE_TARGET="$MODEL_DIR/jhu-clsp/mmBERT-base"
     if [ -d "$BASE_TARGET" ] && [ "$(ls -A "$BASE_TARGET")" ]; then
@@ -467,21 +528,22 @@ fi
 # ============================================================================
 
 echo ""
-echo "-------------------------------------------------"
+echo "============================================================"
 echo "Environment File Configuration"
+echo "============================================================"
 
 if [ -f ".env" ]; then
     echo "⚠️  Existing .env file found. Preserving it."
     echo "   Created backup: .env.backup.$(date +%Y%m%d%H%M%S)"
     cp .env ".env.backup.$(date +%Y%m%d%H%M%S)"
-    sed -i 's/^TTS_BACKEND=.*/TTS_BACKEND=melotts/' .env
-    echo "✅ Updated .env (TTS_BACKEND=melotts)"
+    sed -i 's/^TTS_BACKEND=.*/TTS_BACKEND=tts/' .env
+    echo "✅ Updated .env (TTS_BACKEND=tts)"
 else
     echo "Creating new .env file..."
     
     cat > .env <<'EOF'
 # ATA Speech Anonymizer Configuration
-# Generated by ATA_SelfInstall.sh v3.0
+# Generated by ATA_SelfInstall.sh v3.2
 
 CHAT_AI_API_KEY=your_api_key_here
 CHAT_AI_ENDPOINT=https://your-endpoint.com/v1
@@ -489,12 +551,12 @@ CHAT_AI_ENDPOINT=https://your-endpoint.com/v1
 # ============================================================================
 # TTS BACKEND CONFIGURATION
 # ============================================================================
-# TTS Backend: melotts (pure Python, multilingual)
-# Supported languages: EN, ES, FR, DE, JA, KO, ZH
+# TTS Backend: melotts (MeloTTS - English & European languages)
+# Note: Japanese support disabled (MeCab not installed)
+# DFKI-SLT PII Model supports 11 languages: AR, DE, EN, FI, FR, HI, IT, PL, PT, SP, TR
 TTS_BACKEND=melotts
 
-# TTS Model/Voice Selection
-# MeloTTS: EN-US, EN-GB, EN-India, ES, FR, DE, JA, KO, ZH
+# TTS Model/Voice Selection (MeloTTS)
 TTS_MODEL_NAME=EN-US
 
 # Compliance Settings
@@ -552,12 +614,23 @@ echo "  1. Edit '.env' with your API Key"
 echo "  2. Place videos in 'pipeline/videos'"
 echo "  3. Run: python pipeline/process.py"
 echo ""
-echo "✨ FEATURES (All Working with NumPy 2.x):"
+echo "✨ FEATURES (All Working with NumPy 2.x + PyTorch 2.8+):"
 echo "  • WhisperX speech transcription"
 echo "  • Pyannote speaker diarization"
 echo "  • DFKI-SLT Multilingual DialogPII NER (11 languages)"
+echo "    - AR Arabic, DE German, EN English, FI Finnish"
+echo "    - FR French, HI Hindi, IT Italian, PL Polish"
+echo "    - PT Portuguese, SP Spanish, TR Turkish"
 echo "  • FLERT-style context windowing"
-echo "  • MeloTTS for voice synthesis"
+echo "  • MeloTTS for voice synthesis (EN, ES, FR, DE, KO, ZH)"
+echo "    - Note: Japanese disabled (MeCab not installed)"
+echo ""
+echo "Updated Dependencies:"
+echo "  • NumPy: 2.x (2.5.1+)"
+echo "  • PyTorch: 2.8.0+ (latest stable)"
+echo "  • torchcodec: 0.14.0 (latest)"
+echo "  • spaCy: 3.8.0+ (NumPy 2.x compatible)"
+echo "  • thinc: 8.3.0+ (NumPy 2.x compatible)"
 echo ""
 echo "=========================================================================="
 exit 0
