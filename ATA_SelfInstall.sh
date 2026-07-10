@@ -101,25 +101,6 @@ check_apt_installed() {
     fi
 }
 
-install_if_missing() {
-    local pkg_spec=$1
-    local pkg_name=$2
-    
-    if [[ "$pkg_spec" == git+* ]]; then
-        if pip show whisperx &> /dev/null; then
-            echo "✅ whisperx is already installed. Skipping."
-        else
-            echo "Installing whisperx from source..."
-            pip install "$pkg_spec"
-        fi
-    else
-        if ! check_pip_installed "$pkg_name"; then
-            echo "Installing $pkg_name..."
-            pip install "$pkg_spec"
-        fi
-    fi
-}
-
 # 5. Install System Dependencies (APT)
 echo "Checking system build tools..."
 NEEDS_APT=false
@@ -261,6 +242,29 @@ done
 
 # 3. Spacy Model Check
 echo "Checking spaCy multilingual model..."
+
+# Re-verify typer compatibility AFTER spacy installation
+# (spacy can upgrade typer to incompatible versions during install)
+TYPER_VERSION=$(pip show typer 2>/dev/null | grep Version | awk '{print $2}')
+if [ -n "$TYPER_VERSION" ]; then
+    MAJOR=$(echo $TYPER_VERSION | cut -d. -f1)
+    MINOR=$(echo $TYPER_VERSION | cut -d. -f2)
+    
+    # If typer >= 0.13, force downgrade BEFORE running spaCy CLI
+    if [ "$MAJOR" -eq 0 ] && [ "$MINOR" -ge 13 ]; then
+        echo "⚠️  Detected typer $TYPER_VERSION (incompatible after spacy install)."
+        echo "   Forcing downgrade to 0.12.5 before spaCy CLI..."
+        pip uninstall typer -y
+        pip install "typer==0.12.5" --force-reinstall --no-deps --no-cache-dir
+    else
+        echo "✅ typer version is compatible ($TYPER_VERSION)."
+    fi
+else
+    echo "⚠️  typer not found. Installing compatible version..."
+    pip install "typer==0.12.5" --no-cache-dir
+fi
+
+# NOW run spaCy CLI (typer is guaranteed compatible)
 if python -m spacy check xx_ent_wiki_sm &> /dev/null; then
     echo "✅ spaCy multilingual model (xx_ent_wiki_sm) is already installed."
 else
