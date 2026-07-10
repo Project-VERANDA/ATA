@@ -10,6 +10,7 @@ import re
 import time
 import argparse
 import json
+import traceback
 import numpy as np
 from datetime import datetime
 from collections import defaultdict
@@ -17,6 +18,7 @@ from pathlib import Path
 from pydub import AudioSegment
 from openai import OpenAI
 from dotenv import load_dotenv
+from typing import Optional, Dict, List
 load_dotenv()
 
 # GPU Detection Check
@@ -149,6 +151,10 @@ class SessionLogger:
 
 
 # --- Configuration & Security ---
+
+if os.getenv('ENABLE_BETTER_EXCEPTIONS') == 'true':
+    import better_exceptions
+    better_exceptions.hook()
 
 # Setup Logging
 logging.basicConfig(
@@ -2392,6 +2398,287 @@ def anonymize_text_locally(text):
     except Exception as e:
         logger.error(f"Error in anonymize_text_locally: {e}", exc_info=True)
         return None, False, str(e)
+
+# ============================================================================
+# TTS SERVICE LAYER (Migrated from app.py)
+# ============================================================================
+
+import re
+import random
+from pathlib import Path
+
+# TTS configuration from environment
+TTS_BACKEND = os.getenv('TTS_BACKEND', 'piper').lower()
+TTS_ENABLED = os.getenv('TTS_ENABLED', 'true').lower() == 'true'
+TTS_DEFAULT_LANG = os.getenv('TTS_DEFAULT_LANG', 'en')
+TTS_BIN_PATH = os.getenv('TTS_BIN_PATH', str(pipeline_dir / 'tts' / 'bin' / 'piper'))
+TTS_VOICE_DIR = os.getenv('TTS_VOICE_DIR', str(pipeline_dir / 'tts' / 'voices'))
+TTS_VOICE_PATH = os.getenv('TTS_VOICE_PATH', str(pipeline_dir / 'tts' / 'voices' / 'en_US-ryan-high.onnx'))
+TTS_MODEL_NAME = os.getenv('TTS_MODEL_NAME', 'myshell-ai/MeloTTS-English')
+TTS_SAMPLE_RATE = int(os.getenv('TTS_SAMPLE_RATE', '22050'))
+
+# Global TTS engine instance
+_tts_engine = None
+_tts_engine_lang = None
+
+
+def _get_tts_engine():
+    """Lazy-load TTS backend singleton."""
+    global _tts_engine, _tts_engine_lang
+
+    if _tts_engine is not None:
+        return _tts_engine
+
+    if not TTS_ENABLED:
+        return None
+
+    try:
+        # Add tts module to path
+        tts_module_dir = pipeline_dir / 'tts'
+        if str(tts_module_dir) not in sys.path:
+            sys.path.insert(0, str(tts_module_dir))
+        from backend import get_tts_backend
+
+        config = {
+            'TTS_BACKEND': TTS_BACKEND,
+            'TTS_BIN_PATH': TTS_BIN_PATH,
+            'TTS_VOICE_DIR': TTS_VOICE_DIR,
+            'TTS_VOICE_PATH': TTS_VOICE_PATH,
+            'TTS_MODEL_NAME': TTS_MODEL_NAME,
+            'TTS_SAMPLE_RATE': TTS_SAMPLE_RATE,
+            'TTS_DEFAULT_LANG': TTS_DEFAULT_LANG,
+        }
+
+        _tts_engine = get_tts_backend(config=config)
+        logger.info(f"TTS engine initialized: {_tts_engine.backend_name}")
+        return _tts_engine
+    except ImportError as e:
+        logger.error(f"TTS module import failed: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Failed to initialize TTS engine (unexpected error): {e}")
+        logger.debug(traceback.format_exc())
+        return None
+
+
+def generate_beep(duration_ms=400, freq=1000):
+    """Generate a beep sound for PII tag placeholders."""
+    try:
+        from pydub import AudioSegment
+        from pydub.generators import Sine
+        return Sine(freq).to_audio_segment(duration=duration_ms).apply_gain(-12)
+    except ImportError:
+        logger.warning("pydub not available. Beep generation disabled.")
+        return None
+
+
+def synthesize_segment(text: str, language: str = 'en', speaker_id: int = 0) -> Optional['AudioSegment']:
+    """
+    Synthesize a single text segment using the configured TTS backend.
+    Returns a pydub AudioSegment, or None on failure.
+
+    Migrated from app.py's _synthesize_segment().
+    """
+    engine = _get_tts_engine()
+    if not engine:
+        logger.error("TTS engine not available.")
+        return None
+
+    try:
+        from pydub import AudioSegment
+    except ImportError:
+        logger.error("pydub not available for audio segment handling.")
+        return None
+
+    import tempfile
+    import time as _time
+
+    temp_file = tempfile.NamedTemporaryFile(
+        delete=False, suffix=f'_tts_{int(_time.time() * 1000)}_{random.randint(1000, 9999)}.wav'
+    )
+    temp_path = temp_file.name
+    temp_file.close()
+
+    try:
+        engine.synthesize(
+            text=text,
+            output_path=temp_path,
+            speaker_id=speaker_id,
+            language=language,
+        )
+
+        if not os.path.exists(temp_path):
+            logger.error(f"TTS output file not created: {temp_path}")
+            return None
+
+        segment = AudioSegment.from_wav(temp_path)
+        return segment
+
+    except Exception as e:
+        logger.error(f"TTS segment synthesis failed (speaker {speaker_id}, '{text[:40]}...'): {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return None
+    finally:
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+
+
+def generate_speech(text: str, language: str = 'de', output_dir: Optional[str] = None) -> Optional[str]:
+    """
+    Generate speech audio from anonymized transcript text.
+
+    Parses SPEAKER_XX: blocks, inserts beeps for [TAG] placeholders,
+    and synthesizes speech for each text segment.
+
+    Migrated from app.py's generate_speech().
+
+    Args:
+        text: Anonymized transcript with SPEAKER_XX: labels and [TAG] placeholders
+        language: Target language code ('de', 'en', 'fr', etc.)
+        output_dir: Directory for output file (defaults to pipeline/anonymized_audio/)
+
+    Returns:
+        Path to generated MP3 file, or None on failure.
+    """
+    try:
+        from pydub import AudioSegment
+    except ImportError:
+        logger.error("pydub not available. Cannot generate speech.")
+        return None
+
+    engine = _get_tts_engine()
+    if not engine:
+        logger.error("TTS engine not available. Cannot generate speech.")
+        return None
+
+    try:
+        beep_sound = generate_beep()
+        final_audio = AudioSegment.empty()
+
+        # Parse SPEAKER_XX: blocks
+        speaker_regex = re.compile(r'^(SPEAKER_0[0-9]+):\s*', re.MULTILINE)
+        tag_regex = re.compile(r'(\[[A-Z_]+\])')
+
+        segments = []
+        matches = list(speaker_regex.finditer(text))
+
+        for i, match in enumerate(matches):
+            speaker_id_str = match.group(1)
+            start = match.end()
+            end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+            spoken_text = text[start:end].strip()
+            segments.append((speaker_id_str, spoken_text))
+
+        # If no speakers found, treat entire text as one segment
+        if not segments:
+            segments = [("", text)]
+
+        # Synthesize each segment
+        for raw_speaker_id, spoken_text in segments:
+            # Extract speaker number
+            try:
+                spk_num = int(raw_speaker_id.split('_')[1])
+            except (ValueError, IndexError):
+                spk_num = 0
+
+            # Split by [TAG] placeholders
+            sub_parts = tag_regex.split(spoken_text)
+
+            for sub in sub_parts:
+                if not sub or not sub.strip():
+                    continue
+
+                if tag_regex.match(sub):
+                    # Insert beep for PII tags
+                    if beep_sound:
+                        final_audio += beep_sound
+                else:
+                    # Synthesize speech
+                    segment = synthesize_segment(sub.strip(), language=language, speaker_id=spk_num)
+                    if segment:
+                        final_audio += segment
+
+        if len(final_audio) == 0:
+            logger.warning("No audio generated (all segments were tags or empty).")
+            return None
+
+        # Determine output path
+        if output_dir is None:
+            output_dir = str(BASE_PATH / "pipeline" / "anonymized_audio")
+        os.makedirs(output_dir, exist_ok=True)
+
+        audio_filename = f"speech_output_{int(time.time())}.mp3"
+        audio_path = os.path.join(os.path.abspath(output_dir), audio_filename)
+        final_audio.export(audio_path, format="mp3")
+
+        logger.info(f"Speech generated: {audio_path} (backend={engine.backend_name})")
+        return audio_path
+
+    except Exception as e:
+        logger.error(f"Speech generation failed: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return None
+
+
+def get_available_tts_voices(language: str = 'en') -> list:
+    """
+    Return list of available TTS voices for the given language.
+
+    Migrated from app.py's get_available_voices() route logic.
+    """
+    engine = _get_tts_engine()
+    if not engine:
+        return []
+
+    try:
+        return engine.get_available_voices(language)
+    except Exception as e:
+        logger.error(f"Failed to get available voices: {e}")
+        return []
+
+
+def get_tts_status() -> dict:
+    """Return current TTS configuration and status."""
+    return {
+        'backend': TTS_BACKEND,
+        'enabled': TTS_ENABLED,
+        'available': _get_tts_engine() is not None,
+        'default_lang': TTS_DEFAULT_LANG,
+        'sample_rate': TTS_SAMPLE_RATE,
+    }
+
+__all__ = [
+    # Core pipeline functions
+    'transcribe_audio_locally',
+    'load_models',
+    'call_llm_rewriter',
+    'generate_paraphrase',
+    'anonymize_text_locally',
+    'process_anonymization',
+    
+    # TTS service functions
+    'get_tts_backend',
+    'generate_speech',
+    'generate_beep',
+    'synthesize_segment',
+    'get_available_tts_voices',
+    'get_tts_status',
+    'TTS_BACKEND',
+    'TTS_ENABLED',
+    
+    # Paths and config
+    'BASE_PATH',
+    'pipeline_dir',
+    'ANNONYM_FOLDER',
+    'LLM_ANONNYM_FOLDER',
+    'MODEL_FOLDER',
+    'TRANSCRIPTS_FOLDER',
+]
 
 # --- Main Execution ---
 

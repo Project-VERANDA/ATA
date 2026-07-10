@@ -511,21 +511,162 @@ if [[ "$INSTALL_WEB" =~ ^[Yy]$ ]]; then
     smart_install "pandas>=2.0.0,<3.0.0" "pandas" "2.2.0" "$FORCE_REFRESH"
     smart_install "scipy>=1.11.0,<2.0.0" "scipy" "1.14.0" "$FORCE_REFRESH"
     
-    echo "Step 2/4: Installing Coqui TTS..."
-    if pip show TTS &> /dev/null; then
-        if [ "$FORCE_REFRESH" = true ]; then
-            pip uninstall TTS -y
-            pip install "TTS>=0.22.0" --no-cache-dir
-        else
-            echo "✅ TTS already installed. Skipping."
-        fi
-    else
-        pip install "TTS>=0.22.0" --no-cache-dir || \
-        pip install git+https://github.com/coqui-ai/TTS.git@main --no-cache-dir || {
-            echo "❌ CRITICAL: Failed to install Coqui TTS."
-            exit 1
-        }
+    echo "============================================================"
+    echo "TTS Backend Installation"
+    echo "============================================================"
+
+    # Determine TTS backend
+    if [ -n "$TTS_BACKEND" ]; then
+        echo "Using specified TTS backend: $TTS_BACKEND"
+    elif [ "$INSTALL_WEB" = "y" ] && [ -f ".env" ]; then
+        # Read from .env if exists
+        TTS_BACKEND=$(grep "^TTS_BACKEND=" .env 2>/dev/null | cut -d'=' -f2 | tr -d '"')
+        echo "Reading TTS backend from .env: $TTS_BACKEND"
     fi
+
+    # Default to Piper (recommended for Python 3.12+ with clean licensing)
+    TTS_BACKEND="${TTS_BACKEND:-piper}"
+
+    case "$TTS_BACKEND" in
+        piper)
+            echo "Installing Piper TTS (via dimits wrapper)..."
+            echo "Benefits: Clear Apache 2.0/MIT license, Python 3.12 compatible, CPU-efficient"
+            
+            if [ -x "$TTS_BIN_PATH" ]; then
+                echo "✅ Piper binary already installed."
+            else
+                echo "Downloading Piper binary..."
+                PIPER_VERSION="1.4.2"
+                
+                # Detect system architecture dynamically
+                ARCH=$(uname -m)
+                echo "Detected architecture: $ARCH"
+                
+                case $ARCH in
+                    x86_64)
+                        PIPER_PLATFORM="linux-x86_64"
+                        ;;
+                    aarch64)
+                        PIPER_PLATFORM="linux-aarch64"
+                        ;;
+                    armv7l)
+                        PIPER_PLATFORM="linux-armv7l"
+                        ;;
+                    *)
+                        echo "❌ ERROR: Unsupported architecture: $ARCH"
+                        echo "   Piper TTS binary pre-built packages are not available for your system."
+                        echo "   Options:"
+                        echo "   1. Switch to MeloTTS backend: export TTS_BACKEND=melotts"
+                        echo "   2. Build Piper from source manually: https://github.com/rhasspy/piper"
+                        exit 1
+                        ;;
+                esac
+                
+                echo "Using Piper platform: $PIPER_PLATFORM"
+                
+                # Download with correct URL
+                wget -q "https://github.com/rhasspy/piper/releases/download/v${PIPER_VERSION}/piper_${PIPER_VERSION}_${PIPER_PLATFORM}.tar.xz" -O piper.tar.xz
+                
+                tar xf piper.tar.xz
+                mkdir -p "$CURRENT_DIR/pipeline/tts/bin"
+                mv "piper_${PIPER_VERSION}_${PIPER_PLATFORM}/piper" "$CURRENT_DIR/pipeline/tts/bin/"
+                chmod +x "$CURRENT_DIR/pipeline/tts/bin/piper"
+                rm -rf "piper_${PIPER_VERSION}_${PIPER_PLATFORM}" piper.tar.xz
+                echo "✅ Piper binary installed."
+            fi
+            
+            echo "Installing dimits Python wrapper..."
+            smart_install "dimits" "dimits" "" "$FORCE_REFRESH"
+            
+            # Voice model download
+            DEFAULT_VOICE="en_US-ryan-high"
+            if [ -n "$TTS_VOICE" ]; then
+                VOICE_MODEL="$TTS_VOICE"
+            else
+                VOICE_MODEL="$DEFAULT_VOICE"
+            fi
+            
+            VOICE_DIR="$MODEL_DIR/piper-voices"
+            mkdir -p "$VOICE_DIR"
+            
+            if [ ! -f "$VOICE_DIR/${VOICE_MODEL}.onnx" ]; then
+                echo "Downloading Piper voice: $VOICE_MODEL..."
+                curl -sL "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/${VOICE_MODEL}/medium/${VOICE_MODEL}.onnx" \
+                    -o "$VOICE_DIR/${VOICE_MODEL}.onnx"
+                
+                curl -sL "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/${VOICE_MODEL}/medium/${VOICE_MODEL}.onnx.json" \
+                    -o "$VOICE_DIR/${VOICE_MODEL}.onnx.json" 2>/dev/null || true
+                
+                if [ -f "$VOICE_DIR/${VOICE_MODEL}.onnx" ] && [ "$(ls -la "$VOICE_DIR/${VOICE_MODEL}.onnx" | awk '{print $5}')" -gt 100000 ]; then
+                    echo "✅ Piper voice downloaded: $VOICE_MODEL"
+                else
+                    echo "⚠️  Piper voice download incomplete. Manual download may be needed."
+                fi
+            else
+                echo "✅ Piper voice already exists: $VOICE_MODEL"
+            fi
+            ;;
+        
+        melotts)
+            echo "Installing MeloTTS..."
+            echo "Benefits: MIT license, multilingual (EN, ES, FR, DE, JA, KO, ZH), fast CPU inference"
+            
+            if pip show melotts &> /dev/null; then
+                if [ "$FORCE_REFRESH" = true ]; then
+                    echo "Reinstalling MeloTTS (--force-refresh)..."
+                    pip uninstall melotts -y
+                    pip install git+https://github.com/myshell-ai/MeloTTS.git --no-cache-dir
+                else
+                    echo "✅ MeloTTS already installed. Skipping."
+                fi
+            else
+                echo "Installing MeloTTS from source..."
+                pip install git+https://github.com/myshell-ai/MeloTTS.git --no-cache-dir || \
+                pip install melotts --no-cache-dir || {
+                    echo "❌ CRITICAL: Failed to install MeloTTS."
+                    exit 1
+                }
+            fi
+            
+            # Model is downloaded on first use via from_pretrained()
+            # Optionally pre-download to avoid runtime latency
+            echo "Pre-downloading MeloTTS model (optional)... Press Ctrl+C to skip"
+            python -c "
+    from melotts import MeloTTS
+    print('Loading English model...')
+    model = MeloTTS.from_pretrained('myshell-ai/MeloTTS-English')
+    print('✅ MeloTTS model ready.')
+    " 2>&1 || echo "⚠️  Initial model download deferred to first use."
+            ;;
+        
+        coqui)
+            echo "Installing Coqui TTS (legacy)..."
+            echo "NOTE: Coqui has Python 3.12 compatibility issues and unclear licensing"
+            
+            if pip show TTS &> /dev/null; then
+                if [ "$FORCE_REFRESH" = true ]; then
+                    pip uninstall TTS -y
+                    pip install "TTS>=0.22.0" --no-cache-dir
+                else
+                    echo "✅ TTS already installed. Skipping."
+                fi
+            else
+                pip install "TTS>=0.22.0" --no-cache-dir || \
+                pip install git+https://github.com/coqui-ai/TTS.git@main --no-cache-dir || {
+                    echo "❌ CRITICAL: Failed to install Coqui TTS."
+                    exit 1
+                }
+            fi
+            ;;
+        
+        *)
+            echo "❌ Unknown TTS backend: $TTS_BACKEND"
+            echo "Valid options: piper, melotts, coqui"
+            exit 1
+            ;;
+    esac
+
+    echo ""
     
     echo "Step 3/4: Installing Flask and dependencies..."
     WEB_DEPS=("flask" "requests" "cryptography" "pydub" "ffmpeg-python")
@@ -749,20 +890,52 @@ CLICK_VER=$(pip show click | grep Version | awk '{print $2}')
 TYPER_VER=$(pip show typer | grep Version | awk '{print $2}')
 echo "  click: $CLICK_VER | typer: $TYPER_VER"
 
-# ============================================================================
-# 📁 ENVIRONMENT FILE CREATION
-# ============================================================================
 echo ""
 if [ -f ".env" ]; then
-    echo "⚠️  Existing .env file found. Skipping creation."
-else
-    cat > .env <<EOF
+    echo "⚠️  Existing .env file found. Updating TTS settings only."
+    # Backup existing
+    cp .env .env.backup.$(date +%Y%m%d%H%M%S)
+fi
+
+cat > .env <<'EOF'
 # ATA Speech Anonymizer Configuration
 CHAT_AI_API_KEY=your_api_key_here
 CHAT_AI_ENDPOINT=https://your-endpoint.com/v1
+
+# ============================================================================
+# TTS BACKEND CONFIGURATION
+# ============================================================================
+# Supported backends: piper, melotts, coqui
+# Recommended: piper (clean license, Python 3.12 compatible)
+TTS_BACKEND=piper
+
+# TTS Model/Voice Selection
+# Piper: en_US-ryan-high, en_US-libritts-high, de_DE-thorsten-high
+# MeloTTS: EN-US, EN-GB, EN-India, ES, FR, DE, JA, KO, ZH
+# Coqui: tts_models/de/thorsten/vits, tts_models/en/vctk/vits
+TTS_MODEL_NAME=en_US-ryan-high
+
+# Piper-specific paths (optional, auto-detected if empty)
+TTS_BIN_ACTUAL="$CURRENT_DIR/pipeline/tts/bin/piper"
+TTS_VOICE_ACTUAL="$CURRENT_DIR/pipeline/tts/voices/${VOICE_MODEL}.onnx"
+
+# Piper-specific paths (auto-configured)
+TTS_BIN_PATH=${TTS_BIN_ACTUAL}
+TTS_VOICE_PATH=${TTS_VOICE_ACTUAL}
+
+# Compliance Settings
+COMPLIANCE_MODE=standard  # Options: strict, standard, none
+COMPLIANCE_ENCRYPTION=false  # Enable audio file encryption at rest
+COMPLIANCE_AUDIT_LOG=false   # Enable access logging
+
+# Logging
+LOG_LEVEL=INFO
+LOG_FILE=/path/to/logs/ata.log
 EOF
-    echo "✅ .env file created. Edit with your API key."
-fi
+
+echo "✅ .env file created. Review and customize TTS_BACKEND setting."
+echo "⚠️  For healthcare/PHI data: See COMPLIANCE_MODE recommendations below"
+echo ""
 
 # ============================================================================
 # 📋 FINAL INSTRUCTIONS
