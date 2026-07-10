@@ -289,24 +289,18 @@ except Exception as e:
 # ============================================================================
 # 🔧 Click + typer version enforcement (MOVED BEFORE SPACY)
 # ============================================================================
-echo "Locking click==8.1.7 and typer==0.12.5 (required by spaCy)..."
+echo "Locking click==8.1.7 and typer==0.12.5 (required by spaCy 3.7.x)..."
 
-# Force click first (typer depends on this)
-pip uninstall click -y 2>/dev/null || true
-pip install "click==8.1.7" --no-cache-dir
+pip uninstall click typer -y 2>/dev/null || true
+pip install "click==8.1.7" "typer==0.12.5" --no-cache-dir
 
-# Then typer (must match spaCy 3.7.x requirements)
-pip uninstall typer -y 2>/dev/null || true
-pip install "typer==0.12.5" --no-cache-dir
-
-# Verify before continuing
 CLICK_VER=$(pip show click | grep Version | awk '{print $2}')
 TYPER_VER=$(pip show typer | grep Version | awk '{print $2}')
 echo "✅ Locked: click=$CLICK_VER, typer=$TYPER_VER"
 echo ""
 
 # ============================================================================
-# 🔧 All other packages
+# 🔧 All other packages (WITHOUT spacy yet!)
 # ============================================================================
 
 echo "Upgrading pip..."
@@ -314,40 +308,62 @@ pip install --upgrade pip -q
 
 echo "Installing base ML stack in dependency order..."
 
-# 1. Torch first (many packages require specific versions)
-echo "  → torch (foundation for ML stack)..."
+# 1. Torch
+echo "  → torch..."
 pip install torch==2.8.0 torchaudio==2.8.0 torchvision==0.23.0 --no-cache-dir || \
 pip install torch torchaudio torchvision --no-cache-dir
 
-# 2. NumPy next (must be compatible with both old and new packages)
-echo "  → numpy (2.x for whisperx/pyannote compatibility)..."
+# 2. NumPy
+echo "  → numpy..."
 pip install "numpy>=2.1.0,<3.0.0" --no-cache-dir
 
-# 3. Transformers BEFORE spacy (spacy can downgrade transformers)
+# 3. Transformers
 echo "  → transformers..."
 pip install "transformers>=4.48.0" --no-cache-dir
 
-# 4. huggingface-hub AFTER transformers
+# 4. huggingface-hub
 echo "  → huggingface-hub..."
 pip install "huggingface-hub>=1.5.0" --no-cache-dir
 
-# 5. SciPy AFTER numpy
+# 5. SciPy
 echo "  → scipy..."
 pip install "scipy>=1.14.0" --no-cache-dir
 
-# 6. Pandas AFTER numpy  
+# 6. Pandas
 echo "  → pandas..."
 pip install "pandas>=2.2.0" --no-cache-dir
 
-# 7. NOW spacy (won't override numpy/transformers)
-echo "  → spacy (won't override click/typer)..."
-pip install "spacy>=3.7.5" --no-cache-dir --no-deps
-
-# 8. Other base packages
+# 7. OTHER base packages (EXCLUDE spacy!)
 echo "  → other dependencies..."
 pip install pydub ffmpeg-python sentencepiece torchcrf python-dotenv openai accelerate --no-cache-dir
 
+# 8. NOW install spacy with EXACT version (after click/typer locked)
+echo "  → spacy 3.7.5 (exact pin to avoid 3.8.x)..."
+pip uninstall spacy -y 2>/dev/null || true
+pip install "spacy==3.7.5" --no-cache-dir  # <-- EXACT VERSION, not >=3.7.5
+
 echo "✅ Base ML stack installation complete."
+
+# ============================================================================
+# 🔧 RE-LOCK CLICK/TYPER AT END (before spaCy CLI runs)
+# ============================================================================
+echo "Re-locking click/typer before spaCy CLI..."
+pip uninstall click typer -y 2>/dev/null || true
+pip install "click==8.1.7" "typer==0.12.5" --no-cache-dir
+
+CLICK_VER=$(pip show click | grep Version | awk '{print $2}')
+TYPER_VER=$(pip show typer | grep Version | awk '{print $2}')
+echo "Final verification: click=$CLICK_VER, typer=$TYPER_VER"
+
+if [ "$CLICK_VER" != "8.1.7" ]; then
+    echo "❌ CRITICAL: click version must be 8.1.7 (found $CLICK_VER)"
+    exit 1
+fi
+
+if [[ ! "$TYPER_VER" =~ ^0\.1[0-2]\. ]]; then
+    echo "❌ CRITICAL: typer must be 0.10-0.12.x (found $TYPER_VER)"
+    exit 1
+fi
 
 # Verify versions explicitly
 echo "Verifying installations..."
@@ -390,7 +406,7 @@ STANDARD_PKGS=(
     "transformers>=4.48.0"
     "accelerate>=0.20.0"
     "sentencepiece"
-    "spacy>=3.7.5"
+    "spacy==3.7.5"  # ← Changed from >=3.7.5 to exact pin
     "torchcrf"
     "pandas>=2.2.0"
     "openai>=1.0.0"
@@ -398,7 +414,7 @@ STANDARD_PKGS=(
     "scipy>=1.14.0"
     "numpy>=2.1.0"
     "huggingface-hub>=1.5.0"
-    "thinc>=8.2.2"
+    "thinc>=8.2.2,<8.3.0"  # ← Restrict thinc to 8.2.x for typer compatibility
 )
 
 echo "Installing remaining standard packages..."
@@ -422,6 +438,8 @@ for pkg_spec in "${STANDARD_PKGS[@]}"; do
             echo "  → Installing $pkg_spec..."
             pip install "$pkg_spec" --no-cache-dir
             ;;
+        "spacy")
+            echo "  → $pkg_name already installed (exact pin 3.7.5)"
     esac
 done
 echo "✅ Standard packages processed."
