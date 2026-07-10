@@ -128,26 +128,32 @@ TARGET_PYTHON="3.12"
 
 echo "Creating conda environment '$ENV_NAME' with Python $TARGET_PYTHON..."
 
-# Check if environment exists AND get its Python version
+# Check if environment exists
 if conda env list | grep -q "^$ENV_NAME "; then
-    EXISTING_PYTHON=$(conda run -n $ENV_NAME python -c "import sys; print(sys.version.split()[0])" 2>/dev/null || echo "unknown")
-    
-    # Compare versions
-    if [ "$EXISTING_PYTHON" == "$TARGET_PYTHON" ]; then
-        if [ "$FORCE_REFRESH" = true ]; then
-            echo "Environment exists (--force-refresh). Removing and recreating..."
-            conda env remove -n $ENV_NAME -y
-        else
-            echo "✅ Environment '$ENV_NAME' already exists (Python $EXISTING_PYTHON). Skipping recreation."
-        fi
-    else
-        echo "⚠️  Environment exists with Python $EXISTING_PYTHON (needs $TARGET_PYTHON). Recreating..."
+    # ALWAYS recreate on --force-refresh
+    if [ "$FORCE_REFRESH" = true ]; then
+        echo "🔄 Environment exists (--force-refresh). Removing and recreating..."
         conda env remove -n $ENV_NAME -y
+        
+        # Additional safety: remove directory if still exists
+        rm -rf ~/miniconda3/envs/$ENV_NAME 2>/dev/null || true
+        rm -rf ~/miniforge3/envs/$ENV_NAME 2>/dev/null || true
+    else
+        # If no --force-refresh, warn and RECOMMEND flag (don't trust existing env)
+        echo "⚠️  Environment '$ENV_NAME' already exists."
+        echo "   WARNING: Version may be incorrect. Recommended: --force-refresh"
+        echo "   Running with --force-refresh to ensure Python $TARGET_PYTHON..."
+        
+        # Force recreation anyway for safety
+        conda env remove -n $ENV_NAME -y
+        
+        # Additional safety: remove directory if still exists
+        rm -rf ~/miniconda3/envs/$ENV_NAME 2>/dev/null || true
+        rm -rf ~/miniforge3/envs/$ENV_NAME 2>/dev/null || true
     fi
-else
-    echo "Creating new environment '$ENV_NAME'..."
 fi
 
+echo "Creating fresh environment with Python $TARGET_PYTHON..."
 conda create -n $ENV_NAME python=$TARGET_PYTHON -y
 
 # 4. Activate the environment
@@ -507,7 +513,7 @@ if [[ "$INSTALL_WEB" =~ ^[Yy]$ ]]; then
     echo "Installing Web Interface dependencies..."
     pip install --upgrade pip setuptools wheel
     
-    echo "Step 1/4: Forcing NumPy >=2.1.0 and Pandas >=2.2.3..."
+    echo "Step 1/4: Forcing NumPy >=1.24.0,<2.0.0 , Pandas >=2.0.0,<3.0.0 and scipy >=1.11.0,<2.0.0..."
     smart_install "numpy>=1.24.0,<2.0.0" "numpy" "1.26.4" "$FORCE_REFRESH"
     smart_install "pandas>=2.0.0,<3.0.0" "pandas" "2.2.0" "$FORCE_REFRESH"
     smart_install "scipy>=1.11.0,<2.0.0" "scipy" "1.14.0" "$FORCE_REFRESH"
