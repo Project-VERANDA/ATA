@@ -289,6 +289,43 @@ except Exception as e:
 echo "Upgrading pip..."
 pip install --upgrade pip -q
 
+echo "Installing base ML stack in dependency order..."
+
+# 1. Torch first (many packages require specific versions)
+echo "  → torch (foundation for ML stack)..."
+pip install torch==2.8.0 torchaudio==2.8.0 torchvision==0.23.0 --no-cache-dir || \
+pip install torch torchaudio torchvision --no-cache-dir
+
+# 2. NumPy next (must be compatible with both old and new packages)
+echo "  → numpy (2.x for whisperx/pyannote compatibility)..."
+pip install "numpy>=2.1.0,<3.0.0" --no-cache-dir
+
+# 3. Transformers BEFORE spacy (spacy can downgrade transformers)
+echo "  → transformers..."
+pip install "transformers>=4.48.0" --no-cache-dir
+
+# 4. huggingface-hub AFTER transformers
+echo "  → huggingface-hub..."
+pip install "huggingface-hub>=1.5.0" --no-cache-dir
+
+# 5. SciPy AFTER numpy
+echo "  → scipy..."
+pip install "scipy>=1.14.0" --no-cache-dir
+
+# 6. Pandas AFTER numpy  
+echo "  → pandas..."
+pip install "pandas>=2.2.0" --no-cache-dir
+
+# 7. NOW spacy (won't override numpy/transformers)
+echo "  → spacy..."
+pip install "spacy>=3.7.5" --no-cache-dir
+
+# 8. Other base packages
+echo "  → other dependencies..."
+pip install pydub ffmpeg-python sentencepiece torchcrf python-dotenv openai accelerate --no-cache-dir
+
+echo "✅ Base ML stack installation complete."
+
 # ============================================================================
 # 🔧 Click + typer version enforcement
 # ============================================================================
@@ -360,25 +397,45 @@ STANDARD_PKGS=(
     "pydub"
     "ffmpeg-python"
     "pyannote.audio"
-    "transformers>=4.35.0"
+    "transformers>=4.48.0"
     "accelerate>=0.20.0"
     "sentencepiece"
-    "spacy==3.7.5"
+    "spacy>=3.7.5"
     "torchcrf"
-    "pandas>=2.0.0,<3.0.0"
+    "pandas>=2.2.0"
     "openai>=1.0.0"
     "python-dotenv"
-    "scipy>=1.11.0,<2.0.0" 
-    "numpy>=1.24.0,<2.0.0"
-    "huggingface-hub>=0.20.0,<1.0.0"
-    "thinc>=8.2.2,<8.3.0"
+    "scipy>=1.14.0"
+    "numpy>=2.1.0"
+    "huggingface-hub>=1.5.0"
+    "thinc>=8.2.2"
 )
 
+echo "Installing remaining standard packages..."
 for pkg_spec in "${STANDARD_PKGS[@]}"; do
-    pkg_name=$(echo "$pkg_spec" | grep -oE '^[a-zA-Z0-9_-]+' | tr -d '>=' | tr -d '<')
-    desired_version=$(echo "$pkg_spec" | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1)
-    smart_install "$pkg_spec" "$pkg_name" "$desired_version" "$FORCE_REFRESH"
+    pkg_name=$(echo "$pkg_spec" | sed 's/[<>=].*//')
+    case $pkg_name in
+        torch|numpy|transformers|huggingface-hub|scipy|pandas|spacy|pydub|ffmpeg-python|sentencepiece|torchcrf|python-dotenv|openai|accelerate)
+            # Already handled in base ML pre-installation
+            echo "  → $pkg_name already installed (base ML stack)"
+            ;;
+        "pyannote.audio")
+            # Handle specially - may have dependency issues
+            echo "  → Installing $pkg_spec..."
+            pip install "$pkg_spec" --no-cache-dir || echo "⚠️  Warning installing pyannote.audio"
+            ;;
+        "thinc>=8.2.2")
+            echo "  → Installing $pkg_spec..."
+            pip install "$pkg_spec" --no-cache-dir || echo "⚠️  Warning installing thinc"
+            ;;
+        *)
+            echo "  → Installing $pkg_spec..."
+            pip install "$pkg_spec" --no-cache-dir
+            ;;
+    esac
 done
+echo "✅ Standard packages processed."
+echo ""
 
 # 3. Spacy Model Check & Dependency Fix
 echo "Checking spaCy multilingual model..."
@@ -506,10 +563,10 @@ if [[ "$INSTALL_WEB" =~ ^[Yy]$ ]]; then
     echo "Installing Web Interface dependencies..."
     pip install --upgrade pip setuptools wheel
     
-    echo "Step 1/4: Forcing NumPy >=1.24.0,<2.0.0 , Pandas >=2.0.0,<3.0.0 and scipy >=1.11.0,<2.0.0..."
-    smart_install "numpy>=1.24.0,<2.0.0" "numpy" "1.26.4" "$FORCE_REFRESH"
-    smart_install "pandas>=2.0.0,<3.0.0" "pandas" "2.2.0" "$FORCE_REFRESH"
-    smart_install "scipy>=1.11.0,<2.0.0" "scipy" "1.14.0" "$FORCE_REFRESH"
+    echo "Step 1/4: Verifying NumPy/Pandas/Scipy compatibility..."
+    # Note: Versions already set in base ML pre-installation above
+    # Just ensure they're present
+    pip list | grep -E "numpy|pandas|scipy" || echo "⚠️  Some packages missing from base installation"
     
     echo "============================================================"
     echo "TTS Backend Installation"
