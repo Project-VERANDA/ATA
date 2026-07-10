@@ -346,13 +346,13 @@ if pip show whisperx &> /dev/null; then
     if [ "$FORCE_REFRESH" = true ]; then
         echo "Reinstalling whisperx (--force-refresh)..."
         pip uninstall whisperx -y
-        pip install git+https://github.com/m-bain/whisperx.git@3.6.0 --no-cache-dir
+        pip install git+https://github.com/m-bain/whisperx.git --no-cache-dir
     else
         echo "✅ whisperx already installed. Skipping."
     fi
 else
     echo "Installing whisperx from source..."
-    pip install git+https://github.com/m-bain/whisperx.git@3.6.0 --no-cache-dir
+    pip install git+https://github.com/m-bain/whisperx.git --no-cache-dir
 fi
 
 # Standard packages with version checking
