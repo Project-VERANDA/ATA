@@ -163,9 +163,6 @@ else
     echo "✅ FFmpeg already installed"
 fi
 
-# MeCab (OPTIONAL - skip since no Japanese TTS needed)
-echo "Note: MeCab/Japanese TTS support skipped (not required for DFKI-SLT PII)"
-
 # ============================================================================
 # 🔧 NUMPY 2.x + LATEST PYTORCH INSTALLATION
 # ============================================================================
@@ -516,29 +513,37 @@ except Exception as e:
     
     # Pyannote Diarization Model
     TARGET="$MODEL_DIR/models--pyannote--speaker-diarization-community-1"
-    
+
     if [ "$SKIP_PYANNOTE" = true ]; then
         echo "Skipping Pyannote (--skip-pyannote)"
-    elif [ -d "$TARGET" ] && [ "$(ls -A "$TARGET")" ]; then
+    elif [ -d "$TARGET" ] && [ "$(ls -A "$TARGET" 2>/dev/null)" ]; then
         echo "✅ Pyannote model already exists."
     else
         echo "Downloading Pyannote to $TARGET..."
         
+        # Authenticate if token provided
         if [ "$AUTO_LOGIN" = true ] && [ -n "$HUGGINGFACE_TOKEN" ]; then
-            echo "Auto-authenticating with HUGGINGFACE_TOKEN..."
+            echo "Authenticating with HUGGINGFACE_TOKEN..."
             hf auth login --token "$HUGGINGFACE_TOKEN" --add-to-git-credential 2>/dev/null || true
-            AUTHENTICATED=true
-        elif hf auth status &> /dev/null 2>&1; then
-            AUTHENTICATED=true
-        else
-            AUTHENTICATED=false
         fi
         
-        if [ "$AUTHENTICATED" = true ]; then
-            download_model_hf "pyannote/speaker-diarization-community-1" "$TARGET" "model"
+        # Check auth status using hf whoami
+        if hf whoami &>/dev/null; then
+            echo "✅ Hugging Face authenticated"
+            
+            python -c "
+    from huggingface_hub import snapshot_download
+    snapshot_download(
+        repo_id='pyannote/speaker-diarization-community-1',
+        local_dir='$TARGET',
+        local_dir_use_symlinks=False
+    )
+    print('✅ Download complete')
+    "
         else
-            echo "⚠️  Not logged in to Hugging Face. Pyannote requires authentication."
-            echo "   Run: hf auth login OR export HUGGINGFACE_TOKEN=your_token"
+            echo "⚠️  Not logged in to Hugging Face."
+            echo "   Run: hf auth login"
+            echo "   Or: export HUGGINGFACE_TOKEN=your_token && ./ATA_SelfInstall.sh --auto-login"
         fi
     fi
     
