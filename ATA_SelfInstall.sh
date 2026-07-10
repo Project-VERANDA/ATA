@@ -357,12 +357,15 @@ if [[ "$INSTALL_WEB" =~ ^[Yy]$ ]]; then
     echo "Installing TTS Backend (MeloTTS - No Japanese Support)..."
     
     # Install MeloTTS (Japanese support requires MeCab which we skip)
+    if command -v apt-get &> /dev/null && [ -w /etc ] && [ "$(id -u)" -eq 0 ]; then
+        echo "Installing MeCab (optional, for Japanese TTS)..."
+        sudo apt-get install -y mecab libmecab-dev mecab-ipadic-utf8 || \
+        echo "⚠️  MeCab install failed (non-blocking)"
+    fi
     pip install git+https://github.com/myshell-ai/MeloTTS.git --no-cache-dir || \
-    pip install "melotts>=0.1.0,<0.2.0" --no-cache-dir || \
-    echo "⚠️  MeloTTS installation failed"
+    echo "⚠️  MeloTTS install failed"
     
-    if python -c "from melotts import MeloTTS" 2>/dev/null; then
-        echo "✅ MeloTTS installed successfully"
+    if python -c "from melotts import MeloTTS; print('MeloTTS available')" 2>/dev/null; then echo "✅ MeloTTS installed successfully"
         echo "   Languages: EN, ES, FR, DE, KO, ZH (Japanese disabled)"
     else
         echo "❌ CRITICAL: MeloTTS installation failed"
