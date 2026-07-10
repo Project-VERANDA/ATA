@@ -365,26 +365,10 @@ if [[ ! "$TYPER_VER" =~ ^0\.1[0-2]\. ]]; then
     exit 1
 fi
 
-# Verify versions explicitly
-echo "Verifying installations..."
-CLICK_VER=$(pip show click | grep Version | awk '{print $2}')
-TYPER_VER=$(pip show typer | grep Version | awk '{print $2}')
-echo "  click: $CLICK_VER"
-echo "  typer: $TYPER_VER"
-
-if [ "$CLICK_VER" != "8.1.7" ]; then
-    echo "❌ CRITICAL: click version must be 8.1.7 (found $CLICK_VER)"
-    exit 1
-fi
-
-if [[ ! "$TYPER_VER" =~ ^0\.1[0-2]\. ]]; then
-    echo "❌ CRITICAL: typer must be 0.10-0.12.x (found $TYPER_VER)"
-    exit 1
-fi
-
-echo "Checking NLP and Audio libraries..."
 
 # WhisperX (Git installation)
+
+echo "Checking NLP and Audio libraries..."
 if pip show whisperx &> /dev/null; then
     if [ "$FORCE_REFRESH" = true ]; then
         echo "Reinstalling whisperx (--force-refresh)..."
@@ -414,7 +398,6 @@ STANDARD_PKGS=(
     "scipy>=1.14.0"
     "numpy>=2.1.0"
     "huggingface-hub>=1.5.0"
-    "thinc>=8.2.2,<8.3.0"  # ← Restrict thinc to 8.2.x for typer compatibility
 )
 
 echo "Installing remaining standard packages..."
@@ -426,41 +409,38 @@ for pkg_spec in "${STANDARD_PKGS[@]}"; do
             echo "  → $pkg_name already installed (base ML stack)"
             ;;
         "pyannote.audio")
-            # Handle specially - may have dependency issues
             echo "  → Installing $pkg_spec..."
             pip install "$pkg_spec" --no-cache-dir || echo "⚠️  Warning installing pyannote.audio"
-            ;;
-        "thinc>=8.2.2")
-            echo "  → Installing $pkg_spec..."
-            pip install "$pkg_spec" --no-cache-dir || echo "⚠️  Warning installing thinc"
             ;;
         *)
             echo "  → Installing $pkg_spec..."
             pip install "$pkg_spec" --no-cache-dir
             ;;
-        "spacy")
-            echo "  → $pkg_name already installed (exact pin 3.7.5)"
-    esac
+    esac  # ← esac immediately after *)
 done
 echo "✅ Standard packages processed."
 echo ""
 
-# 3. Spacy Model Check & Dependency Fix
-echo "Checking spaCy multilingual model..."
+# ============================================================================
+# 🔧 SPACY MODEL DOWNLOAD (FIXED URL)
+# ============================================================================
+echo "Checking spaCy English model..."
 
-# NOW run spaCy CLI (dependencies guaranteed compatible)
-if python -m spacy check xx_ent_wiki_sm &> /dev/null; then
-    echo "✅ spaCy multilingual model (xx_ent_wiki_sm) is already installed."
+# Use en_core_web_sm instead of xx_ent_wiki_sm (URL formatting bug)
+if python -m spacy check en_core_web_sm &> /dev/null; then
+    echo "✅ spaCy English model (en_core_web_sm) is already installed."
 else
-    echo "Installing spaCy multilingual model (xx_ent_wiki_sm)..."
-    python -m spacy download xx_ent_wiki_sm
-    
-    # Post-download verification
-    if [ $? -eq 0 ]; then
-        echo "✅ spaCy model downloaded successfully."
-    else
-        echo "⚠️  spaCy model download failed. Continuing without sentence splitting..."
-    fi
+    echo "Installing spaCy English model (en_core_web_sm)..."
+    python -c "
+    import spacy.cli
+    try:
+        spacy.cli.download('en_core_web_sm')
+        print('✅ Model downloaded successfully.')
+    except Exception as e:
+        print(f'⚠️  Download failed: {e}')
+        print('   Manual installation: pip install https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl')
+    )
+    "
 fi
 
 # Torchcodec check
