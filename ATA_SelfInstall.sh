@@ -335,11 +335,11 @@ STANDARD_PKGS=(
     "sentencepiece"
     "spacy==3.7.5"
     "torchcrf"
-    "pandas>=2.2.0"
+    "pandas>=2.0.0,<3.0.0"
     "openai>=1.0.0"
     "python-dotenv"
-    "scipy>=1.14.0"
-    "numpy>=2.1.0"
+    "scipy>=1.11.0" 
+    "numpy>=1.24.0,<2.0.0"
     "huggingface-hub>=0.20.0,<1.0.0"
 )
 
@@ -492,9 +492,9 @@ if [[ "$INSTALL_WEB" =~ ^[Yy]$ ]]; then
     pip install --upgrade pip setuptools wheel
     
     echo "Step 1/4: Forcing NumPy >=2.1.0 and Pandas >=2.2.3..."
-    smart_install "numpy>=2.1.0,<3.0.0" "numpy" "2.1.0" "$FORCE_REFRESH"
-    smart_install "pandas>=2.2.3,<3.0.0" "pandas" "2.2.3" "$FORCE_REFRESH"
-    smart_install "scipy>=1.14.0" "scipy" "1.14.0" "$FORCE_REFRESH"
+    smart_install "numpy>=1.24.0,<2.0.0" "numpy" "1.26.4" "$FORCE_REFRESH"
+    smart_install "pandas>=2.0.0,<3.0.0" "pandas" "2.2.0" "$FORCE_REFRESH"
+    smart_install "scipy>=1.11.0,<2.0.0" "scipy" "1.14.0" "$FORCE_REFRESH"
     
     echo "Step 2/4: Installing Coqui TTS..."
     if pip show TTS &> /dev/null; then
