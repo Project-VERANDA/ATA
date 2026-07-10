@@ -211,7 +211,7 @@ echo "  → sentencepiece..."
 pip install "sentencepiece>=0.1.99" --no-cache-dir
 
 echo "  → huggingface-hub..."
-pip install "huggingface-hub>=0.24.0" --no-cache-dir
+pip install "huggingface-hub>=0.34.0" --no-cache-dir
 
 # Other utilities
 echo "  → pandas..."
@@ -533,6 +533,7 @@ except Exception as e:
             
             python -c "
     from huggingface_hub import snapshot_download
+    import sys
     snapshot_download(
         repo_id='pyannote/speaker-diarization-community-1',
         local_dir='$TARGET',
@@ -544,6 +545,7 @@ except Exception as e:
             echo "⚠️  Not logged in to Hugging Face."
             echo "   Run: hf auth login"
             echo "   Or: export HUGGINGFACE_TOKEN=your_token && ./ATA_SelfInstall.sh --auto-login"
+            echo "   Verify: hf whoami"
         fi
     fi
     
