@@ -111,7 +111,7 @@ fi
 
 # 3. Create the environment
 ENV_NAME="whisperx"
-TARGET_PYTHON="3.12"
+TARGET_PYTHON="3.13"
 
 echo "Creating conda environment '$ENV_NAME' with Python $TARGET_PYTHON..."
 
