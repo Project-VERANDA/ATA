@@ -977,20 +977,18 @@
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ 
                             text: text,
-                            lang: transcriptionLanguageSelect.value
+                            lang: transcriptionLanguageSelect.value  // ✅ Also add language
                         })
                     });
                     
                     const result = await response.json();
                     
                     if (response.ok && result.success) {
+                        // ✅ Use 'text' field that backend actually returns
                         anonymizedText.value = result.text || result.anonymized_text;
                         anonymizedText.dispatchEvent(new Event('input'));
                         ttsContainer.classList.remove('hidden');
                         downloadBertBtn.disabled = false;
-                        updateStatus("Anonymization successful!", false);
-                    }
-    
                         updateStatus("Anonymization successful!", false);
                     } else {
                         throw new Error(result.error || "Anonymization failed.");
