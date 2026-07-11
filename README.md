@@ -1,28 +1,42 @@
-# Audio-Transcript-Anonymizer (**ATA**)
+# Audio-Transcript-Anonymizer (ATA)
 
-A comprehensive pipeline for privacy-preserving audio processing. This tool accepts audio or video files, transcribes the content using WhisperX, applies speaker diarization via Pyannote, and anonymizes Personally Identifiable Information (**PII**) using **BERT** and LLMs. It uniquely supports audio-level anonymization, replacing sensitive spoken segments with beeps to create fully anonymized audio files.
+A comprehensive pipeline for privacy-preserving audio processing. This tool accepts audio or video files, transcribes the content using WhisperX, applies speaker diarization via Pyannote, and anonymizes Personally Identifiable Information (PII) using BERT and LLMs. It uniquely supports audio-level anonymization, replacing sensitive spoken segments with beeps to create fully anonymized audio files.
 
 Ideal for: Interviews, therapy sessions, legal consultations, and any conversation involving multiple speakers where privacy is paramount. 
 
 # 🚀 Features
     
-  Video to Audio Extraction: Automatically isolates audio from video files (**MP4**, **MKV**, etc.).
+  Video to Audio Extraction: Automatically isolates audio from video files (MP4, MKV, etc.).
   
   * High-Accuracy Transcription: Powered by WhisperX (Faster-Whisper) with support for 12+ languages.
   
   * Speaker Diarization: Identifies and separates speakers using Pyannote.audio.
   
-  * Text Anonymization (**BERT**): Detects and replaces **PII** (names, emails, locations, phone numbers, etc.) using a multilingual **BERT** model.
+  * Text Anonymization (BERT): Detects and replaces PII (names, emails, locations, phone numbers, etc.) using a multilingual BERT model.
   
-   * 🆕 Audio Anonymization (Beep Replacement): Maps identified **PII** to audio timestamps and replaces sensitive segments with beeps, preserving the rest of the conversation.
+   * 🆕 Audio Anonymization (Beep Replacement): Maps identified PII to audio timestamps and replaces sensitive segments with beeps, preserving the rest of the conversation.
   
-  * **LLM** Rewriting: Uses Large Language Models to generalize indirect identifiers (e.g., specific job titles, rare locations) that **BERT** might miss.
+  * LLM Rewriting: Uses Large Language Models to generalize indirect identifiers (e.g., specific job titles, rare locations) that BERT might miss.
   
-  * Adversarial Mode: Optional *Red Team vs. Blue Team* loop to iteratively improve anonymization quality.
+  * Adversarial Mode: Optional Red Team vs. Blue Team loop to iteratively improve anonymization quality.
   
-  * Web Interface: User-friendly **GUI** for uploading, recording, editing, and downloading anonymized results.
+  * Web Interface: User-friendly GUI for uploading, recording, editing, and downloading anonymized results.
   
-  * Bulk Processing: Supports batch processing via command line or **ZIP** file uploads.
+  * Bulk Processing: Supports batch processing via command line or ZIP file uploads.
+
+  * TTS Backends:
+    
+  * Piper TTS (Recommended)
+- Fast offline synthesis
+- 30+ languages
+- GPL v3 license
+- Voice: en_US-lessac-medium
+
+  * Coqui XTTS v2
+- Voice cloning support
+- 17 languages
+- CPML license (non-commercial)
+- Model: ~2GB download
 
 # 📦 Installation Prerequisites
 
@@ -130,7 +144,7 @@ Argument	Description
 
   Access the interface:
     Open [https://**127**.0.0.1:**5001**](https://**127**.0.0.1:**5001**) in your browser.
-  **HTTPS** is required for the microphone recording feature.
+  HTTPS is required for the microphone recording feature.
 
   Workflow:
    * Upload: Drag & drop audio/video files or click to browse.
@@ -141,15 +155,15 @@ Argument	Description
    
    *  Edit: Correct any transcription errors manually.
    
-   * Anonymize: Click *Anonymize Text* to apply **BERT** and/or **LLM**.
+   * Anonymize: Click Anonymize Text to apply BERT and/or LLM.
    
-   * 🆕 Generate Anonymized Audio: Click this button to replace **PII** segments with beeps.
+   * 🆕 Generate Anonymized Audio: Click this button to replace PII segments with beeps.
    
    * Download: Download the text transcript and the _beeped.wav audio file.
 
 🔧 Configuration Environment Variables (.env)
 
-Create a .env file in the **ATA** root directory to configure optional features:
+Create a .env file in the ATA root directory to configure optional features:
 
 ## LLM API Configuration (Required for LLM Rewrite & Adversarial Mode)
 
@@ -189,9 +203,9 @@ python -c "import torch; print('**CUDA** Available:', torch.cuda.is_available())
 **ATA**/ 
 ├── pipeline/ │   
 ├── videos/          # Input video files │   
-├── audios/          # Extracted **WAV** files │   
+├── audios/          # Extracted WAV files │   
 ├── transcripts/     # Raw transcription files (.txt) │   
-├── anonym/          # **BERT**-anonymized transcripts (_anon.txt) │   ├── **LLM**-Anon/    # **LLM**-rewritten transcripts (_llm_*.txt, _adversarial_*.txt) 
+├── anonym/          # BERT-anonymized transcripts (_anon.txt) │   ├── LLM-Anon/    # LLM-rewritten transcripts (_llm_.txt, _adversarial_.txt) 
 │   
 ├── uploads/         # Temporary storage for web uploads (includes _beeped.wav files) 
 │   ├── model/           # Downloaded AI models 
@@ -220,11 +234,11 @@ from audio_utils import AudioBeepReplacer
 
 # 'offsets' must be obtained from the transcription step (returned by transcribe_audio_locally)
 
-replacer = AudioBeepReplacer(beep_freq=**1000**, beep_gain_db=-6) output_file = replacer.replace_offsets_with_beeps(*input.wav*, offsets, *output_beeped.wav*)
+replacer = AudioBeepReplacer(beep_freq=1000, beep_gain_db=-6) output_file = replacer.replace_offsets_with_beeps(input.wav, offsets, output_beeped.wav)
 
 🛡️ Supported **PII** Tags
 
-The **BERT** anonymization model detects and replaces the following entity types:
+The BERT anonymization model detects and replaces the following entity types:
 
 |Tag |	Description	| Replacement|
 
@@ -291,18 +305,12 @@ Solution:
 
 # 🔄 Pending Updates & Roadmap
 
-* [ ] Batch Processing: Add folder-based batch processing (currently **ZIP** only).
-    
-* [ ] Local **LLM** Support: Switch from **API** calls to local **LLM** models (e.g., Ollama, LM Studio).
-    
+* [ ] Batch Processing: Add folder-based batch processing (currently ZIP only).
+* [ ] Local LLM Support: Switch from API calls to local LLM models (e.g., Ollama, LM Studio).
 * [ ] Live Streaming: Implement chunk-processing for live transcription and anonymization.
-    
-* [ ] Non-**NVIDIA** **GPU**: Add support for **AMD**/Intel GPUs.
-    
-* [ ] Improved **TTS**: Switch from Google **TTS** to a local text-to-speech engine.
-    
+* [ ] Non-NVIDIA GPU: Add support for AMD/Intel GPUs.
+* [x] Improved TTS: Switch from Google TTS to a local text-to-speech engine.
 * [ ] Production Web Interface: Upgrade the demo interface to a full production-ready UI.
-
 * [ ] * [x] Re-adding the anonymization process.
 * [ ] Adding the models to the Github Repo.
 * [x] Add a web interface.
@@ -329,6 +337,8 @@ Solution:
 * [ ] Disable the translation feature of WhisperX.
 * [ ] Look into whether there can be chunk-processing of live-recorded data for live transcription and anonymization.
 
+* [ ] 
+
 # 📄 License & Credits
 
 This project utilizes:
@@ -340,38 +350,6 @@ This project utilizes:
     PyDub
 
 Developed for privacy-preserving audio analysis.
-
-# Pending updates
-
-* [x] Re-adding the anonymization process.
-* [ ] Adding the models to the Github Repo.
-* [x] Add a web interface.
-  *   [ ] Update the existing web interface to be a "demo" interface.
-  *   [ ] Create a new production interface.
-      * [ ] Add buttons for the interface to enable/disable each feature in the pipeline.
-* [x] Add a recording button to the web interface for demos.
-* [ ] Add batch transcripting via selected folder instead of only with selected files.
-* [ ] Add automatic cleanup of the input video/audio folders. 
-* [ ] Add arguments for a debug running of the pipeline.
-* [x] Add text to speech for the output transcripts.
-* [x] Switch the diarization to speaker-diarization-community-1 from the older diarization model.
-* [x] Automate the downloading of WhisperX models.
-* [ ] Switch from API calls for the AI models to local model processing.
-  *  [ ] Add a check/installation for local models, and if not, fall back to API calls.
-  *  [ ] Disable the LLM rewrite function when no LLM model is available.
-  *  [ ] Switch the .env file to also host the LLM API endpoint variable, instead of hardcoding it into the code.
-* [ ] Do some optimizations for the LLM system prompt.
-* [ ] Try getting all the local LLM models working.
-* [x] Update the Running the Script section of this ReadMe.
-* [ ] Add arguments for process.py to enable/disable each feature in the pipeline.
-* [ ] Add code enabling other non-nvidia GPUs.
-* [ ] Switch from Google TTS to a new, locally-running text-to-speech tool.
-* [ ] Disable the translation feature of WhisperX.
-* [ ] Look into whether there can be chunk-processing of live-recorded data for live transcription and anonymization.
-
-
-
-* [ ]
 
 # Future additions
 
