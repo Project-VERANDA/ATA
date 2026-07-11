@@ -113,7 +113,7 @@ class PiperBackend(TTSBackend):
         logger.info(f"Piper voice set: {voice_path.name} (lang={lang_key})")
 
     def synthesize(self, text: str, output_path: str, speaker_id: int = 0,
-                   language: str = 'en', **kwargs) -> str:
+                language: str = 'en', **kwargs) -> str:
         import subprocess
 
         # Check binary availability
@@ -141,12 +141,12 @@ class PiperBackend(TTSBackend):
                 logger.warning(f"Language switch failed: {e}. Using current model ({self._current_lang}).")
 
         output_path = str(Path(output_path).absolute())
-
+        sample_rate = int(self.config.get('TTS_SAMPLE_RATE', 22050))
         cmd = [
             str(self.bin_path),
             '-m', str(self._voice_path),
             '-o', output_path,
-            '--sample_rate', str(self.sample_rate),
+            '--sample_rate', str(sample_rate),
         ]
 
         # Add speaker ID if supported

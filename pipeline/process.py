@@ -2440,9 +2440,9 @@ if TTS_BACKEND not in ['piper', 'coqui_xtts']:
     TTS_BACKEND = 'piper'
 
 # Piper TTS settings
-TTS_BIN_PATH = os.getenv('TTS_BIN_PATH', str(pipeline_dir / 'tts' / 'bin' / 'piper'))
-TTS_VOICE_DIR = os.getenv('TTS_VOICE_DIR', str(pipeline_dir / 'model' / 'piper-voices'))
-TTS_VOICE_PATH = os.getenv('TTS_VOICE_PATH', str(pipeline_dir / 'model' / 'piper-voices' / 'en_US-lessac-medium.onnx'))
+TTS_BIN_PATH = Path(os.getenv('TTS_BIN_PATH', ''))
+TTS_VOICE_DIR = Path(os.getenv('TTS_VOICE_DIR', str(pipeline_dir / 'model' / 'piper-voices')))
+TTS_VOICE_PATH = Path(os.getenv('TTS_VOICE_PATH', ''))
 TTS_SAMPLE_RATE = int(os.getenv('TTS_SAMPLE_RATE', '22050'))
 
 # Coqui XTTS settings
@@ -2471,7 +2471,7 @@ def generate_beep(duration_ms=400, freq=1000):
     try:
         import tempfile
         temp_path = tempfile.mktemp(suffix='.wav')
-        
+        duration_sec = float(duration_ms) / 1000.0
         subprocess.run([
             'ffmpeg', '-y', '-f', 'lavfi', '-i',
             f'sine=frequency={freq}:duration={duration_ms/1000}',
@@ -2564,6 +2564,8 @@ def generate_speech(text, language='en', output_dir=None, speaker_id=0):
     Main speech generation wrapper - delegates to backend.
     Returns path to generated audio file.
     """
+    logger.debug(f"DEBUG: input types - text={type(text)}, lang={type(language)}, dir={type(output_dir)}")
+    logger.debug(f"DEBUG: TTS_SAMPLE_RATE={TTS_SAMPLE_RATE} (type={type(TTS_SAMPLE_RATE)})")
     engine = _get_tts_engine()
     
     if not engine:
@@ -2573,20 +2575,24 @@ def generate_speech(text, language='en', output_dir=None, speaker_id=0):
     if output_dir is None:
         output_dir = BASE_PATH / "audios" / "tts_output"
         output_dir.mkdir(parents=True, exist_ok=True)
+    else:
+        output_dir = Path(output_dir)
     
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    output_path = str(output_dir / f"speech_{timestamp}.wav")
+    output_path = output_dir / f"speech_{timestamp}.wav"
     
     try:
         engine.synthesize(
             text=text,
-            output_path=output_path,
-            speaker_id=speaker_id,
-            language=language
+            output_path=str(output_path),
+            speaker_id=int(speaker_id),
+            language=str(language)
         )
-        return output_path
+        return str(output_path)
     except Exception as e:
         logger.error(f"TTS synthesis failed: {e}")
+        import traceback
+        logger.debug(traceback.format_exc())
         return None
 
 def synthesize_segment(text, language='en'):

@@ -801,35 +801,29 @@ def generate_org_audio_route():
 def generate_speech_route():
     try:
         data = request.get_json()
-        if not data or 'text' not in data:
-            return jsonify({'error': 'No text provided'}), 400
+        text = data.get('text', '').strip()
+        lang = data.get('lang', 'en')
         
-        text = data['text'].strip()
-        if not text:
-            return jsonify({'error': 'Empty text'}), 400
+        logger.info(f"DEBUG: Speech generation request ({len(text)} chars)")
+        logger.debug(f"DEBUG: Lang parameter: {lang} (type={type(lang)})")
         
-        if not TTS_AVAILABLE:
-            return jsonify({'error': 'TTS not available. Enable in .env with TTS_ENABLED=true'}), 500
+        from pipeline.process import generate_speech
+        audio_path = generate_speech(text, language=lang)
         
-        lang = data.get('lang', 'en').lower()[:2]
-        output_dir = data.get('output_dir', str(project_root / 'pipeline' / 'anonymized_audio'))
+        logger.debug(f"DEBUG: Audio path returned: {audio_path} (type={type(audio_path)})")
         
-        audio_path = generate_speech(text, language=lang, output_dir=output_dir)
+        if not audio_path:
+            return jsonify({'error': 'Speech generation failed'}), 500
         
-        if audio_path and os.path.exists(audio_path):
-            audio_filename = os.path.basename(audio_path)
-            return jsonify({
-                'success': True,
-                'audio_file': audio_filename,
-                'audio_url': f'/download_speech/{audio_filename}',
-                'tts_backend': TTS_BACKEND,
-                'message': 'Speech generated successfully!'
-            })
-        else:
-            return jsonify({'error': 'Failed to generate speech'}), 500
+        return jsonify({
+            'success': True,
+            'audio_url': audio_path,
+            'audio_name': Path(audio_path).name
+        })
+        
     except Exception as e:
-        logger.error(f"Error generating speech: {str(e)}")
-        return jsonify({'error': f'Error generating speech: {str(e)}'}), 500
+        logger.error(f"Error generating speech: {e}", exc_info=True)  # ← Full traceback!
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/available_voices')
 def get_available_voices():
