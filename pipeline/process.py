@@ -2559,41 +2559,74 @@ def get_available_tts_voices(language='en'):
     except Exception:
         return [{'id': 'default', 'name': f'{language.upper()} Default', 'language': [language], 'engine': TTS_BACKEND}]
 
-def generate_speech(text, language='en', output_dir=None, speaker_id=0):
+def generate_speech(text, language='en', output_dir=None, speaker_id=0, return_bytes=False):
     """
     Main speech generation wrapper - delegates to backend.
-    Returns path to generated audio file.
+    Args:
+        text: Text to synthesize
+        language: Language code
+        output_dir: If provided, saves to file; if None and return_bytes=True, returns BytesIO
+        speaker_id: Speaker ID for multi-speaker models
+        return_bytes: If True, returns BytesIO object instead of file path
+    
+    Returns:
+        If return_bytes=True: BytesIO object with audio data
+        Else: str path to generated audio file
     """
     logger.debug(f"DEBUG: input types - text={type(text)}, lang={type(language)}, dir={type(output_dir)}")
-    logger.debug(f"DEBUG: TTS_SAMPLE_RATE={TTS_SAMPLE_RATE} (type={type(TTS_SAMPLE_RATE)})")
+    logger.debug(f"DEBUG: return_bytes={return_bytes}")
+    
     engine = _get_tts_engine()
     
     if not engine:
         logger.error("TTS engine not available")
         return None
     
-    if output_dir is None:
-        output_dir = BASE_PATH / "audios" / "tts_output"
-        output_dir.mkdir(parents=True, exist_ok=True)
+    if return_bytes:
+        # ✅ IN-MEMORY MODE: Use BytesIO buffer
+        import io
+        buffer = io.BytesIO()
+        
+        try:
+            # Some backends support writing to file-like objects
+            engine.synthesize(
+                text=text,
+                output_path=buffer,  # Pass BytesIO instead of string path
+                speaker_id=int(speaker_id),
+                language=str(language)
+            )
+            buffer.seek(0)
+            return buffer
+        except Exception as e:
+            logger.error(f"TTS synthesis to buffer failed: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
+            return None
+    
     else:
-        output_dir = Path(output_dir)
-    
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    output_path = output_dir / f"speech_{timestamp}.wav"
-    
-    try:
-        engine.synthesize(
-            text=text,
-            output_path=str(output_path),
-            speaker_id=int(speaker_id),
-            language=str(language)
-        )
-        return str(output_path)
-    except Exception as e:
-        logger.error(f"TTS synthesis failed: {e}")
-        import traceback
-        logger.debug(traceback.format_exc())
-        return None
+        # DISK MODE: Write to file (legacy behavior for CLI usage)
+        if output_dir is None:
+            output_dir = BASE_PATH / "pipeline" / "audios" / "tts_output"
+            output_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            output_dir = Path(output_dir)
+        
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        output_path = output_dir / f"speech_{timestamp}.wav"
+        
+        try:
+            engine.synthesize(
+                text=text,
+                output_path=str(output_path),
+                speaker_id=int(speaker_id),
+                language=str(language)
+            )
+            return str(output_path)
+        except Exception as e:
+            logger.error(f"TTS synthesis failed: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
+            return None
 
 def synthesize_segment(text, language='en'):
     """

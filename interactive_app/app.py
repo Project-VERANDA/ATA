@@ -800,30 +800,37 @@ def generate_org_audio_route():
 
 @app.route('/generate_speech', methods=['POST'])
 def generate_speech_route():
+    """
+    Generate speech WITHOUT writing to persistent storage.
+    Returns audio directly via BytesIO buffer for privacy.
+    """
     try:
         data = request.get_json()
         text = data.get('text', '').strip()
         lang = data.get('lang', 'en')
         
-        logger.info(f"DEBUG: Speech generation request ({len(text)} chars)")
-        logger.debug(f"DEBUG: Lang parameter: {lang} (type={type(lang)})")
+        logger.info(f"🎵 Speech generation request ({len(text)} chars, ephemeral mode)")
         
         from pipeline.process import generate_speech
-        audio_path = generate_speech(text, language=lang)
+        import io
         
-        logger.debug(f"DEBUG: Audio path returned: {audio_path} (type={type(audio_path)})")
+        # ✅ Generate in-memory buffer (no disk writes!)
+        audio_buffer = generate_speech(text, language=lang, return_bytes=True)
         
-        if not audio_path:
+        if not audio_buffer:
             return jsonify({'error': 'Speech generation failed'}), 500
         
-        return jsonify({
-            'success': True,
-            'audio_url': audio_path,
-            'audio_name': Path(audio_path).name
-        })
+        # ✅ Send file from memory (no filesystem access needed!)
+        return send_file(
+            audio_buffer,
+            mimetype='audio/wav',
+            as_attachment=False,
+            download_name='synthetic_speech.wav',
+            conditional=True
+        )
         
     except Exception as e:
-        logger.error(f"Error generating speech: {e}", exc_info=True)  # ← Full traceback!
+        logger.error(f"Error generating speech: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 @app.route('/available_voices')
