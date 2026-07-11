@@ -217,9 +217,6 @@ pip install "huggingface-hub>=0.34.0" --no-cache-dir
 echo "  → pandas..."
 pip install "pandas>=2.2.0" --no-cache-dir
 
-echo "  → pydub..."
-pip install pydub --no-cache-dir
-
 echo "  → ffmpeg-python..."
 pip install ffmpeg-python --no-cache-dir
 

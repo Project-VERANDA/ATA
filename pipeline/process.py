@@ -15,14 +15,6 @@ import numpy as np
 from datetime import datetime
 from collections import defaultdict
 from pathlib import Path
-try:
-    from pydub import AudioSegment
-    from pydub.generators import Sine
-    PYDUB_AVAILABLE = True
-except (ImportError, ModuleNotFoundError):
-    logger.warning("Pydub not available (Python 3.13 audioop issue). Beep generation may be limited.")
-    AudioSegment = None
-    PYDUB_AVAILABLE = False
 from openai import OpenAI
 from dotenv import load_dotenv
 from typing import Optional, Dict, List
