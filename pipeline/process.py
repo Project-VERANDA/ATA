@@ -2398,6 +2398,23 @@ def anonymize_text_locally(text):
         logger.error(f"Error in anonymize_text_locally: {e}", exc_info=True)
         return None, False, str(e)
 
+# ============================================================================
+# TTS SERVICE LAYER (Updated for Piper + Coqui TTS)
+# ============================================================================
+
+import re
+import random
+from pathlib import Path
+
+try:
+    from pydub import AudioSegment
+    from pydub.generators import Sine
+    PYDUB_AVAILABLE = True
+except ImportError:
+    PYDUB_AVAILABLE = False
+    AudioSegment = None
+    logger.warning("Pydub not available - using ffmpeg fallback for beep generation")
+
 # TTS configuration from environment (UPDATED)
 TTS_BACKEND = os.getenv('TTS_BACKEND', 'piper').lower()
 TTS_ENABLED = os.getenv('TTS_ENABLED', 'true').lower() == 'true'
@@ -2503,6 +2520,67 @@ def _get_tts_engine():
         import traceback
         logger.debug(traceback.format_exc())
         return None
+
+# ============================================================================
+# EXPORTED TTS HELPER FUNCTIONS
+# ============================================================================
+
+def get_tts_status():
+    """Return TTS configuration status for web interface."""
+    return {
+        'backend': TTS_BACKEND,
+        'enabled': TTS_ENABLED,
+        'default_language': TTS_DEFAULT_LANG,
+        'backend_details': f'{TTS_BACKEND.title()} TTS' if TTS_BACKEND == 'piper' else 'Coqui XTTS v2',
+        'supported_languages': ['en', 'de', 'fr', 'es', 'it', 'pl', 'pt', 'fi', 'ar', 'hi', 'tr'] if TTS_BACKEND == 'piper' else ['en', 'de', 'fr', 'es', 'it', 'pl', 'pt', 'zh', 'ja', 'ko', 'ar', 'hi', 'tr', 'fi'],
+    }
+
+def get_available_tts_voices(language='en'):
+    """Return available voice models for the current backend."""
+    if not _get_tts_engine():
+        return []
+    
+    try:
+        return _get_tts_engine().get_available_voices(language)
+    except Exception:
+        return [{'id': 'default', 'name': f'{language.upper()} Default', 'language': [language], 'engine': TTS_BACKEND}]
+
+def generate_speech(text, language='en', output_dir=None, speaker_id=0):
+    """
+    Main speech generation wrapper - delegates to backend.
+    Returns path to generated audio file.
+    """
+    engine = _get_tts_engine()
+    
+    if not engine:
+        logger.error("TTS engine not available")
+        return None
+    
+    if output_dir is None:
+        output_dir = BASE_PATH / "audios" / "tts_output"
+        output_dir.mkdir(parents=True, exist_ok=True)
+    
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    output_path = str(output_dir / f"speech_{timestamp}.wav")
+    
+    try:
+        engine.synthesize(
+            text=text,
+            output_path=output_path,
+            speaker_id=speaker_id,
+            language=language
+        )
+        return output_path
+    except Exception as e:
+        logger.error(f"TTS synthesis failed: {e}")
+        return None
+
+def synthesize_segment(text, language='en'):
+    """
+    Synthesize a single text segment (wrapper for generate_speech).
+    Returns audio file path.
+    """
+    return generate_speech(text, language=language)
 
 __all__ = [
     # Core pipeline functions
