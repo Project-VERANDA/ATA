@@ -1531,7 +1531,6 @@ class AnonymizationEngine:
         if ANONYMIZATION_ENABLED:
             logger.info(f"AnonymizationEngine initialized: Method={self.method}, Level={self.level}")
             self._load_model()
-            self._debug_label_mapping()
 
     def _build_safe_label_mapping(self):
         """
@@ -1596,6 +1595,13 @@ class AnonymizationEngine:
                 
         logger.info(f"Built label mapping with {len(mapping)} entries.")
         return mapping
+
+    def _debug_label_mapping(self):
+        """Debug helper to verify label mapping."""
+        logger.info("=== LABEL MAPPING DEBUG ===")
+        for model_id, anon_tag in sorted(self.label_mapping.items()):
+            logger.info(f"  Model ID {model_id} → {repr(anon_tag)}")
+        logger.info("===========================")
 
     def _load_model(self):
         """Loads the multilingual_DialogPII_NER model with FLERT config support."""
