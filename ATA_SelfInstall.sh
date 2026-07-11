@@ -165,7 +165,7 @@ fi
 
 # pyaudioop for Python 3.13 compatibility with pydub
 echo "  → pyaudioop (Python 3.13 audioop shim)..."
-pip install pyaudioop --no-cache-dir || \
+conda install -c conda-forge pyaudioop -y
 echo "⚠️  pyaudioop may already be installed"
 
 # ============================================================================
