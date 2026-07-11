@@ -675,6 +675,7 @@ def anonymize_route():
             return jsonify({'error': 'No JSON data provided'}), 400
         
         text = data.get('text', '').strip()
+        lang = data.get('lang', 'EN')
         if not text:
             return jsonify({'error': 'No text provided'}), 400
         

@@ -975,13 +975,15 @@
                     const response = await fetch('/anonymize', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ text: text })
+                        body: JSON.stringify({ 
+                            text: text,
+                            lang: transcriptionLanguageSelect.value
+                        })
                     });
                     
                     const result = await response.json();
                     
                     if (response.ok && result.success) {
-                        // ✅ Use 'text' field that backend actually returns
                         anonymizedText.value = result.text || result.anonymized_text;
                         anonymizedText.dispatchEvent(new Event('input'));
                         ttsContainer.classList.remove('hidden');
