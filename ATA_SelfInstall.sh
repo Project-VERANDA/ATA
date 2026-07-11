@@ -530,19 +530,24 @@ except Exception as e:
             hf auth login --token "$HUGGINGFACE_TOKEN" --add-to-git-credential 2>/dev/null || true
         fi
         
-        # Check auth status using hf whoami
-        if hf whoami &>/dev/null; then
+        # Check auth status using hf auth whoami
+        if hf auth whoami &>/dev/null; then
             echo "✅ Hugging Face authenticated"
             
             python -c "
     from huggingface_hub import snapshot_download
     import sys
-    snapshot_download(
-        repo_id='pyannote/speaker-diarization-community-1',
-        local_dir='$TARGET',
-        local_dir_use_symlinks=False
-    )
-    print('✅ Download complete')
+    try:
+        snapshot_download(
+            repo_id='pyannote/speaker-diarization-community-1',
+            local_dir='./pipeline/model/models--pyannote--speaker-diarization-community-1',
+            local_dir_use_symlinks=False,
+            token=None
+        )
+        print('✅ Pyannote model downloaded successfully!')
+    except Exception as e:
+        print(f'❌ Download failed: {e}', file=sys.stderr)
+        sys.exit(1)
     "
         else
             echo "⚠️  Not logged in to Hugging Face."
