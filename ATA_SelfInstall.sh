@@ -138,9 +138,9 @@ MODEL_DIR="$CURRENT_DIR/pipeline/model"
 mkdir -p "$MODEL_DIR"
 
 ACTUAL_PYTHON=$(conda run -n $ENV_NAME python --version | awk '{print $2}')
-EXPECTED_PYTHON="3.12"
-if [[ ! "$ACTUAL_PYTHON" =~ ^3\.12 ]]; then
-    echo "❌ ERROR: Expected Python 3.12.x, got $ACTUAL_PYTHON"
+EXPECTED_PYTHON="3.13"
+if [[ ! "$ACTUAL_PYTHON" =~ ^3\.13 ]]; then
+    echo "❌ ERROR: Expected Python 3.13.x, got $ACTUAL_PYTHON"
     exit 1
 fi
 echo "✅ Python version verified: $ACTUAL_PYTHON"
@@ -598,25 +598,44 @@ if [ -f ".env" ]; then
     cp .env ".env.backup.$(date +%Y%m%d%H%M%S)"
 fi
 
+# UPDATED .env CONFIGURATION SECTION
+
 cat > .env <<EOF
 # ATA Speech Anonymizer Configuration
 CHAT_AI_API_KEY=your_api_key_here
 CHAT_AI_ENDPOINT=https://your-endpoint.com/v1
 
 # TTS CONFIGURATION
-TTS_BACKEND=$TTS_CONFIG
+TTS_BACKEND=piper  # Options: piper, coqui_xtts
+
+# Piper TTS Settings
+TTS_DEFAULT_LANG=en
+TTS_VOICE_PATH=./pipeline/model/piper-voices/en_US-lessac-medium.onnx
+TTS_VOICE_DIR=./pipeline/model/piper-voices
+TTS_SAMPLE_RATE=22050
+
+# Coqui XTTS Settings (used when TTS_BACKEND=coqui_xtts)
+XTTS_Model_Path=./pipeline/model/coqui-xtts
+XTTS_Reference_Audio_Path=./reference_audio.wav
+
+# TTS Global Settings
+TTS_ENABLED=true
 EOF
 
 # Add backend-specific paths
 case "$TTS_CONFIG" in
     piper)
         cat >> .env <<EOF
+
+# Piper Voice Configuration
 Piper_Voice_Path=$TTS_VOICE_PATH
 Piper_Config_Path=$TTS_CONFIG_PATH
 EOF
         ;;
     coqui_xtts)
         cat >> .env <<EOF
+
+# Coqui XTTS Configuration
 XTTS_Model_Path=$TTS_CONFIG_PATH
 XTTS_Reference_Audio_Path=./reference_audio.wav
 EOF

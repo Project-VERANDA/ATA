@@ -824,9 +824,22 @@ def get_available_voices():
     try:
         language = request.args.get('language', 'en').lower()[:2]
         voices = get_available_tts_voices(language)
-        return jsonify({'voices': voices, 
+        
+        # Enhance with additional metadata
+        for voice in voices:
+            if TTS_BACKEND == 'piper':
+                voice['quality'] = voice.get('id', '').split('-')[-1] if '-' in voice.get('id', '') else 'medium'
+                voice['offline'] = True
+            elif TTS_BACKEND == 'coqui_xtts':
+                voice['cloning_supported'] = True
+                voice['offline'] = True
+                
+        return jsonify({
+            'voices': voices, 
             'tts_available': TTS_AVAILABLE,
-            'tts_backend': TTS_BACKEND,})
+            'tts_backend': TTS_BACKEND,
+            'backend_version': 'v2.0' if TTS_BACKEND == 'coqui_xtts' else 'v1.4.2'
+        })
     except Exception as e:
         return jsonify({'error': f'Error getting voices: {str(e)}'}), 500
 
@@ -1062,7 +1075,16 @@ def download_speech_route(filename):
 @app.route('/tts/status')
 def get_tts_status_route():
     """Return current TTS configuration."""
-    return jsonify(get_tts_status())
+    status = get_tts_status()
+    # Add backend-specific info
+    if TTS_BACKEND == 'piper':
+        status['backend_details'] = 'Piper TTS (offline neural TTS)'
+        status['supported_languages'] = ['en', 'de', 'fr', 'es', 'it', 'pl', 'pt', 'fi', 'ar', 'hi', 'tr']
+    elif TTS_BACKEND == 'coqui_xtts':
+        status['backend_details'] = 'Coqui XTTS v2 (voice cloning, 17 langs)'
+        status['supported_languages'] = ['en', 'de', 'fr', 'es', 'it', 'pl', 'pt', 'zh', 'ja', 'ko', 'ar', 'hi', 'tr', 'fi']
+        status['license_notice'] = 'CPML License: Non-commercial use only'
+    return jsonify(status)
 
 
 @app.route('/tts/generate_beep', methods=['POST'])
