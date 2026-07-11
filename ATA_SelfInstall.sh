@@ -227,17 +227,15 @@ echo "  → python-dotenv..."
 pip install python-dotenv --no-cache-dir
 
 echo "  → torchcrf..."
+pip install torchcrf --no-cache-dir  # ← FIXED! Was installing spaCy instead
+
+echo "  → spacy (includes thinc)..."
 pip install "spacy>=3.8.1" --no-cache-dir || \
-pip install "spacy==3.8.0" --no-cache-dir || \
 echo "⚠️ spacy installation may need manual fix"
 
-echo "  → thinc (should be auto-installed with spaCy)..."
-pip install "thinc>=8.3.5" --no-cache-dir 2>/dev/null || \
+echo "  → thinc..."
 pip install "thinc>=8.3.0" --only-binary :all: --no-cache-dir || \
 echo "⚠️ thinc may have been installed with spaCy"
-
-echo "  → thinc>=8.3.0 (NumPy 2.x compatible)..."
-pip install "thinc>=8.3.5" --no-cache-dir
 
 echo "  → blis..."
 pip install "blis>=0.7.0" --no-cache-dir
