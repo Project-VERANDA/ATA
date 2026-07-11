@@ -2588,26 +2588,26 @@ def generate_speech(text, language='en', output_dir=None, speaker_id=0, return_b
         import tempfile
         import os
         
-        # Create secure temp file in /tmp
-        fd, temp_path = tempfile.mkstemp(suffix='.wav', prefix='piper_tts_')
-        os.close(fd)
+        # Create secure temp file in /tmp (string path, NOT BytesIO)
+        fd, temp_path = tempfile.mkstemp(suffix='.wav', prefix='piper_tts_', dir='/tmp')
+        os.close(fd)  # Close file descriptor immediately
         logger.debug(f"📝 Created temp file: {temp_path}")
         
         try:
-            # Synthesize to temp file (Piper requires string path)
+            # ✅ Synthesize to TEMP FILE STRING PATH (Piper accepts string paths)
             engine.synthesize(
                 text=text,
-                output_path=temp_path,
+                output_path=temp_path,  # ← This is a STRING, not BytesIO!
                 speaker_id=int(speaker_id),
                 language=str(language)
             )
             
-            # Read into memory buffer
+            # Read into memory buffer AFTER file is written
             buffer = io.BytesIO()
             with open(temp_path, 'rb') as f:
                 buffer.write(f.read())
             buffer.seek(0)
-            logger.debug(f"✅ Audio buffered ({buffer.tell()} bytes), deleting temp file")
+            logger.debug(f"✅ Audio buffered ({buffer.tell()} bytes)")
             
             return buffer
             
