@@ -3,9 +3,14 @@ pipeline/model/models--Systran--faster-whisper-large-v3/*
 pipeline/model/models--pyannote--speaker-diarization-community-1/*
 pipeline/model/pyannote-SpeakerDiarization/
 pipeline/model/*
+pipeline/models/*
 pipeline/annonym/*
 !pipeline/model/*/.GithubCreateDir
+pipeline/model/
+pipeline/models/
 pipeline_Test.py
+!.gitkeep
+!models_manifest.txt
 ModelTraining/*
 key.pem
 cert.pem

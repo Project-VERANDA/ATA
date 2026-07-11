@@ -1,0 +1,19 @@
+# Required Models for Speech Anonymization Pipeline
+# Download these manually after cloning the repository
+
+## Transcription Models
+- Systran--faster-whisper-large-v3 (WhisperX)
+- models--pyannote--speaker-diarization-community-1 (Diarization)
+
+## Anonymization Models  
+- multilingual_DialogPII_NER (BERT NER)
+
+## TTS Voices
+- piper-voices/en_US-lessac-medium.onnx (Piper TTS)
+
+## Download Instructions:
+1. Clone this repo
+2. Run: bash ATA_SelfInstall.sh --download-models
+3. Or manually download from:
+   - HuggingFace Hub (search model names)
+   - Check ATA_SelfInstall.sh for direct URLs
