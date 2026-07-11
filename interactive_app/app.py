@@ -88,13 +88,12 @@ logger = logging.getLogger(__name__)
 
 # --- Dependency Checks ---
 try:
-    import whisperx
-    WHISPERX_AVAILABLE = True
-    logger.info("WhisperX is available.")
+    from pydub import AudioSegment
+    from pydub.generators import Sine
+    PYDUB_AVAILABLE = True
 except ImportError:
-    WHISPERX_AVAILABLE = False
-    logger.error("WhisperX is not installed. The application cannot run without it.")
-    sys.exit("Exiting: WhisperX is a required dependency.")
+    PYDUB_AVAILABLE = False
+    logger.warning("PyDub not available. Audio processing features may be limited.")
 
 try:
     from pydub import AudioSegment
@@ -1089,17 +1088,37 @@ def get_tts_status_route():
 
 @app.route('/tts/generate_beep', methods=['POST'])
 def generate_beep_route():
-    """Generate a beep sound for testing."""
+    """Generate a beep sound using ffmpeg, streaming directly."""
     try:
+        import io
+        
         data = request.get_json() or {}
         duration_ms = data.get('duration_ms', 400)
         freq = data.get('freq', 1000)
-        beep = generate_beep(duration_ms, freq)
-        if not beep:
-            return jsonify({'error': 'Beep generation unavailable'}), 500
-        temp_path = tempfile.mktemp(suffix='.mp3')
-        beep.export(temp_path, format='mp3')
-        return send_file(temp_path, mimetype='audio/mp3', as_attachment=True, download_name='beep.mp3')
+        
+        # Create in-memory buffer
+        buffer = io.BytesIO()
+        
+        # Generate beep (pipe to stdout instead of file)
+        proc = subprocess.run([
+            'ffmpeg', '-y', '-f', 'lavfi', '-i',
+            f'sine=frequency={freq}:duration={duration_ms/1000}',
+            '-c:a', 'libmp3lame',
+            '-'  # Output to stdout
+        ], capture_output=True, check=True)
+        
+        buffer.write(proc.stdout)
+        buffer.seek(0)
+        
+        return send_file(
+            buffer,
+            mimetype='audio/mpeg',
+            as_attachment=True,
+            download_name='beep.mp3'
+        )
+        
+    except subprocess.CalledProcessError as e:
+        return jsonify({'error': f'Beep generation failed'}), 500
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

@@ -15,7 +15,14 @@ import numpy as np
 from datetime import datetime
 from collections import defaultdict
 from pathlib import Path
-from pydub import AudioSegment
+try:
+    from pydub import AudioSegment
+    from pydub.generators import Sine
+    PYDUB_AVAILABLE = True
+except (ImportError, ModuleNotFoundError):
+    logger.warning("Pydub not available (Python 3.13 audioop issue). Beep generation may be limited.")
+    AudioSegment = None
+    PYDUB_AVAILABLE = False
 from openai import OpenAI
 from dotenv import load_dotenv
 from typing import Optional, Dict, List
@@ -2399,19 +2406,12 @@ def anonymize_text_locally(text):
         logger.error(f"Error in anonymize_text_locally: {e}", exc_info=True)
         return None, False, str(e)
 
-# ============================================================================
-# TTS SERVICE LAYER (Updated for Piper + Coqui TTS)
-# ============================================================================
-
-import re
-import random
-from pathlib import Path
-
 # TTS configuration from environment (UPDATED)
 TTS_BACKEND = os.getenv('TTS_BACKEND', 'piper').lower()
 TTS_ENABLED = os.getenv('TTS_ENABLED', 'true').lower() == 'true'
 TTS_DEFAULT_LANG = os.getenv('TTS_DEFAULT_LANG', 'en')
 
+# >>> ADD VALIDATION HERE <<<
 if TTS_BACKEND not in ['piper', 'coqui_xtts']:
     logger.warning(f"Invalid TTS_BACKEND '{TTS_BACKEND}'. Defaulting to 'piper'")
     TTS_BACKEND = 'piper'
@@ -2431,6 +2431,37 @@ XTTS_REFERENCE_AUDIO = os.getenv('XTTS_Reference_Audio_Path', '')
 _tts_engine = None
 _tts_engine_lang = None
 
+
+def generate_beep(duration_ms=400, freq=1000):
+    """
+    Generate a beep sound. Uses pydub if available, ffmpeg fallback otherwise.
+    Returns AudioSegment object (if pydub) or file path string (if ffmpeg).
+    """
+    if PYDUB_AVAILABLE and AudioSegment is not None:
+        try:
+            from pydub.generators import Sine
+            return Sine(freq).to_audio_segment(duration=duration_ms).apply_gain(-12)
+        except Exception as e:
+            logger.error(f"Pydub beep generation failed: {e}")
+    
+    # Fallback: use ffmpeg (returns temp file path)
+    try:
+        import tempfile
+        temp_path = tempfile.mktemp(suffix='.wav')
+        
+        subprocess.run([
+            'ffmpeg', '-y', '-f', 'lavfi', '-i',
+            f'sine=frequency={freq}:duration={duration_ms/1000}',
+            '-ar', '16000',
+            '-ac', '1',
+            temp_path
+        ], capture_output=True, check=True)
+        
+        return temp_path
+        
+    except subprocess.CalledProcessError as e:
+        logger.error(f"FFmpeg beep generation failed: {e.stderr}")
+        return None
 
 def _get_tts_engine():
     """Lazy-load TTS backend singleton."""
