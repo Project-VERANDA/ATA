@@ -534,21 +534,24 @@ except Exception as e:
         if hf auth whoami &>/dev/null; then
             echo "✅ Hugging Face authenticated"
             
-            python -c "
-    from huggingface_hub import snapshot_download
-    import sys
-    try:
-        snapshot_download(
-            repo_id='pyannote/speaker-diarization-community-1',
-            local_dir='./pipeline/model/models--pyannote--speaker-diarization-community-1',
-            local_dir_use_symlinks=False,
-            token=None
-        )
-        print('✅ Pyannote model downloaded successfully!')
-    except Exception as e:
-        print(f'❌ Download failed: {e}', file=sys.stderr)
-        sys.exit(1)
-    "
+            python -c "from huggingface_hub import snapshot_download; import sys; snapshot_download(repo_id='pyannote/speaker-diarization-community-1', local_dir='./pipeline/model/models--pyannote--speaker-diarization-community-1', local_dir_use_symlinks=False, token=None); print('✅ Pyannote model downloaded successfully!')" || {
+                echo "⚠️  Single-line download failed, trying heredoc..."
+                python <<'PYEOF'
+from huggingface_hub import snapshot_download
+import sys
+try:
+    snapshot_download(
+        repo_id='pyannote/speaker-diarization-community-1',
+        local_dir='./pipeline/model/models--pyannote--speaker-diarization-community-1',
+        local_dir_use_symlinks=False,
+        token=None
+    )
+    print('✅ Pyannote model downloaded successfully!')
+except Exception as e:
+    print(f'❌ Download failed: {e}', file=sys.stderr)
+    sys.exit(1)
+PYEOF
+            }
         else
             echo "⚠️  Not logged in to Hugging Face."
             echo "   Run: hf auth login"
