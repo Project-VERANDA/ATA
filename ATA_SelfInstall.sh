@@ -163,6 +163,11 @@ else
     echo "✅ FFmpeg already installed"
 fi
 
+# pyaudioop for Python 3.13 compatibility with pydub
+echo "  → pyaudioop (Python 3.13 audioop shim)..."
+pip install pyaudioop --no-cache-dir || \
+echo "⚠️  pyaudioop may already be installed"
+
 # ============================================================================
 # 🔧 NUMPY 2.x + LATEST PYTORCH INSTALLATION
 # ============================================================================
