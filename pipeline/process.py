@@ -1531,6 +1531,7 @@ class AnonymizationEngine:
         if ANONYMIZATION_ENABLED:
             logger.info(f"AnonymizationEngine initialized: Method={self.method}, Level={self.level}")
             self._load_model()
+            self._debug_label_mapping()
 
     def _build_safe_label_mapping(self):
         """
@@ -1559,6 +1560,13 @@ class AnonymizationEngine:
             'MISC': '[MISC]',
             'O': '' # "O" means keep original word
         }
+
+        def _debug_label_mapping(self):
+            """Debug helper to verify label mapping."""
+            logger.info("=== LABEL MAPPING DEBUG ===")
+            for model_id, anon_tag in sorted(self.label_mapping.items()):
+                logger.info(f"  Model ID {model_id} → {repr(anon_tag)}")
+            logger.info("===========================")
 
         active_tags = set(all_target_tags.keys())
 

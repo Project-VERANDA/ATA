@@ -981,10 +981,15 @@
                     const result = await response.json();
                     
                     if (response.ok && result.success) {
-                        anonymizedText.value = result.anonymized_text;
+                        anonymizedText.value = result.text || result.anonymized_text;
                         anonymizedText.dispatchEvent(new Event('input'));
                         ttsContainer.classList.remove('hidden');
                         downloadBertBtn.disabled = false;
+                        updateStatus("Anonymization successful!", false);
+                        if (result.changes_made) {
+                             console.log(`ℹ️  ${result.changes_made} entities anonymized`);
+                        }
+    
                         updateStatus("Anonymization successful!", false);
                     } else {
                         throw new Error(result.error || "Anonymization failed.");

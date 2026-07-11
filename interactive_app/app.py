@@ -666,34 +666,47 @@ def transcribe_recording():
         return jsonify({'error': f'Error processing recording: {str(e)}'}), 500
 
 @app.route('/anonymize', methods=['POST'])
-def anonymize_text():
+def anonymize_route():
+    """Anonymize uploaded transcript or text."""
     try:
+        # Parse request
         data = request.get_json()
-        if not data or 'text' not in data:
+        if not data:
+            return jsonify({'error': 'No JSON data provided'}), 400
+        
+        text = data.get('text', '').strip()
+        if not text:
             return jsonify({'error': 'No text provided'}), 400
         
-        text = data['text']
+        logger.info(f"📥 Received anonymization request ({len(text)} chars)")
         
-        if not BERT_ANONYMIZER_AVAILABLE:
-            return jsonify({'error': 'BERT anonymizer not available. Please check server logs.'}), 500
+        # Call anonymization
+        from pipeline.process import anonymize_text_locally
+        result_text, success, msg = anonymize_text_locally(text)
         
-        anonymized_text, success, error_msg = anonymize_text_locally(text)
+        if not success or result_text is None:
+            logger.error(f"❌ Anonymization failed: {msg}")
+            return jsonify({
+                'success': False,
+                'error': msg,
+                'original_text': text
+            }), 500
         
-        if not success:
-            logger.error(f"Anonymization failed: {error_msg}")
-            return jsonify({'error': f'Anonymization failed: {error_msg}'}), 500
+        # Log what changed
+        changes = sum(1 for a, b in zip(text.split(), result_text.split()) if a != b)
+        logger.info(f"✅ Anonymization complete: {changes} replacements made")
         
+        # Return BOTH original and anonymized for debugging
         return jsonify({
             'success': True,
-            'anonymized_text': anonymized_text,
-            'model_used': 'Local BERT',
-            'tts_available': TTS_AVAILABLE,
-            'tts_backend': TTS_BACKEND,
+            'text': result_text,
+            'original_text': text,
+            'changes_made': changes
         })
-    
+        
     except Exception as e:
-        logger.error(f"Error in anonymize route: {str(e)}")
-        return jsonify({'error': f'Error anonymizing text: {str(e)}'}), 500
+        logger.error(f"❌ Route error: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/surrogate_text', methods=['POST'])
