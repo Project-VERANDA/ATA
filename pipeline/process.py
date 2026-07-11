@@ -2565,7 +2565,7 @@ def generate_speech(text, language='en', output_dir=None, speaker_id=0, return_b
     Args:
         text: Text to synthesize
         language: Language code
-        output_dir: If provided, saves to file; if None and return_bytes=True, returns BytesIO
+        output_dir: If provided, saves to file; if None and return_bytes=True, uses /tmp
         speaker_id: Speaker ID for multi-speaker models
         return_bytes: If True, returns BytesIO object instead of file path
     
@@ -2583,25 +2583,48 @@ def generate_speech(text, language='en', output_dir=None, speaker_id=0, return_b
         return None
     
     if return_bytes:
-        # ✅ IN-MEMORY MODE: Use BytesIO buffer
+        # ✅ IN-MEMORY MODE: Use temp file + immediate cleanup
         import io
-        buffer = io.BytesIO()
+        import tempfile
+        import os
+        
+        # Create secure temp file in /tmp
+        fd, temp_path = tempfile.mkstemp(suffix='.wav', prefix='piper_tts_')
+        os.close(fd)
+        logger.debug(f"📝 Created temp file: {temp_path}")
         
         try:
-            # Some backends support writing to file-like objects
+            # Synthesize to temp file (Piper requires string path)
             engine.synthesize(
                 text=text,
-                output_path=buffer,  # Pass BytesIO instead of string path
+                output_path=temp_path,
                 speaker_id=int(speaker_id),
                 language=str(language)
             )
+            
+            # Read into memory buffer
+            buffer = io.BytesIO()
+            with open(temp_path, 'rb') as f:
+                buffer.write(f.read())
             buffer.seek(0)
+            logger.debug(f"✅ Audio buffered ({buffer.tell()} bytes), deleting temp file")
+            
             return buffer
+            
         except Exception as e:
             logger.error(f"TTS synthesis to buffer failed: {e}")
             import traceback
             logger.debug(traceback.format_exc())
             return None
+            
+        finally:
+            # ✅ SECURITY: Always delete temp file immediately
+            try:
+                if os.path.exists(temp_path):
+                    os.unlink(temp_path)
+                    logger.debug(f"🗑️ Temporary file deleted: {temp_path}")
+            except OSError as e:
+                logger.warning(f"Failed to delete temp file {temp_path}: {e}")
     
     else:
         # DISK MODE: Write to file (legacy behavior for CLI usage)
