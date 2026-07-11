@@ -68,13 +68,21 @@ class PiperBackend(TTSBackend):
     def _initialize(self):
         logger.info("Initializing Piper TTS backend...")
 
-        self.bin_path = Path(self.config.get(
-            'TTS_BIN_PATH',
-            './pipeline/tts/bin/piper'
-        ))
-        self.voice_dir = Path(self.config.get(
-            'TTS_VOICE_DIR',
-            './pipeline/model/piper-voices'  # Updated path to match installer
+from pathlib import Path
+import os
+
+    # Determine project root (go up from pipeline/ directory)
+    project_root = Path(__file__).resolve().parent.parent  # Goes from tts/ to pipeline/ then to root
+    if project_root.name != "ATA":
+        # Keep going up until we find ATA folder
+        while project_root.name != "ATA" and project_root != project_root.parent:
+            project_root = project_root.parent
+
+    bin_default = project_root / "pipeline" / "tts" / "bin" / "piper"
+    voice_default = project_root / "pipeline" / "model" / "piper-voices"
+
+    self.bin_path = Path(self.config.get('TTS_BIN_PATH', bin_default))
+    self.voice_dir = Path(self.config.get('TTS_VOICE_DIR', voice_default))
         ))
         self.sample_rate = int(self.config.get('TTS_SAMPLE_RATE', 22050))
 

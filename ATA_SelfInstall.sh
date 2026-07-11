@@ -612,17 +612,21 @@ CHAT_AI_API_KEY=your_api_key_here
 CHAT_AI_ENDPOINT=https://your-endpoint.com/v1
 
 # TTS CONFIGURATION
-TTS_BACKEND=piper  # Options: piper, coqui_xtts
+TTS_BACKEND=piper
+TTS_ENABLED=true
 
-# Piper TTS Settings
-TTS_DEFAULT_LANG=en
-TTS_VOICE_PATH=./pipeline/model/piper-voices/en_US-lessac-medium.onnx
-TTS_VOICE_DIR=./pipeline/model/piper-voices
+# TTS Global Settings
 TTS_SAMPLE_RATE=22050
+TTS_DEFAULT_LANG=en
 
-# Coqui XTTS Settings (used when TTS_BACKEND=coqui_xtts)
-XTTS_Model_Path=./pipeline/model/coqui-xtts
-XTTS_Reference_Audio_Path=./reference_audio.wav
+#  Pier TTS Settings
+TTS_BIN_PATH=/mnt/Data_Mount/VERANDA_DataMount/Experimental/ATA/pipeline/tts/bin/piper
+TTS_VOICE_DIR=/mnt/Data_Mount/VERANDA_DataMount/Experimental/ATA/pipeline/model/piper-voices
+TTS_VOICE_PATH=/mnt/Data_Mount/VERANDA_DataMount/Experimental/ATA/pipeline/model/piper-voices/en_US-lessac-medium.onnx
+
+# Coqui XTTS Settings (unused when TTS_BACKEND=piper)
+XTTS_Model_Path=/mnt/Data_Mount/VERANDA_DataMount/Experimental/ATA/pipeline/model/coqui-xtts
+XTTS_Reference_Audio_Path=/mnt/Data_Mount/VERANDA_DataMount/Experimental/ATA/reference_audio.wav
 
 # TTS Global Settings
 TTS_ENABLED=true

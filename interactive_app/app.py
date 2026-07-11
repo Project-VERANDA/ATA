@@ -802,7 +802,7 @@ def generate_org_audio_route():
 def generate_speech_route():
     """
     Generate speech WITHOUT writing to persistent storage.
-    Returns audio directly via BytesIO buffer for privacy.
+    Sets explicit working directory to avoid '.' permission errors.
     """
     try:
         data = request.get_json()
@@ -811,24 +811,42 @@ def generate_speech_route():
         
         logger.info(f"🎵 Speech generation request ({len(text)} chars, ephemeral mode)")
         
-        from pipeline.process import generate_speech
-        import io
+        from pipeline.process import generate_speech, BASE_PATH, pipeline_dir
+        import os
+        import tempfile
+
+        original_cwd = os.getcwd()
+        temp_dir = tempfile.mkdtemp(prefix='piper_work_')
         
-        # ✅ Generate in-memory buffer (no disk writes!)
-        audio_buffer = generate_speech(text, language=lang, return_bytes=True)
-        
-        if not audio_buffer:
-            return jsonify({'error': 'Speech generation failed'}), 500
-        
-        # ✅ Send file from memory (no filesystem access needed!)
-        return send_file(
-            audio_buffer,
-            mimetype='audio/wav',
-            as_attachment=False,
-            download_name='synthetic_speech.wav',
-            conditional=True
-        )
-        
+        try:
+            # Set working directory to avoid '.' permission issues
+            os.chdir(temp_dir)
+            logger.debug(f"📁 Changed working directory to: {temp_dir}")
+            
+            # Generate in-memory buffer (no persistent disk writes!)
+            audio_buffer = generate_speech(text, language=lang, return_bytes=True)
+            
+            if not audio_buffer:
+                return jsonify({'error': 'Speech generation failed'}), 500
+            
+            # Send file from memory
+            return send_file(
+                audio_buffer,
+                mimetype='audio/wav',
+                as_attachment=False,
+                download_name='synthetic_speech.wav',
+                conditional=True
+            )
+            
+        finally:
+            os.chdir(original_cwd)
+            try:
+                import shutil
+                shutil.rmtree(temp_dir)
+                logger.debug(f"🗑️ Temp work directory deleted: {temp_dir}")
+            except OSError:
+                pass
+                
     except Exception as e:
         logger.error(f"Error generating speech: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
