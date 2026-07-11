@@ -227,7 +227,7 @@ echo "  → python-dotenv..."
 pip install python-dotenv --no-cache-dir
 
 echo "  → torchcrf..."
-pip install torchcrf --no-cache-dir  # ← FIXED! Was installing spaCy instead
+pip install pytorch-crf --no-cache-dir
 
 echo "  → spacy (includes thinc)..."
 pip install "spacy>=3.8.1" --no-cache-dir || \
