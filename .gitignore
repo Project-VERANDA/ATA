@@ -15,3 +15,44 @@ ModelTraining/*
 key.pem
 cert.pem
 .env
+
+# ===== LARGE MODEL FILES (Do not commit) =====
+pipeline/model/
+pipeline/models/
+*.bin
+*.pt
+*.pth
+*.onnx
+*.safetensors
+*.ckpt
+
+# Python cache
+__pycache__/
+*.pyc
+
+# ===== Uploaded/Audio Files =====
+uploads/
+
+# ===== LARGE FILES (Do not commit) =====
+# Audio files from processing
+uploads/
+pipeline/audios/
+pipeline/transcripts/
+pipeline/annonym/
+pipeline/logs/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Temporary files
+*.tmp
+.tmp/
