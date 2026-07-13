@@ -270,17 +270,6 @@ Use --include-tags or --exclude-tags to customize which tags are anonymized.
 
 # 🐞 Troubleshooting Issue: 
 
-## *Audio Beep Replacement failed* or *PyDub not available*
-
-Cause: Missing pydub library or ffmpeg binary. Solution:
-
-    Install PyDub: pip install pydub
-    Install FFmpeg:
-    Ubuntu: sudo apt-get install ffmpeg
-    macOS: brew install ffmpeg
-    Windows: Download and add to **PATH**.
-    Restart the server.
-
 ## Issue: *Offset alignment error* in logs
 
 Cause: The text transcription does not perfectly match the audio timing. Solution:
@@ -311,8 +300,7 @@ Solution:
 * [ ] Non-NVIDIA GPU: Add support for AMD/Intel GPUs.
 * [x] Improved TTS: Switch from Google TTS to a local text-to-speech engine.
 * [ ] Production Web Interface: Upgrade the demo interface to a full production-ready UI.
-* [ ] * [x] Re-adding the anonymization process.
-* [ ] Adding the models to the Github Repo.
+* [x] Re-adding the anonymization process.
 * [x] Add a web interface.
   *   [ ] Update the existing web interface to be a "demo" interface.
   *   [ ] Create a new production interface.
@@ -327,15 +315,13 @@ Solution:
 * [ ] Switch from API calls for the AI models to local model processing.
   *  [ ] Add a check/installation for local models, and if not, fall back to API calls.
   *  [ ] Disable the LLM rewrite function when no LLM model is available.
-  *  [ ] Switch the .env file to also host the LLM API endpoint variable, instead of hardcoding it into the code.
+  *  [x] Switch the .env file to also host the LLM API endpoint variable, instead of hardcoding it into the code.
 * [ ] Do some optimizations for the LLM system prompt.
 * [ ] Try getting all the local LLM models working.
 * [x] Update the Running the Script section of this ReadMe.
 * [ ] Add arguments for process.py to enable/disable each feature in the pipeline.
 * [ ] Add code enabling other non-nvidia GPUs.
-* [ ] Switch from Google TTS to a new, locally-running text-to-speech tool.
-* [ ] Disable the translation feature of WhisperX.
-* [ ] Look into whether there can be chunk-processing of live-recorded data for live transcription and anonymization.
+* [x] Disable the translation feature of WhisperX.
 
 * [ ] 
 
@@ -347,7 +333,6 @@ This project utilizes:
     Pyannote.audio
     Hugging Face Transformers (mmbert_multilingual_pii_ner)
     Flask
-    PyDub
 
 Developed for privacy-preserving audio analysis.
 
