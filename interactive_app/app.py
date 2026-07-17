@@ -32,7 +32,7 @@ current_script_dir = Path(__file__).resolve().parent
 # Determine the project root (ATA/)
 project_root = current_script_dir.parent
 
-# CRITICAL: Define Pipeline and Model paths EXACTLY as process.py does
+# Define Pipeline and Model paths EXACTLY as process.py does
 pipeline_path = project_root / "pipeline"
 MODEL_FOLDER = pipeline_path / "model"
 
@@ -96,12 +96,11 @@ except ImportError:
     logger.warning("PyDub not available. Audio processing features may be limited.")
 
 try:
-    from pydub import AudioSegment
-    from pydub.generators import Sine
-    PYDUB_AVAILABLE = True
+    import whisperx
+    WHISPERX_AVAILABLE = True
 except ImportError:
-    PYDUB_AVAILABLE = False
-    logger.warning("PyDub not available. Audio processing features may be limited.")
+    WHISPERX_AVAILABLE = False
+    logger.warning("WhisperX not available. Transcription features may be limited.")
 
 # --- Application Configuration ---
 BERT_ANONYMIZER_AVAILABLE = True
