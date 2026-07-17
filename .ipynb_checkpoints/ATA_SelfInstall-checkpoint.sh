@@ -1,7 +1,67 @@
 #!/usr/bin/bash
 
-# Exit immediately if a command exits with a non-zero status
+# ============================================================================
+# ATA Speech Anonymizer Installer (v3.1 - Latest Dependencies)
+# NumPy 2.x Compatible | Latest PyTorch 2.8+ | Streamlined TTS
+# ============================================================================
+
 set -e
+
+SHOW_HELP=false
+SKIP_WEB=false
+NO_MODELS=false
+SKIP_WHISPER=false
+SKIP_PYANNOTE=false
+AUTO_LOGIN=false
+ANSWER_YES=false
+QUIET_MODE=false
+WHISPER_SELECTION=""
+FORCE_REFRESH=false
+HUGGINGFACE_TOKEN=""
+
+usage() {
+    cat << 'EOF'
+Usage: ./ATA_SelfInstall.sh [OPTIONS]
+
+Options:
+  -h, --help              Show this help message
+  -y, --yes               Auto-answer 'yes' to all prompts
+  --skip-web              Skip web interface installation (Flask, TTS)
+  --no-models             Skip ALL ML model downloads
+  --skip-whisper          Skip WhisperX model download
+  --skip-pyannote         Skip Pyannote diarization model download
+  --whisper-models LIST   Comma-separated Whisper models (default: large-v3)
+  --auto-login            Auto-authenticate with HUGGINGFACE_TOKEN env var
+  -q, --quiet             Minimal output mode
+  --force-refresh         Unconditionally reinstall all packages
+EOF
+}
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -h|--help) SHOW_HELP=true; shift ;;
+        -y|--yes) ANSWER_YES=true; shift ;;
+        --skip-web) SKIP_WEB=true; shift ;;
+        --no-models) NO_MODELS=true; shift ;;
+        --skip-whisper) SKIP_WHISPER=true; shift ;;
+        --skip-pyannote) SKIP_PYANNOTE=true; shift ;;
+        --whisper-models) WHISPER_SELECTION="$2"; shift 2 ;;
+        --auto-login) AUTO_LOGIN=true; shift ;;
+        -q|--quiet) QUIET_MODE=true; shift ;;
+        --force-refresh) FORCE_REFRESH=true; shift ;;
+        *) echo "Unknown option: $1"; usage; exit 1 ;;
+    esac
+done
+
+if [ "$SHOW_HELP" = true ]; then
+    usage
+    exit 0
+fi
+
+if [ "$QUIET_MODE" = true ]; then
+    exec >/dev/null 2>&1
+fi
 
 # --- 1. MAIN FOLDER LOGIC ---
 CURRENT_DIR="$(pwd)"
@@ -14,32 +74,27 @@ if [ "$(basename "$CURRENT_DIR")" == "$MAIN_DIR_NAME" ]; then
     echo "✅ Already inside '$MAIN_DIR_NAME' folder. Proceeding..."
 else
     echo "📂 Not inside '$MAIN_DIR_NAME'. Checking for project files..."
-    
     if [ -d "pipeline" ] || [ -f "README.md" ]; then
         echo "✅ Detected project root. Creating '$MAIN_DIR_NAME' and moving files..."
         mkdir -p "$MAIN_DIR_NAME"
-        
         for item in *; do
             if [ "$item" != "$MAIN_DIR_NAME" ]; then
                 mv "$item" "$MAIN_DIR_NAME/"
             fi
         done
-        
         cd "$MAIN_DIR_NAME"
         CURRENT_DIR="$(pwd)"
         echo "✅ Moved all files into '$MAIN_DIR_NAME'. New location: $CURRENT_DIR"
     else
         echo "❌ Error: Not inside '$MAIN_DIR_NAME' and no project files found."
-        echo "   Please run this script from the root of the cloned ATA repository."
         exit 1
     fi
 fi
 
 cd "$CURRENT_DIR"
 
-echo "=== ATA Speech Anonymizer Installer ==="
+echo "=== ATA Speech Anonymizer Installer (v3.1 - Latest Dependencies) ==="
 echo "Working Directory: $(pwd)"
-echo "This script checks for existing dependencies and skips installation if found."
 echo ""
 
 # 2. Check if Conda is installed
@@ -56,12 +111,25 @@ fi
 
 # 3. Create the environment
 ENV_NAME="whisperx"
-echo "Creating conda environment '$ENV_NAME' with Python 3.11..."
+TARGET_PYTHON="3.13"
+
+echo "Creating conda environment '$ENV_NAME' with Python $TARGET_PYTHON..."
+
 if conda env list | grep -q "^$ENV_NAME "; then
-    echo "Environment '$ENV_NAME' already exists. Removing and recreating..."
-    conda env remove -n $ENV_NAME -y
+    if [ "$FORCE_REFRESH" = true ]; then
+        echo "🔄 Environment exists (--force-refresh). Removing and recreating..."
+        conda env remove -n $ENV_NAME -y
+        rm -rf ~/miniconda3/envs/$ENV_NAME 2>/dev/null || true
+        rm -rf ~/miniforge3/envs/$ENV_NAME 2>/dev/null || true
+    else
+        echo "⚠️  Environment '$ENV_NAME' already exists."
+        echo "   Using existing environment (use --force-refresh to recreate)"
+    fi
+else
+    echo "Creating fresh environment with Python $TARGET_PYTHON..."
 fi
-conda create -n $ENV_NAME python=3.11 -y
+
+conda create -n $ENV_NAME python=$TARGET_PYTHON -c conda-forge -y
 
 # 4. Activate the environment
 echo "Activating environment..."
@@ -69,664 +137,567 @@ conda activate $ENV_NAME
 MODEL_DIR="$CURRENT_DIR/pipeline/model"
 mkdir -p "$MODEL_DIR"
 
-# --- HELPER FUNCTIONS ---
+ACTUAL_PYTHON=$(conda run -n $ENV_NAME python --version | awk '{print $2}')
+EXPECTED_PYTHON="3.13"
+if [[ ! "$ACTUAL_PYTHON" =~ ^3\.13 ]]; then
+    echo "❌ ERROR: Expected Python 3.13.x, got $ACTUAL_PYTHON"
+    exit 1
+fi
+echo "✅ Python version verified: $ACTUAL_PYTHON"
 
-check_pip_installed() {
-    local pkg=$1
-    if pip show "$pkg" &> /dev/null; then
-        echo "✅ $pkg is already installed. Skipping."
-        return 0
-    else
-        return 1
-    fi
-}
+# ============================================================================
+# 🔧 SYSTEM DEPENDENCIES
+# ============================================================================
 
-check_conda_installed() {
-    local pkg=$1
-    if conda list "$pkg" &> /dev/null; then
-        echo "✅ Conda package $pkg is already installed. Skipping."
-        return 0
-    else
-        return 1
-    fi
-}
+echo ""
+echo "============================================================"
+echo "Installing System Dependencies"
+echo "============================================================"
 
-check_apt_installed() {
-    local pkg=$1
-    if dpkg -l | grep -q "^ii  $pkg"; then
-        echo "✅ System package $pkg is already installed. Skipping."
-        return 0
-    else
-        return 1
-    fi
-}
-
-install_if_missing() {
-    local pkg_spec=$1
-    local pkg_name=$2
-    
-    if [[ "$pkg_spec" == git+* ]]; then
-        if pip show whisperx &> /dev/null; then
-            echo "✅ whisperx is already installed. Skipping."
-        else
-            echo "Installing whisperx from source..."
-            pip install "$pkg_spec"
-        fi
-    else
-        if ! check_pip_installed "$pkg_name"; then
-            echo "Installing $pkg_name..."
-            pip install "$pkg_spec"
-        fi
-    fi
-}
-
-# 5. Install System Dependencies (APT)
-echo "Checking system build tools..."
-NEEDS_APT=false
-
-if ! check_apt_installed "build-essential"; then NEEDS_APT=true; fi
-if ! check_apt_installed "libsndfile1"; then NEEDS_APT=true; fi
-if ! check_apt_installed "ffmpeg"; then NEEDS_APT=true; fi
-if ! check_apt_installed "espeak-ng"; then NEEDS_APT=true; fi
-
-if [ "$NEEDS_APT" = true ]; then
-    echo "Installing missing system tools via apt..."
-    sudo apt-get update -qq && sudo apt-get install -y -qq build-essential libsndfile1 ffmpeg espeak-ng
+# FFmpeg (required for video/audio processing)
+if ! command -v ffmpeg &> /dev/null; then
+    echo "Installing FFmpeg..."
+    sudo apt-get update -q
+    sudo apt-get install -y ffmpeg || echo "⚠️  FFmpeg installation failed (may work without it)"
 else
-    echo "All system tools are present."
+    echo "✅ FFmpeg already installed"
 fi
 
-# Ensure ffmpeg and libsndfile are present in conda as well
-echo "Checking Conda packages (ffmpeg, libsndfile)..."
-if ! check_conda_installed "ffmpeg"; then
-    echo "Installing ffmpeg via Conda..."
-    conda install -c conda-forge ffmpeg -y
-fi
-if ! check_conda_installed "libsndfile"; then
-    echo "Installing libsndfile via Conda..."
-    conda install -c conda-forge libsndfile -y
-fi
+# ============================================================================
+# 🔧 NUMPY 2.x + LATEST PYTORCH INSTALLATION
+# ============================================================================
 
-# --- HELPER FUNCTION: Normalize package name ---
-normalize_pkg_name() {
-    echo "$1" | tr '-' '_'
-}
+echo ""
+echo "============================================================"
+echo "Installing ML Stack (NumPy 2.x + Latest PyTorch 2.8+)"
+echo "============================================================"
 
-# --- HELPER FUNCTION: Check if pip package is installed (Robust) ---
-check_pip_installed_robust() {
-    local pkg=$1
-    local norm_pkg=$(normalize_pkg_name "$pkg")
-    
-    if pip show "$pkg" &> /dev/null; then
-        return 0
-    fi
-    if pip show "$norm_pkg" &> /dev/null; then
-        return 0
-    fi
-    return 1
-}
-
-# --- HELPER FUNCTION: Check if Git Package is Installed ---
-check_git_installed() {
-    local url=$1
-    local pkg_name=$2
-    
-    if ! check_pip_installed_robust "$pkg_name"; then
-        return 1
-    fi
-    return 0
-}
-
-# 6. Install Python packages (Optimized)
-echo "Upgrading pip..."
 pip install --upgrade pip -q
 
+# Core ML stack with NumPy 2.x compatibility
+echo "  → numpy>=2.0.0 (NumPy 2.x series)..."
+pip install "numpy>=2.0.0,<3.0.0" --no-cache-dir
+
+echo "  → scipy..."
+pip install "scipy>=1.18.0" --no-cache-dir
+
+# LATEST PyTorch 2.8+ (updated from 2.0.0)
+echo "  → torch>=2.8.0 (LATEST STABLE)..."
+pip install "torch>=2.8.0,<3.0.0" --no-cache-dir || \
+pip install torch --no-cache-dir
+
+echo "  → torchaudio..."
+pip install "torchaudio>=2.8.0" --no-cache-dir || \
+pip install torchaudio --no-cache-dir
+
+echo "  → torchvision..."
+pip install "torchvision>=0.23.0" --no-cache-dir || \
+pip install torchvision --no-cache-dir
+
+# LATEST torchcodec 0.14.0 (updated from 0.7.0)
+echo "  → torchcodec>=0.14.0 (LATEST WITH NUMPY 2.x SUPPORT)..."
+pip install "torchcodec>=0.14.0" --no-cache-dir || \
+pip install "torchcodec>=0.10.0" --no-cache-dir || \
+echo "⚠️  torchcodec installation failed (optional)"
+
+# Transformers & dependencies (NumPy 2.x compatible)
+echo "  → transformers..."
+pip install "transformers>=4.50.0" --no-cache-dir
+
+echo "  → accelerate..."
+pip install "accelerate>=0.30.0" --no-cache-dir
+
+echo "  → sentencepiece..."
+pip install "sentencepiece>=0.1.99" --no-cache-dir
+
+echo "  → huggingface-hub..."
+pip install "huggingface-hub>=0.34.0" --no-cache-dir
+
+# Other utilities
+echo "  → pandas..."
+pip install "pandas>=2.2.0" --no-cache-dir
+
+echo "  → ffmpeg-python..."
+pip install ffmpeg-python --no-cache-dir
+
+echo "  → openai..."
+pip install "openai>=1.0.0" --no-cache-dir
+
+echo "  → python-dotenv..."
+pip install python-dotenv --no-cache-dir
+
+echo "  → torchcrf..."
+pip install pytorch-crf --no-cache-dir
+
+echo "  → spacy (includes thinc)..."
+pip install "spacy>=3.8.1" --no-cache-dir || \
+echo "⚠️ spacy installation may need manual fix"
+
+echo "  → thinc..."
+pip install "thinc>=8.3.0" --only-binary :all: --no-cache-dir || \
+echo "⚠️ thinc may have been installed with spaCy"
+
+echo "  → blis..."
+pip install "blis>=0.7.0" --no-cache-dir
+
+echo "  → click..."
+pip install "click>=8.1.7" --no-cache-dir
+
+echo "  → typer..."
+pip install "typer>=0.9.0" --no-cache-dir
+
+# Speaker diarization (NumPy 2.x compatible)
+echo "  → pyannote.audio (speaker diarization)..."
+pip install "pyannote.audio>=4.0.0" --no-cache-dir || \
+pip install "pyannote.audio>=4.0.0,<5.0.0" --no-cache-dir || \
+echo "⚠️  Warning installing pyannote.audio"
+
+# whisperx
+echo "  → whisperx..."
+pip uninstall whisperx -y 2>/dev/null || true
+pip install git+https://github.com/m-bain/whisperx.git --no-cache-dir || \
+pip install whisperx --no-cache-dir || \
+echo "⚠️  Warning installing whisperx"
+
+echo "✅ Base ML stack installation complete."
+
 # ============================================================================
-# 🔧 CRITICAL FIX: Install click==8.1.7 AND compatible typer EARLY
-# This prevents Python 3.12 TypeError with 'Choice' subscriptable conflicts.
+# 🔧 VERSION VERIFICATION
 # ============================================================================
-echo "Ensuring click==8.1.7 and compatible typer are installed..."
-if ! check_pip_installed "click"; then
-    echo "Installing click==8.1.7..."
-    pip install "click==8.1.7" --force-reinstall --no-deps
+
+echo ""
+echo "=== Version Verification ==="
+NUMPY_VER=$(pip show numpy | grep Version | awk '{print $2}')
+Torch_VER=$(pip show torch | grep Version | awk '{print $2}')
+THINC_VER=$(pip show thinc | grep Version | awk '{print $2}')
+SPACY_VER=$(pip show spacy | grep Version | awk '{print $2}')
+PYANNOTE_VER=$(pip show pyannote.audio | grep Version | awk '{print $2}')
+TORCHCODEC_VER=$(pip show torchcodec | grep Version | awk '{print $2}')
+
+echo "  numpy: $NUMPY_VER"
+echo "  torch: $Torch_VER"
+echo "  thinc: $THINC_VER"
+echo "  spacy: $SPACY_VER"
+echo "  pyannote.audio: ${PYANNOTE_VER:-installed}"
+echo "  torchcodec: ${TORCHCODEC_VER:-installed}"
+
+if [[ ! "$NUMPY_VER" =~ ^2\. ]]; then
+    echo "⚠️  WARNING: NumPy $NUMPY_VER (expected 2.x)"
 else
-    CLICK_VERSION=$(pip show click | grep Version | awk '{print $2}' | cut -d. -f1)
-    # Check if it's 8.1.x (safe) or 8.2+ (conflict) or <8.1 (error)
-    if [ "$CLICK_VERSION" -lt 8 ]; then
-        echo "⚠️  Detected click version < 8.0. Upgrading to 8.1.7..."
-        pip install "click==8.1.7" --force-reinstall --no-deps
-    elif [ "$CLICK_VERSION" -gt 8 ]; then
-        echo "⚠️  Detected click version > 8.1. Downgrading to 8.1.7..."
-        pip install "click==8.1.7" --force-reinstall --no-deps
-    else
-        MINOR=$(pip show click | grep Version | awk '{print $2}' | cut -d. -f2)
-        if [ "$MINOR" -lt 1 ]; then
-             echo "⚠️  Detected click 8.0.x. Upgrading to 8.1.7..."
-             pip install "click==8.1.7" --force-reinstall --no-deps
-        else
-             echo "✅ click version is sufficient (8.1.x)."
-        fi
-    fi
+    echo "✅ NumPy $NUMPY_VER confirmed (2.x series)"
 fi
 
-# Ensure typer is compatible
-if ! check_pip_installed "typer"; then
-    echo "Installing compatible typer (0.9.0 - 0.12.x)..."
-    pip install "typer>=0.9.0,<0.13.0" --force-reinstall --no-deps
+if [[ ! "$Torch_VER" =~ ^2\.[89] ]] && [[ ! "$Torch_VER" =~ ^3\. ]]; then
+    echo "⚠️  NOTE: PyTorch $Torch_VER (2.8+ recommended)"
 else
-    TYPER_VERSION=$(pip show typer | grep Version | awk '{print $2}')
-    MAJOR=$(echo $TYPER_VERSION | cut -d. -f1)
-    MINOR=$(echo $TYPER_VERSION | cut -d. -f2)
-    if [ "$MAJOR" -eq 0 ] && [ "$MINOR" -ge 13 ]; then
-        echo "⚠️  Detected typer >= 0.13. Downgrading to 0.12.5..."
-        pip install "typer==0.12.5" --force-reinstall --no-deps
-    else
-        echo "✅ typer version is compatible ($TYPER_VERSION)."
-    fi
+    echo "✅ PyTorch $Torch_VER confirmed (2.8+ latest)"
 fi
 
-echo "Checking NLP and Audio libraries..."
-
-# 1. WhisperX (Special handling for Git)
-if check_git_installed "git+https://github.com/m-bain/whisperx.git" "whisperx"; then
-    echo "✅ whisperx is already installed. Skipping."
+if python -c "import spacy; import thinc; import pyannote.audio; import whisperx; import torchcodec" 2>/dev/null; then
+    echo "✅ All core packages imported successfully"
 else
-    echo "Installing whisperx from source..."
-    pip install git+https://github.com/m-bain/whisperx.git
+    echo "❌ CRITICAL: Import test failed"
+    exit 1
 fi
 
-# 2. Define list of standard packages to check
-STANDARD_PKGS=(
-    "pydub"
-    "ffmpeg-python"
-    "pyannote.audio"
-    "transformers"
-    "accelerate"
-    "sentencepiece"
-    "spacy"
-    "torchcrf"
-    "pandas"
-    "openai"
-    "python-dotenv"
-    "scipy"
-    "numpy"
-    "huggingface-hub"
-)
+# ============================================================================
+# 🔧 SPACY MODEL INSTALLATION
+# ============================================================================
 
-for pkg in "${STANDARD_PKGS[@]}"; do
-    if check_pip_installed_robust "$pkg"; then
-        echo "✅ $pkg is already installed. Skipping."
-    else
-        echo "Installing $pkg..."
-        pip install "$pkg"
-    fi
-done
+echo ""
+echo "============================================================"
+echo "Downloading spaCy Models (for PII Detection)"
+echo "============================================================"
 
-# 3. Spacy Model Check
-echo "Checking spaCy multilingual model..."
+if python -m spacy check en_core_web_sm &> /dev/null; then
+    echo "✅ en_core_web_sm already installed."
+else
+    echo "Installing spaCy English model (en_core_web_sm)..."
+    python -m spacy download en_core_web_sm
+fi
+
 if python -m spacy check xx_ent_wiki_sm &> /dev/null; then
-    echo "✅ spaCy multilingual model (xx_ent_wiki_sm) is already installed."
+    echo "✅ xx_ent_wiki_sm already installed."
 else
     echo "Installing spaCy multilingual model (xx_ent_wiki_sm)..."
     python -m spacy download xx_ent_wiki_sm
 fi
 
-# 4. Torchcodec check
-echo "Checking torchcodec..."
-if pip show torchcodec &> /dev/null; then
-    CURRENT_VERSION=$(pip show torchcodec | grep Version | awk '{print $2}')
-    if [ "$CURRENT_VERSION" == "0.7.0" ]; then
-        echo "✅ torchcodec 0.7.0 is already installed."
-    else
-        echo "Updating torchcodec to 0.7.0..."
-        pip uninstall torchcodec -y
-        pip install torchcodec==0.7.0
-    fi
-else
-    echo "Installing torchcodec 0.7.0..."
-    pip install torchcodec==0.7.0
-fi
-
-# --- TorchCRF Installation ---
-echo "Checking CRF library..."
-if python -c "from torchcrf import CRF" 2>/dev/null; then
-    echo "✅ torchcrf is already installed and working."
-else
-    echo "Installing CRF library (pytorch-crf)..."
-    pip uninstall torchcrf -y 2>/dev/null || true
-    pip install pytorch-crf --no-cache-dir
-    
-    if python -c "from torchcrf import CRF" 2>/dev/null; then
-        echo "✅ CRF library installed successfully."
-    else
-        echo "❌ CRITICAL: Failed to install CRF library."
-        exit 1
-    fi
-fi
-
 # ============================================================================
-# 🔧 POST-INSTALLATION VERIFICATION
+# 🖥️ WEB INTERFACE & TTS BACKENDS
 # ============================================================================
+
 echo ""
-echo "=== Verifying Critical Dependencies ==="
+echo "============================================================"
+echo "Web Interface & TTS Backend Installation"
+echo "============================================================"
 
-if python -c "import click; from click import Choice; c = Choice(['a','b'])" 2>/dev/null; then
-    echo "✅ click is compatible with Python 3.12"
+if [ "$SKIP_WEB" = true ]; then
+    echo "Skipping Web Interface (--skip-web)"
+    INSTALL_WEB="n"
+elif [ "$ANSWER_YES" = true ]; then
+    echo "Web Interface: YES (auto-answered --yes)"
+    INSTALL_WEB="y"
 else
-    echo "❌ WARNING: click may not be compatible."
+    read -p "Install Web Interface (Flask + TTS)? (y/n): " INSTALL_WEB
+    INSTALL_WEB=${INSTALL_WEB:-y}
 fi
-
-if python -c "import typer" 2>/dev/null; then
-    echo "✅ typer imported successfully"
-else
-    echo "❌ WARNING: typer import failed"
-fi
-
-if python -c "import spacy" 2>/dev/null; then
-    echo "✅ spacy imported successfully"
-else
-    echo "❌ WARNING: spacy import failed"
-fi
-
-if python -c "from huggingface_hub import snapshot_download" 2>/dev/null; then
-    echo "✅ huggingface-hub imported successfully"
-else
-    echo "❌ WARNING: huggingface-hub import failed"
-fi
-
-# ============================================================================
-# 7. Web Interface Option
-# ============================================================================
-echo ""
-echo "-------------------------------------------------"
-read -p "Do you want to install the Web Interface (Flask, Coqui TTS, etc.)? (y/n): " INSTALL_WEB
-INSTALL_WEB=${INSTALL_WEB:-y}
 
 if [[ "$INSTALL_WEB" =~ ^[Yy]$ ]]; then
-    WEB_PKGS=("flask" "python-dotenv" "requests" "cryptography" "TTS" "scipy")
-    SKIP_WEB=true
-    for pkg in "${WEB_PKGS[@]}"; do
-        if ! check_pip_installed "$pkg"; then
-            SKIP_WEB=false
-            break
-        fi
-    done
-
-    if [ "$SKIP_WEB" = false ]; then
-        echo "Installing Web Interface dependencies..."
-        
-        # 1. Upgrade pip and build tools
-        pip install --upgrade pip setuptools wheel
-        
-        # 2. CRITICAL FIX: Install core data libraries FIRST with forced versions
-        # This prevents scipy/TTS from pinning numpy to old versions
-        echo "Step 1/4: Forcing NumPy >=2.1.0 and Pandas >=2.2.3..."
-        pip install --no-cache-dir --force-reinstall \
-            "numpy>=2.1.0,<3.0.0" \
-            "pandas>=2.2.3,<3.0.0" \
-            "scipy>=1.14.0" || {
-                echo "⚠️  Force install failed. Trying standard install..."
-                pip install "numpy>=2.1.0" "pandas>=2.2.3" "scipy>=1.14.0" --no-cache-dir
-            }
-
-        # 3. Verify versions before proceeding
-        python -c "import numpy; import pandas; assert float(numpy.__version__.split('.')[0]) >= 2, 'NumPy too low'; print(f'✅ NumPy: {numpy.__version__}, Pandas: {pandas.__version__}')"
-
-        # 4. Now install Coqui TTS (which will respect the new numpy)
-        echo "Step 2/4: Installing Coqui TTS..."
-        pip install "TTS>=0.22.0" --no-cache-dir || {
-            echo "⚠️  PyPI TTS failed. Trying GitHub source..."
-            pip install git+https://github.com/coqui-ai/TTS.git@main --no-cache-dir || {
-                echo "❌ CRITICAL: Failed to install Coqui TTS."
-                exit 1
-            }
-        }
-
-        # 5. Install remaining web frameworks
-        echo "Step 3/4: Installing Flask and dependencies..."
-        pip install flask python-dotenv requests cryptography pydub ffmpeg-python spacy --no-cache-dir
-        
-        echo "✅ Step 4/4: Web Interface dependencies installed successfully."
-    else
-        echo "Skipping Web Interface installation (all packages already present)."
-    fi
-else
-    echo "Skipping Web Interface installation."
-fi
-
-# ============================================================================
-# 🗣️ DOWNLOAD MULTI-VOICE MODELS
-# ============================================================================
-echo ""
-echo "-------------------------------------------------"
-echo "Coqui TTS Multi-Voice Models"
-echo "Note: Coqui manages its own cache (~/.cache/tts). We will verify download."
-echo ""
-
-DOWNLOAD_MODELS=${DOWNLOAD_MODELS:-y} 
-read -p "Do you want to trigger Coqui model downloads now? (y/n) [y]: " DOWNLOAD_INPUT
-DOWNLOAD_INPUT=${DOWNLOAD_INPUT:-y}
-
-if [[ "$INSTALL_WEB" =~ ^[Yy]$ ]] && [[ "$DOWNLOAD_INPUT" =~ ^[Yy]$ ]]; then
-    echo "Triggering Coqui model downloads via Python..."
+    pip install flask requests cryptography --no-cache-dir
     
-    # This forces the models to download to the default TTS cache
-    python -c "
-import sys
-try:
-    from TTS.api import TTS
-    print('Downloading German Thorsten (Multi-Voice)...')
-    try:
-        tts_de = TTS(model_name='tts_models/de/thorsten/vits') # Standard Thorsten first
-        print('✅ German Thorsten downloaded.')
-    except Exception as e:
-        print(f'⚠️  German Thorsten failed (might be multispeaker issue): {e}')
-        # Try to find available de models
-        pass
+    # TTS BACKEND SELECTION
+    echo ""
+    echo "Select TTS Backend:"
+    echo "  1. piper       - Fast offline neural TTS (recommended)"
+    echo "  2. coqui_xtts  - High-quality voice cloning (17 langs)"
+    
+    if [ "$ANSWER_YES" = true ]; then
+        TTS_BACKEND_CHOICE="piper"
+    else
+        read -p "Enter choice [1]: " TTS_CHOICE
+        TTS_BACKEND_CHOICE=${TTS_CHOICE:-piper}
+        [ "$TTS_CHOICE" = "2" ] && TTS_BACKEND_CHOICE="coqui_xtts"
+    fi
+    
+    MODEL_DIR="$CURRENT_DIR/pipeline/models"
+    mkdir -p "$MODEL_DIR"
+    
+    echo "Installing TTS Backend: $TTS_BACKEND_CHOICE..."
+    
+    if [ "$TTS_BACKEND_CHOICE" = "piper" ]; then
+        # PIPER TTS
+        pip install "piper-tts>=1.4.2" --no-cache-dir
         
-    print('Downloading English VCTK...')
-    try:
-        tts_en = TTS(model_name='tts_models/en/vctk/vits')
-        print('✅ English VCTK downloaded.')
-    except Exception as e:
-        print(f'⚠️  English VCTK failed: {e}')
-except Exception as e:
-    print(f'Error initializing TTS: {e}')
-"
-    echo "Coqui models are now cached. If 'thorsten-multispeaker' was requested in app.py, you may need to update app.py to use 'tts_models/de/thorsten/vits' as per previous advice."
-else
-    echo "Skipping Coqui model pre-download."
-fi
-
-# ============================================================================
-# 🧩 DOWNLOAD WHISPERX & NLP MODELS TO pipeline/model/
-# ============================================================================
-echo ""
-echo "-------------------------------------------------"
-echo "WhisperX & NLP Model Download"
-echo "Target Directory: $MODEL_DIR"
-echo "Expected Folder Names:"
-echo "  - models--Systran--faster-whisper-large-v3"
-echo "  - models--pyannote--speaker-diarization-community-1"
-echo "  - jhu-clsp/mmBERT-base (Base model for PII NER)"
-echo "  - multilingual_DialogPII_NER (NEW: DFKI-SLT PII Detection Model)"
-echo ""
-
-read -p "Enter WhisperX models to download (tiny, base, small, medium, large) or press Enter to skip: " WHISPER_MODELS_INPUT
-
-# Map short names to HF repos
-declare -A MODEL_MAP
-MODEL_MAP["tiny"]="Systran/faster-whisper-tiny"
-MODEL_MAP["base"]="Systran/faster-whisper-base"
-MODEL_MAP["small"]="Systran/faster-whisper-small"
-MODEL_MAP["medium"]="Systran/faster-whisper-medium"
-MODEL_MAP["large"]="Systran/faster-whisper-large-v3"
-
-if [ -n "$WHISPER_MODELS_INPUT" ]; then
-    for model_name in $WHISPER_MODELS_INPUT; do
-        model_name=$(echo "$model_name" | tr '[:upper:]' '[:lower:]')
+        PIPER_VOICE_DIR="$MODEL_DIR/piper-voices"
+        mkdir -p "$PIPER_VOICE_DIR"
         
-        if [ -z "${MODEL_MAP[$model_name]}" ]; then
-            echo "⚠️  Warning: '$model_name' is not valid. Skipping."
-            continue
-        fi
-
-        hf_repo="${MODEL_MAP[$model_name]}"
-        # CRITICAL: Use the exact naming convention expected by process.py
-        target_dir="$MODEL_DIR/$(echo "$hf_repo" | sed 's/\//\--/g')"
+        echo "Downloading default voice (en_US-lessac-medium)..."
+        curl -sL "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx" \
+               -o "$PIPER_VOICE_DIR/en_US-lessac-medium.onnx"
+        curl -sL "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json" \
+               -o "$PIPER_VOICE_DIR/en_US-lessac-medium.onnx.json"
         
-        if [ -d "$target_dir" ] && [ "$(ls -A "$target_dir")" ]; then
-            echo "✅ Model '$model_name' already exists at $target_dir."
+        if [ -s "$PIPER_VOICE_DIR/en_US-lessac-medium.onnx" ]; then
+            echo "✅ Piper TTS installed with voice model"
+            TTS_CONFIG="piper"
+            TTS_VOICE_PATH="$PIPER_VOICE_DIR/en_US-lessac-medium.onnx"
+            TTS_CONFIG_PATH="$PIPER_VOICE_DIR/en_US-lessac-medium.onnx.json"
         else
-            echo "Downloading: $model_name ($hf_repo) -> $target_dir"
-            mkdir -p "$target_dir"
-            
-            # Download using huggingface-cli
-            if command -v huggingface-cli &> /dev/null; then
-                huggingface-cli download "$hf_repo" --local-dir "$target_dir" --local-dir-use-symlinks False 2>&1 | grep -v "already downloaded" || true
-            else
-                echo "⚠️  huggingface-cli not found. Install with: pip install huggingface-hub"
-                # Fallback to Python if CLI missing
-                python -c "from huggingface_hub import snapshot_download; snapshot_download('$hf_repo', local_dir='$target_dir', local_dir_use_symlinks=False)"
-            fi
-            
-            if [ $? -eq 0 ] && [ "$(ls -A "$target_dir")" ]; then
-                echo "✅ Successfully downloaded: $model_name"
-            else
-                echo "❌ Failed to download: $model_name"
-            fi
+            echo "❌ Voice download failed"
+            exit 1
         fi
-    done
+        
+    elif [ "$TTS_BACKEND_CHOICE" = "coqui_xtts" ]; then
+        # COQUI XTTS v2
+        echo "⚠️  CPML License: Non-commercial use only"
+        export COQUI_TOS_AGREED=1
+        
+        pip install "TTS>=0.27.0" --no-cache-dir
+        
+        COQUI_MODEL_DIR="$MODEL_DIR/coqui-xtts"
+        mkdir -p "$COQUI_MODEL_DIR"
+        
+        echo "Downloading XTTS v2 model (~2GB)..."
+        python <<EOF
+import os
+os.environ['COQUI_TOS_AGREED'] = '1'
+from TTS.api import TTS
+tts = TTS('tts_models/multilingual/multi-dataset/xtts_v2', gpu=False)
+import shutil
+for root, dirs, files in os.walk(tts.model_path):
+    for f in files:
+        shutil.copy2(os.path.join(root, f), "$COQUI_MODEL_DIR")
+print("Done")
+EOF
+        
+        if [ "$(ls -A "$COQUI_MODEL_DIR" 2>/dev/null)" ]; then
+            echo "✅ Coqui XTTS v2 installed"
+            TTS_CONFIG="coqui_xtts"
+            TTS_VOICE_PATH="$COQUI_MODEL_DIR"
+            TTS_CONFIG_PATH="$COQUI_MODEL_DIR"
+        else
+            echo "❌ Model download failed"
+            exit 1
+        fi
+    fi
 else
-    # Auto-download Large if user pressed Enter (default recommendation)
-    echo "No selection made. Downloading 'large-v3' by default..."
-    HF_REPO="Systran/faster-whisper-large-v3"
-    TARGET_DIR="$MODEL_DIR/models--Systran--faster-whisper-large-v3"
-    if [ ! -d "$TARGET_DIR" ]; then
-        echo "Downloading large-v3..."
-        mkdir -p "$TARGET_DIR"
-        huggingface-cli download "$HF_REPO" --local-dir "$TARGET_DIR" --local-dir-use-symlinks False 2>&1 | grep -v "already downloaded" || true
-    else
-        echo "✅ large-v3 already present."
-    fi
+    echo "Skipping TTS installation"
+    TTS_CONFIG="none"
 fi
 
 # ============================================================================
-# 🎙️ PYANNOTE DIARIZATION MODEL
+# 🧩 MODEL DOWNLOADS
 # ============================================================================
-echo ""
-echo "Downloading Pyannote Speaker Diarization Model"
-TARGET="$MODEL_DIR/models--pyannote--speaker-diarization-community-1"
 
-if [ -d "$TARGET" ] && [ "$(ls -A "$TARGET")" ]; then
-    echo "✅ Pyannote model already exists."
+echo ""
+echo "============================================================"
+echo "Model Downloads (WhisperX, Pyannote, DFKI-SLT PII)"
+echo "============================================================"
+
+if [ "$NO_MODELS" = true ]; then
+    echo "Skipping all model downloads (--no-models)"
+    SKIP_WHISPER=true
+    SKIP_PYANNOTE=true
 else
-    echo "Downloading Pyannote to $TARGET..."
-    mkdir -p "$TARGET"
-    # Requires HF Token login first
-    if hf whoami > /dev/null 2>&1; then
-        huggingface-cli download pyannote/speaker-diarization-community-1 --local-dir "$TARGET" --local-dir-use-symlinks False
-        echo "✅ Pyannote downloaded."
-    else
-        echo "❌ Not logged in to Hugging Face. Please run 'huggingface-cli login' and retry."
-    fi
-fi
-
-# ============================================================================
-# 🧠 MBERT BASE & PII MODELS (UPDATED FOR DFKI-SLT MODEL)
-# ============================================================================
-echo ""
-echo "=========================================================="
-echo "Downloading mBert Base & NEW DFKI-SLT PII NER Model"
-echo "=========================================================="
-echo ""
-echo "📝 IMPORTANT: The new model (DFKI-SLT/multilingual_DialogPII_NER)"
-echo "   requires these configuration files:"
-echo "   - crf_config.json"
-echo "   - flert_config.json"  
-echo "   - id2label.json"
-echo ""
-
-# 1. Base Model (mmBERT-base - still needed as foundation)
-BASE_TARGET="$MODEL_DIR/jhu-clsp/mmBERT-base"
-if [ ! -d "$BASE_TARGET" ]; then
-    echo "Downloading mmBERT-base to $BASE_TARGET..."
-    mkdir -p "$(dirname "$BASE_TARGET")"
-    if command -v huggingface-cli &> /dev/null; then
-        huggingface-cli download jhu-clsp/mmBERT-base --local-dir "$BASE_TARGET" --local-dir-use-symlinks False
-    else
-        python -c "from huggingface_hub import snapshot_download; snapshot_download('jhu-clsp/mmBERT-base', local_dir='$BASE_TARGET', local_dir_use_symlinks=False)"
-    fi
-    echo "✅ Base model downloaded."
-else
-    echo "✅ mmBERT-base already present."
-fi
-
-# 2. NEW: DFKI-SLT PII Model (Primary anonymization model)
-echo ""
-echo "📦 Downloading NEW DFKI-SLT Multilingual DialogPII NER Model"
-echo "   Repository: https://huggingface.co/DFKI-SLT/multilingual_DialogPII_NER"
-PII_TARGET="$MODEL_DIR/multilingual_DialogPII_NER"
-
-if [ -d "$PII_TARGET" ] && [ "$(ls -A "$PII_TARGET")" ]; then
-    echo "✅ DFKI-SLT PII model already exists at $PII_TARGET."
-    
-    # Verify required config files exist
-    echo "   Verifying required configuration files..."
-    MISSING_CONFIG=false
-    
-    if [ ! -f "$PII_TARGET/crf_config.json" ]; then
-        echo "   ⚠️  Missing: crf_config.json"
-        MISSING_CONFIG=true
-    fi
-    
-    if [ ! -f "$PII_TARGET/id2label.json" ]; then
-        echo "   ⚠️  Missing: id2label.json"
-        MISSING_CONFIG=true
-    fi
-    
-    if [ "$MISSING_CONFIG" = true ]; then
-        echo "   ⚠️  Some config files are missing. Will attempt to re-download..."
-        rm -rf "$PII_TARGET"
-    else
-        echo "   ✅ All required config files present."
-    fi
-fi
-
-if [ ! -d "$PII_TARGET" ] || [ -z "$(ls -A "$PII_TARGET" 2>/dev/null)" ]; then
-    echo "Downloading DFKI-SLT PII model to $PII_TARGET..."
-    mkdir -p "$PII_TARGET"
-    
-    if command -v huggingface-cli &> /dev/null; then
-        echo "   Using huggingface-cli..."
-        huggingface-cli download DFKI-SLT/multilingual_DialogPII_NER \
-            --local-dir "$PII_TARGET" \
-            --local-dir-use-symlinks False \
-            2>&1 | grep -v "already downloaded" || true
-    else
-        echo "   Using Python fallback..."
+    # Helper function for model downloads
+    download_model_hf() {
+        local repo_id=$1
+        local target_dir=$2
+        local repo_type=${3:-model}
+        
+        echo "Downloading $repo_id..."
+        mkdir -p "$target_dir"
+        
         python -c "
 from huggingface_hub import snapshot_download
 import sys
 try:
     snapshot_download(
-        'DFKI-SLT/multilingual_DialogPII_NER',
-        local_dir='$PII_TARGET',
-        local_dir_use_symlinks=False
+        '$repo_id',
+        local_dir='$target_dir',
+        local_dir_use_symlinks=False,
+        repo_type='$repo_type'
     )
     print('✅ Download complete')
 except Exception as e:
     print(f'❌ Download failed: {e}', file=sys.stderr)
     sys.exit(1)
 " || {
-        echo "❌ Failed to download DFKI-SLT PII model."
-        exit 1
+        echo "❌ Failed to download $repo_id"
+        return 1
     }
+    }
+    
+    # WhisperX Models
+    declare -A MODEL_MAP
+    MODEL_MAP["tiny"]="Systran/faster-whisper-tiny"
+    MODEL_MAP["base"]="Systran/faster-whisper-base"
+    MODEL_MAP["small"]="Systran/faster-whisper-small"
+    MODEL_MAP["medium"]="Systran/faster-whisper-medium"
+    MODEL_MAP["large"]="Systran/faster-whisper-large-v3"
+    
+    if [ "$SKIP_WHISPER" = true ]; then
+        echo "Skipping WhisperX models (--skip-whisper)"
+    elif [ -n "$WHISPER_SELECTION" ]; then
+        # Convert comma-separated to space-separated for proper iteration
+        WHISPER_MODELS_INPUT="${WHISPER_SELECTION//,/ }"
+    elif [ "$ANSWER_YES" = true ]; then
+        WHISPER_MODELS_INPUT="large"
+    else
+        read -p "Enter WhisperX models to download (tiny, base, small, medium, large) or press Enter to skip: " WHISPER_MODELS_INPUT
     fi
     
-    # Verify the download succeeded
-    if [ "$(ls -A "$PII_TARGET" 2>/dev/null)" ]; then
-        echo "✅ DFKI-SLT PII model downloaded successfully."
-        
-        # List key files for verification
-        echo "   Key files found:"
-        ls -la "$PII_TARGET"/*.json 2>/dev/null | awk '{print "   - " $NF}' || echo "   (No .json files found - check manually)"
+    if [ -n "$WHISPER_MODELS_INPUT" ]; then
+        for model_name in $WHISPER_MODELS_INPUT; do
+            model_name=$(echo "$model_name" | tr '[:upper:]' '[:lower:]')
+            if [ -z "${MODEL_MAP[$model_name]}" ]; then
+                echo "⚠️  Invalid: '$model_name'. Skipping."
+                continue
+            fi
+            
+            hf_repo="${MODEL_MAP[$model_name]}"
+            target_dir="$MODEL_DIR/$(echo "$hf_repo" | sed 's/\//\--/g')"
+            
+            if [ -d "$target_dir" ] && [ "$(ls -A "$target_dir")" ]; then
+                echo "✅ Model '$model_name' already exists."
+            else
+                download_model_hf "$hf_repo" "$target_dir"
+            fi
+        done
+    elif [ "$ANSWER_YES" = true ]; then
+        echo "Downloading 'large-v3' by default (auto-answered --yes)..."
+        download_model_hf "Systran/faster-whisper-large-v3" "$MODEL_DIR/models--Systran--faster-whisper-large-v3"
+    fi
+    
+    # Pyannote Diarization Model
+    TARGET="$MODEL_DIR/models--pyannote--speaker-diarization-community-1"
+
+    if [ "$SKIP_PYANNOTE" = true ]; then
+        echo "Skipping Pyannote (--skip-pyannote)"
+    elif [ -d "$TARGET" ] && [ "$(ls -A "$TARGET" 2>/dev/null)" ]; then
+        echo "✅ Pyannote model already exists."
     else
-        echo "❌ Download appeared to succeed but target directory is empty."
-        echo "   Please manually download from: https://huggingface.co/DFKI-SLT/multilingual_DialogPII_NER"
+        echo "Downloading Pyannote to $TARGET..."
+        
+        # Authenticate if token provided
+        if [ "$AUTO_LOGIN" = true ] && [ -n "$HUGGINGFACE_TOKEN" ]; then
+            echo "Authenticating with HUGGINGFACE_TOKEN..."
+            hf auth login --token "$HUGGINGFACE_TOKEN" --add-to-git-credential 2>/dev/null || true
+        fi
+        
+        # Check auth status using hf auth whoami
+        if hf auth whoami &>/dev/null; then
+            echo "✅ Hugging Face authenticated"
+            
+            python -c "from huggingface_hub import snapshot_download; import sys; snapshot_download(repo_id='pyannote/speaker-diarization-community-1', local_dir='./pipeline/model/models--pyannote--speaker-diarization-community-1', local_dir_use_symlinks=False, token=None); print('✅ Pyannote model downloaded successfully!')" || {
+                echo "⚠️  Single-line download failed, trying heredoc..."
+                python <<'PYEOF'
+from huggingface_hub import snapshot_download
+import sys
+try:
+    snapshot_download(
+        repo_id='pyannote/speaker-diarization-community-1',
+        local_dir='./pipeline/model/models--pyannote--speaker-diarization-community-1',
+        local_dir_use_symlinks=False,
+        token=None
+    )
+    print('✅ Pyannote model downloaded successfully!')
+except Exception as e:
+    print(f'❌ Download failed: {e}', file=sys.stderr)
+    sys.exit(1)
+PYEOF
+            }
+        else
+            echo "⚠️  Not logged in to Hugging Face."
+            echo "   Run: hf auth login"
+            echo "   Or: export HUGGINGFACE_TOKEN=your_token && ./ATA_SelfInstall.sh --auto-login"
+            echo "   Verify: hf whoami"
+        fi
+    fi
+    
+    # mmBERT Base & PII Models (11 Languages for PII Detection)
+    echo ""
+    echo "=========================================================="
+    echo "Downloading mBert Base & DFKI-SLT PII NER Model"
+    echo "(Supports 11 languages for PII detection)"
+    echo "=========================================================="
+    echo ""
+    echo "Languages: AR, DE, EN, FI, FR, HI, IT, PL, PT, SP/TR"
+    echo ""
+    echo "  AR - Arabic     FI - Finnish    PL - Polish"
+    echo "  DE - German     FR - French     PT - Portuguese"
+    echo "  EN - English    HI - Hindi      SP - Spanish"
+    echo "  IT - Italian    PL - Polish     TR - Turkish"
+    echo ""
+    
+    BASE_TARGET="$MODEL_DIR/jhu-clsp/mmBERT-base"
+    if [ -d "$BASE_TARGET" ] && [ "$(ls -A "$BASE_TARGET")" ]; then
+        echo "✅ mmBERT-base already present."
+    else
+        download_model_hf "jhu-clsp/mmBERT-base" "$BASE_TARGET" "model"
+    fi
+    
+    PII_TARGET="$MODEL_DIR/multilingual_DialogPII_NER"
+    echo ""
+    echo "📦 Downloading DFKI-SLT Multilingual DialogPII NER Model"
+    
+    if [ -d "$PII_TARGET" ] && [ "$(ls -A "$PII_TARGET")" ]; then
+        echo "✅ DFKI-SLT PII model already exists."
+    else
+        download_model_hf "DFKI-SLT/multilingual_DialogPII_NER" "$PII_TARGET" "model"
+        
+        if [ "$(ls -A "$PII_TARGET" 2>/dev/null)" ]; then
+            echo "✅ DFKI-SLT PII model downloaded successfully."
+        else
+            echo "❌ Download failed. Manual download required:"
+            echo "   https://huggingface.co/DFKI-SLT/multilingual_DialogPII_NER"
+        fi
     fi
 fi
 
-# 3. Old PII Model (Keep for backward compatibility - optional)
-OLD_PII_TARGET="$MODEL_DIR/mmbert_multilingual_pii_ner"
-if [ -d "$OLD_PII_TARGET" ] && [ "$(ls -A "$OLD_PII_TARGET")" ]; then
-    echo ""
-    echo "⚠️  Note: Old PII model (mmbert_multilingual_pii_ner) also exists."
-    echo "   The new DFKI-SLT model should be used for improved accuracy."
-    echo "   If you want to remove the old model, delete: $OLD_PII_TARGET"
-else
-    echo ""
-    echo "ℹ️  Old PII model (mmbert_multilingual_pii_ner) not found."
-    echo "   Only the new DFKI-SLT model is installed."
-fi
+# ============================================================================
+# 📋 ENV FILE CONFIGURATION
+# ============================================================================
 
-echo ""
-echo "=== Model Installation Complete ==="
-echo "Verification: Check that folders exist in $MODEL_DIR"
-echo ""
-echo "Installed Models:"
-echo "=================="
-if [ -d "$MODEL_DIR" ]; then
-    ls -la "$MODEL_DIR" | grep "^d" | awk '{print "  " $NF}'
-else
-    echo "  ❌ Model directory not found!"
-fi
-
-# Create Environment file
 if [ -f ".env" ]; then
-    echo ""
-    echo "⚠️  Existing .env file found. Skipping creation to preserve your settings."
-    echo "   Your current API keys and configurations are safe."
-else
-    cat > .env <<EOF
-# ATA Speech Anonymizer Configuration
-# Generated by ATA_SelfInstall.sh on $(date)
+    echo "⚠️  Backing up existing .env..."
+    cp .env ".env.backup.$(date +%Y%m%d%H%M%S)"
+fi
 
-# LLM API Configuration
+# UPDATED .env CONFIGURATION SECTION
+
+cat > .env <<EOF
+# ATA Speech Anonymizer Configuration
 CHAT_AI_API_KEY=your_api_key_here
 CHAT_AI_ENDPOINT=https://your-endpoint.com/v1
 
-# Optional HTTPS toggle
-# USE_HTTPS=true
-EOF
-    echo "✅ .env file created. Edit it with your real API key."
-fi
+# TTS CONFIGURATION
+TTS_BACKEND=piper
+TTS_ENABLED=true
 
-# 14. Final Instructions
+# TTS Global Settings
+TTS_SAMPLE_RATE=22050
+TTS_DEFAULT_LANG=en
+
+#  Pier TTS Settings
+TTS_BIN_PATH=/mnt/Data_Mount/VERANDA_DataMount/Experimental/ATA/pipeline/tts/bin/piper
+TTS_VOICE_DIR=/mnt/Data_Mount/VERANDA_DataMount/Experimental/ATA/pipeline/model/piper-voices
+TTS_VOICE_PATH=/mnt/Data_Mount/VERANDA_DataMount/Experimental/ATA/pipeline/model/piper-voices/en_US-lessac-medium.onnx
+
+# Coqui XTTS Settings (unused when TTS_BACKEND=piper)
+XTTS_Model_Path=/mnt/Data_Mount/VERANDA_DataMount/Experimental/ATA/pipeline/model/coqui-xtts
+XTTS_Reference_Audio_Path=/mnt/Data_Mount/VERANDA_DataMount/Experimental/ATA/reference_audio.wav
+
+# TTS Global Settings
+TTS_ENABLED=true
+EOF
+
+# Add backend-specific paths
+case "$TTS_CONFIG" in
+    piper)
+        cat >> .env <<EOF
+
+# Piper Voice Configuration
+Piper_Voice_Path=$TTS_VOICE_PATH
+Piper_Config_Path=$TTS_CONFIG_PATH
+EOF
+        ;;
+    coqui_xtts)
+        cat >> .env <<EOF
+
+# Coqui XTTS Configuration
+XTTS_Model_Path=$TTS_CONFIG_PATH
+XTTS_Reference_Audio_Path=./reference_audio.wav
+EOF
+        ;;
+esac
+
+# Common config
+cat >> .env <<EOF
+
+# COMPLIANCE & LOGGING
+COMPLIANCE_MODE=standard
+COMPLIANCE_ENCRYPTION=false
+COMPLIANCE_AUDIT_LOG=false
+LOG_LEVEL=INFO
+LOG_FILE=./logs/ata.log
+
+# PII MODEL (DFKI-SLT - 11 languages)
+PII_Model_Path=pipeline/model/multilingual_DialogPII_NER
+PII_Languages=AR,DE,EN,FI,FR,H,I,IT,PL,PT,SP,TR
+
+# WHISPERX
+Whisper_Model_Path=pipeline/model/models--Systran--faster-whisper-large-v3
+Whisper_Device=cuda
+Whisper_Compute_Type=float16
+
+# PYANNOTE
+Pyannote_Model_Path=pipeline/model/models--pyannote--speaker-diarization-community-1
+EOF
+
+echo "✅ .env configured (TTS_BACKEND=$TTS_CONFIG)"
+
+# ============================================================================
+# 📋 FINAL INSTRUCTIONS
+# ============================================================================
+
 echo ""
 echo "=========================================================================="
-echo "===              SETUP COMPLETE!                           ==="
+echo "✅ SETUP COMPLETE"
 echo "=========================================================================="
 echo ""
-echo "To use the environment:"
-echo "  source \$HOME/miniconda3/etc/profile.d/conda.sh"
-echo "  conda activate $ENV_NAME"
+echo "Activate environment:"
+echo "  conda activate whisperx"
 echo ""
-echo "Project Structure:"
-echo "  $(pwd)/"
-echo "    ├── .env"
-echo "    ├── ATA_SelfInstall.sh"
-echo "    └── pipeline/"
-echo "        ├── model/ (Models downloaded here)"
-echo "        │   ├── models--Systran--faster-whisper-*/"
-echo "        │   ├── models--pyannote--speaker-diarization-*/"
-echo "        │   ├── jhu-clsp/mmBERT-base"
-echo "        │   └── multilingual_DialogPII_NER ← NEW Model"
-echo "        ├── videos/ (Place input videos here)"
-echo "        ├── audios/ (Processed audio goes here)"
-echo "        ├── transcripts/ (Raw transcripts)"
-echo "        ├── anonym/ (BERT anonymized)"
-echo "        └── LLM-Anon/ (LLM rewritten)"
+echo "TTS Backend: $TTS_CONFIG"
+echo "  Piper:    Offline, 30+ langs, GPL v3"
+echo "  Coqui:    Voice cloning, 17 langs, CPML (non-commercial)"
 echo ""
-echo "Next Steps:"
-echo "  1. Edit the '.env' file with your API Key."
-echo "  2. Place video files in 'pipeline/videos'."
-echo "  3. Run the pipeline:"
-echo "     python pipeline/process.py"
-echo "  4. (Optional) Run the Web Interface (with Offline Coqui TTS):"
-echo "     python interactive_app/app.py"
+echo "Model Location: pipeline/models/"
 echo ""
-echo "✨ NEW FEATURES:"
-echo "  • DFKI-SLT Multilingual DialogPII NER Model installed"
-echo "    - Improved accuracy for 11 languages"
-echo "    - FLERT-style context windowing"
-echo "    - Better dialogue-aware PII detection"
-echo ""
-echo "💡 IMPORTANT: You may see 'dependency conflict' warnings from pip regarding numpy/pandas."
-echo "   These are safe to ignore. As long as 'python -c \"import whisperx...\"' works, your system is fine."
-echo ""
-echo "📚 Documentation:"
-echo "  • Model details: https://huggingface.co/DFKI-SLT/multilingual_DialogPII_NER"
-echo "  • Support: https://proton.me/support/lumo"
-echo ""
+echo "Next steps:"
+echo "  1. Edit .env with API key"
+echo "  2. Place videos in pipeline/videos/"
+echo "  3. Run: python pipeline/process.py"
 echo "=========================================================================="

@@ -480,7 +480,8 @@ except Exception as e:
     if [ "$SKIP_WHISPER" = true ]; then
         echo "Skipping WhisperX models (--skip-whisper)"
     elif [ -n "$WHISPER_SELECTION" ]; then
-        WHISPER_MODELS_INPUT="$WHISPER_SELECTION"
+        # Convert comma-separated to space-separated for proper iteration
+        WHISPER_MODELS_INPUT="${WHISPER_SELECTION//,/ }"
     elif [ "$ANSWER_YES" = true ]; then
         WHISPER_MODELS_INPUT="large"
     else
