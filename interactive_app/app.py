@@ -94,7 +94,6 @@ try:
 except ImportError:
     PYDUB_AVAILABLE = False
     logger.warning("PyDub not available. Audio processing features may be limited.")
-
 try:
     import whisperx
     WHISPERX_AVAILABLE = True
