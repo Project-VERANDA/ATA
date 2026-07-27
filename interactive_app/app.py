@@ -19,6 +19,8 @@ from collections import OrderedDict
 from audio_utils import AudioBeepReplacer
 from io import BytesIO
 from dotenv import load_dotenv
+import json
+import requests
 CHAT_AI_API_KEY = os.getenv('CHAT_AI_API_KEY')
 CHAT_AI_ENDPOINT = os.getenv('CHAT_AI_ENDPOINT', 'https://llm.cloud.cci.charite.de/v1')
 
@@ -538,7 +540,28 @@ def replace_surrogates(text, lang="EN"):
     
 
 
+# ============================================================================
+# GLOBAL ERROR HANDLERS (Return JSON instead of HTML)
+# ============================================================================
 
+@app.errorhandler(400)
+def bad_request(error):
+    return jsonify({'error': 'Bad request', 'message': str(error.description)}), 400
+
+@app.errorhandler(404)
+def not_found(error):
+    return jsonify({'error': 'Not found', 'message': str(error.description)}), 404
+
+@app.errorhandler(500)
+def internal_error(error):
+    logger.error(f"Internal server error: {error}", exc_info=True)
+    return jsonify({'error': 'Internal server error', 'message': 'An unexpected error occurred'}), 500
+
+@app.errorhandler(Exception)
+def handle_exception(error):
+    """Catch-all for unhandled exceptions."""
+    logger.error(f"Unhandled exception: {error}", exc_info=True)
+    return jsonify({'error': 'Server error', 'message': str(error)}), 500
 
 # --- ROUTES ---
 
@@ -588,19 +611,34 @@ def upload_file():
             logger.info(f"Transcribing file: {filename} in language: {language}")
             transcription, wordOffS = transcribe_audio_locally(filepath, language=language)
             
-            #os.remove(filepath)
+            # Check if transcription resulted in an error message
+            if isinstance(transcription, str) and transcription.startswith("Error:") or transcription.startswith("Transcription failed:"):
+                logger.error(f"Transcription returned error: {transcription}")
+                return jsonify({'error': transcription}), 500
             
             return jsonify({
                 'success': True,
-                'transcription': transcription,
-                'offsets': wordOffS,
+                'transcription': transcription if transcription else "",
+                'offsets': wordOffS if wordOffS else [],
                 'audio_name': filepath
             })
         
         return jsonify({'error': 'Invalid file format'}), 400
     
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON decode error in upload: {e}", exc_info=True)
+        return jsonify({'error': f'Response parsing failed: {str(e)}'}), 500
+    except requests.exceptions.SSLError as e:
+        logger.error(f"SSL error during transcription: {e}", exc_info=True)
+        return jsonify({'error': 'Transcription service SSL error. Check VPN connection.'}), 503
+    except requests.exceptions.Timeout as e:
+        logger.error(f"Timeout during transcription: {e}", exc_info=True)
+        return jsonify({'error': 'Transcription service timeout. Please try again.'}), 504
+    except requests.exceptions.ConnectionError as e:
+        logger.error(f"Connection error during transcription: {e}", exc_info=True)
+        return jsonify({'error': 'Transcription service unavailable. Check network connection.'}), 503
     except Exception as e:
-        logger.error(f"Error processing upload: {str(e)}")
+        logger.error(f"Error processing upload: {str(e)}", exc_info=True)  # Added exc_info for traceback
         return jsonify({'error': f'Error processing audio: {str(e)}'}), 500
 
 @app.route('/transcribe_recording', methods=['POST'])
@@ -637,26 +675,39 @@ def transcribe_recording():
                 audio_file_to_transcribe = converted_file_path
             else:
                 audio_file_to_transcribe = temp_file_path
-        except Exception:
+        except Exception as e:
+            logger.warning(f"FFmpeg conversion failed: {e}. Using original file.")
             audio_file_to_transcribe = temp_file_path
         
         logger.info(f"Starting transcription of: {audio_file_to_transcribe}")
         transcription, wordOffS = transcribe_audio_locally(audio_file_to_transcribe, language=language)
-            
-        #if temp_file_path and os.path.exists(temp_file_path):
-        #    os.unlink(temp_file_path)
-        #if converted_file_path and os.path.exists(converted_file_path):
-        #    os.unlink(converted_file_path)
-            
+        
+        # Check if transcription resulted in an error message
+        if isinstance(transcription, str) and ("Error:" in transcription or "failed" in transcription.lower()):
+            logger.error(f"Transcription returned error: {transcription}")
+            return jsonify({'error': transcription}), 500
+        
         return jsonify({
             'success': True,
-            'transcription': transcription,
-            'offsets': wordOffS,
+            'transcription': transcription if transcription else "",
+            'offsets': wordOffS if wordOffS else [],
             'audio_name': audio_file_to_transcribe
         })
     
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON decode error in transcribe_recording: {e}", exc_info=True)
+        return jsonify({'error': f'Response parsing failed: {str(e)}'}), 500
+    except requests.exceptions.SSLError as e:
+        logger.error(f"SSL error during transcription: {e}", exc_info=True)
+        return jsonify({'error': 'Transcription service SSL error. Check VPN connection.'}), 503
+    except requests.exceptions.Timeout as e:
+        logger.error(f"Timeout during transcription: {e}", exc_info=True)
+        return jsonify({'error': 'Transcription service timeout. Please try again.'}), 504
+    except requests.exceptions.ConnectionError as e:
+        logger.error(f"Connection error during transcription: {e}", exc_info=True)
+        return jsonify({'error': 'Transcription service unavailable. Check network connection.'}), 503
     except Exception as e:
-        logger.error(f"Error processing recording: {str(e)}")
+        logger.error(f"Error processing recording: {str(e)}", exc_info=True)  # Added exc_info for traceback
         if temp_file_path and os.path.exists(temp_file_path):
             os.unlink(temp_file_path)
         if converted_file_path and os.path.exists(converted_file_path):
