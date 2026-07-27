@@ -316,7 +316,7 @@ import_checks = {
     'transformers': lambda: __import__('transformers').__version__,
     'spacy':        lambda: __import__('spacy').__version__,
     'thinc':        lambda: __import__('thinc').__version__,
-    'pyannote.audio': lambda: __import__('importlib.metadata').version('pyannote.audio'),
+    'pyannote.audio': lambda: __import__('importlib.metadata', fromlist=['version']).version('pyannote.audio'),
     'whisperx':     lambda: __import__('whisperx').__version__ if hasattr(__import__('whisperx'), '__version__') else 'imported',
 }
 
