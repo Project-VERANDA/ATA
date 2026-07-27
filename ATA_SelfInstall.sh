@@ -316,7 +316,7 @@ import_checks = {
     'transformers': lambda: __import__('transformers').__version__,
     'spacy':        lambda: __import__('spacy').__version__,
     'thinc':        lambda: __import__('thinc').__version__,
-    'pyannote.audio': lambda: __import__('pyannote.audio').__version__,
+    'pyannote.audio': lambda: __import__('importlib.metadata').version('pyannote.audio'),
     'whisperx':     lambda: __import__('whisperx').__version__ if hasattr(__import__('whisperx'), '__version__') else 'imported',
 }
 
@@ -344,7 +344,7 @@ for model in ['en_core_web_sm', 'xx_ent_wiki_sm']:
 # --- Model directory checks ---
 print("  --- Model Files ---")
 model_paths = [
-    ('Whisper (large-v3)', 'pipeline/model/models--Systran--faster-whisper-large-v3'),
+    ('Whisper (large-v3)', 'pipeline/model/Systran--faster-whisper-large-v3'),
     ('Pyannote',           'pipeline/model/models--pyannote--speaker-diarization-community-1'),
     ('mmBERT-base',        'pipeline/model/jhu-clsp/mmBERT-base'),
     ('DFKI-SLT PII',       'pipeline/model/multilingual_DialogPII_NER'),
@@ -543,6 +543,8 @@ else
     log_info "Creating fresh environment with Python ${TARGET_PYTHON}..."
     conda create -n "$ENV_NAME" python="$TARGET_PYTHON" -c conda-forge -y  # Inside new env branch
 fi
+
+conda create -n "$ENV_NAME" python="$TARGET_PYTHON" -c conda-forge -y
 
 # 4. Activate the environment
 log_info "Activating environment..."
