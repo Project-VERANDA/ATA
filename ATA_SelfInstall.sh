@@ -438,21 +438,26 @@ if [ "$UNINSTALL" = true ]; then
     fi
 
     # Remove conda environment
-    if command -v conda &> /dev/null; then
-        eval "$(conda shell.bash hook)"
-        if conda env list | grep -q "^${ENV_NAME} "; then
-            log_info "Removing conda environment '${ENV_NAME}'..."
-            conda env remove -n "$ENV_NAME" -y
-            log_success "Conda environment removed"
+    if conda env list | grep -q "^${ENV_NAME} "; then
+        if [ "$FORCE_REFRESH" = true ]; then
+            log_info "🔄 Environment exists (--force-refresh). Removing and recreating..."
+            conda env remove -n "$ENV_NAME" -y 2>/dev/null || true
+            rm -rf "$HOME/miniconda3/envs/$ENV_NAME" 2>/dev/null || true
+            rm -rf "$HOME/miniforge3/envs/$ENV_NAME" 2>/dev/null || true
+            conda create -n "$ENV_NAME" python="$TARGET_PYTHON" -c conda-forge -y  # ← Inside FORCE_REFRESH
         else
-            log_warn "Conda environment '${ENV_NAME}' not found"
+            log_warn "⚠️ Environment '${ENV_NAME}' already exists."
+            log_info "Using existing environment (use --force-refresh to recreate)"
         fi
+    else
+        log_info "Creating fresh environment with Python ${TARGET_PYTHON}..."
+        conda create -n "$ENV_NAME" python="$TARGET_PYTHON" -c conda-forge -y  # ← Inside new env branch
     fi
 
     # Remove model files
     if [ -d "pipeline/model" ]; then
-        local_model_size=$(du -sh "pipeline/model" 2>/dev/null | awk '{print $1}')
-        log_info "Removing model files (${local_model_size})..."
+        model_size=$(du -sh "pipeline/model" 2>/dev/null | awk '{print $1}')
+        log_info "Removing model files (${model_size})..."
         rm -rf pipeline/model
         log_success "Model files removed"
     fi
@@ -493,9 +498,7 @@ else
         cd "$MAIN_DIR_NAME"
         CURRENT_DIR="$(pwd)"
         log_success "Moved all files into '${MAIN_DIR_NAME}'. New location: ${CURRENT_DIR}"
-    else
-
-        else
+    else                                        # ← Only ONE else here
         log_error "Not inside '${MAIN_DIR_NAME}' and no project files found."
         exit 1
     fi
@@ -957,7 +960,7 @@ TTS_SAMPLE_RATE=22050
 TTS_DEFAULT_LANG=en
 
 # Piper TTS Settings
-TTS_BIN_PATH=\$CURRENT_DIR/$MODEL_DIR_NAME/piper
+TTS_BIN_PATH=./$MODEL_DIR_NAME/piper
 TTS_VOICE_DIR=\$CURRENT_DIR/$MODEL_DIR_NAME/piper-voices
 TTS_VOICE_PATH=\$CURRENT_DIR/$MODEL_DIR_NAME/piper-voices/en_US-lessac-medium.onnx
 
