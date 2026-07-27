@@ -1,8 +1,38 @@
+# ============================================================================
+# ENVIRONMENT CONFIGURATION (must precede all ML library imports)
+# ============================================================================
+
 import os
+
+# Pin HF Hub and Transformers to offline mode.  Both libraries attempt
+# metadata API calls (commit refs, PR discussions, safetensors index probes)
+# even when local_files_only=True is passed downstream.  Setting these
+# environment variables before import suppresses all network activity,
+# eliminating spurious 404s and connection-timeout delays.
+os.environ.setdefault('HF_HUB_OFFLINE', '1')
+os.environ.setdefault('TRANSFORMERS_OFFLINE', '1')
+
+# Reduce transformers logging verbosity to WARNING so that benign load-time
+# messages do not clutter production logs.
+os.environ.setdefault('TRANSFORMERS_VERBOSITY', 'warning')
+
+# Enable TF32 for CUDA matmul and cuDNN convolution kernels.  pyannote-audio
+# emits a ReproducibilityWarning when TF32 is disabled because it both
+# slows inference (~3× on Ampere+) and can marginally reduce diarization
+# accuracy.  TF32 uses the first 19 bits of the FP32 mantissa, which is
+# well within the tolerance band for ASR/diarization pipelines.
+try:
+    import torch
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
+except ImportError:
+    pass  # torch is imported in full below
+
+# ============================================================================
+# STANDARD IMPORTS
+# ============================================================================
+
 import sys
-import whisperx
-import ffmpeg
-import torch
 import subprocess
 import gc
 import logging
@@ -18,12 +48,13 @@ from pathlib import Path
 from openai import OpenAI
 from dotenv import load_dotenv
 from typing import Optional, Dict, List
-load_dotenv()
 
-os.environ.setdefault('HF_HUB_OFFLINE', '1')
-os.environ.setdefault('TRANSFORMERS_OFFLINE', '1')
-torch.backends.cuda.matmul.allow_tf32 = True
-torch.backends.cudnn.allow_tf32 = True
+# ML libraries imported after environment is configured
+import torch
+import whisperx
+import ffmpeg
+
+load_dotenv()
 
 # GPU Detection Check
 
@@ -1088,53 +1119,57 @@ def transcribe_audio_locally(audio_path, language='de'):
         if _loaded_diarize_model:
             logger.info("Running speaker diarization...")
             try:
-                # Apply aggressive thresholds to prevent over-segmentation
+                # Set minimum duration thresholds to reduce over-segmentation.
+                # min_duration_on: minimum speech segment length (seconds)
+                # min_duration_off: minimum silence gap between segments (seconds)
                 _loaded_diarize_model.min_duration_on = 4.0
                 _loaded_diarize_model.min_duration_off = 2
-                
-                diarize_output = _loaded_diarize_model(audio_path, min_speakers=2, max_speakers=10)
+
+                diarize_output = _loaded_diarize_model(
+                    audio_path, min_speakers=2, max_speakers=10
+                )
                 speaker_diarization = diarize_output.speaker_diarization
-                
+
                 import pandas as pd
                 segments_list = []
+
                 for turn, _, speaker in speaker_diarization.itertracks(yield_label=True):
                     duration = turn.end - turn.start
-                    # Filter out sub-second segments that cause the
-                    # std() degrees-of-freedom <= 0 warning in pyannote's
-                    # pooling layer (too few frames for valid statistics).
+
+                    # Discard sub-second turns.  pyannote's pooling layer
+                    # computes std(dim=-1, correction=1) over the frame
+                    # sequences; when a turn yields fewer than 2 frames,
+                    # degrees of freedom drops to zero and triggers a
+                    # UserWarning from ATen/native/ReduceOps.  These
+                    # fragments are acoustically meaningless and would be
+                    # filtered by the downstream merge step anyway.
                     if duration < 0.5:
                         logger.debug(f"Discarding short diarization turn: {duration:.3f}s")
                         continue
+
                     segments_list.append({
                         'start': turn.start,
                         'end': turn.end,
                         'speaker': speaker
                     })
-                
+
                 logger.info(f"Diarization extracted {len(segments_list)} speaker segments.")
-                
-                # CRITICAL FIX: Sort segments by start time before assigning speakers
-                # This ensures chronological order for proper merging later
+
+                # Sort chronologically before speaker assignment.  pyannote
+                # may return tracks ordered by speaker cluster rather than
+                # by time; unsorted segments cause misaligned word-to-speaker
+                # mapping in whisperx.assign_word_speakers.
                 segments_list = sorted(segments_list, key=lambda x: x.get('start', 0))
-                
+
                 diarize_df = pd.DataFrame(segments_list)
                 result = whisperx.assign_word_speakers(diarize_df, result)
                 logger.info("Speakers assigned to segments.")
+
             except Exception as e:
                 logger.error(f"Diarization failed: {e}")
                 logger.warning("Falling back to generic speaker labels.")
                 for i, segment in enumerate(result["segments"]):
-                    segment["speaker"] = f"SPEAKER_{i%2:02d}"
-        else:
-            logger.warning("No diarization model loaded. Using generic speaker labels.")
-            for i, segment in enumerate(result["segments"]):
-                segment["speaker"] = f"SPEAKER_{i%2:02d}"
-
-        # CRITICAL FIX: Ensure segments are sorted by time BEFORE merging
-        # Diarization models sometimes return segments out of order or grouped by speaker
-        if 'segments' in result:
-            result["segments"] = sorted(result["segments"], key=lambda x: x.get('start', 0))
-            logger.info(f"Segments sorted by time. Count: {len(result['segments'])}")
+                    segment["speaker"] = f"SPEAKER_{i % 2:02d}"
 
         # 6. MERGE CONSECUTIVE SEGMENTS
         logger.info("Merging consecutive speaker segments...")
@@ -1666,17 +1701,20 @@ class AnonymizationEngine:
             from torchcrf import CRF
             import torch.nn as nn
             import json
-            
-            # Load CRF configuration
+
+            # ------------------------------------------------------------------
+            # CRF Configuration
+            # ------------------------------------------------------------------
+
             crf_config_path = self.model_path / "crf_config.json"
             if not crf_config_path.exists():
                 logger.error(f"crf_config.json not found at {crf_config_path}")
                 self.method = None
                 return
-            
+
             with open(crf_config_path, "r") as f:
                 crf_config = json.load(f)
-            
+
             required_keys = ["base_model_name", "num_labels", "id2label", "label2id"]
             if not all(k in crf_config for k in required_keys):
                 logger.error(f"Missing required keys in crf_config.json: {required_keys}")
@@ -1687,7 +1725,10 @@ class AnonymizationEngine:
             self.original_label2id = crf_config.get("label2id", {})
             logger.info(f"Loaded {len(self.original_id2label)} original model labels from crf_config.json")
 
-            # Load FLERT config if available
+            # ------------------------------------------------------------------
+            # FLERT Configuration (optional, enables context-windowed inference)
+            # ------------------------------------------------------------------
+
             flert_config_path = self.model_path / "flert_config.json"
             flert_config = None
             if flert_config_path.exists():
@@ -1695,55 +1736,97 @@ class AnonymizationEngine:
                     flert_config = json.load(f)
                 logger.info("FLERT config loaded successfully")
 
-            # Register custom model type to suppress transformers warning
+            # ------------------------------------------------------------------
+            # Model Type Registration
+            #
+            # The base model's config.json declares model_type="mmbert", but
+            # this type is not registered in the transformers AutoConfig
+            # registry.  Without registration, transformers logs a warning
+            # ("model of type mmbert to instantiate model of type ''").
+            # Registering a lightweight config stub silences the warning
+            # and allows AutoModel to resolve the architecture correctly.
+            # ------------------------------------------------------------------
+
             try:
                 AutoConfig.register("mmbert", type("MMBERTConfig", (), {
                     "model_type": "mmbert",
                     "is_composition": False,
                 }))
             except Exception:
-                pass
+                pass  # Already registered or incompatible transformers version
 
-            # Define model architecture
+            # ------------------------------------------------------------------
+            # Model Architecture: ModernBERT + Linear Classifier + CRF Decoder
+            # ------------------------------------------------------------------
+
             class ModernBertCRF(nn.Module):
-                def __init__(self, base_model_name, num_labels, id2label, label2id, flert_config=None):
+                """
+                Wraps a pretrained transformer backbone with a linear
+                classification head and a CRF decoding layer for sequence
+                labelling of PII entities in dialogue transcripts.
+                """
+
+                def __init__(self, base_model_name, num_labels, id2label,
+                             label2id, flert_config=None):
                     super().__init__()
                     self.num_labels = num_labels
                     self.id2label = id2label
                     self.label2id = label2id
                     self.flert_config = flert_config
-                    
+
+                    # Load the transformer backbone.  The base model
+                    # checkpoint may contain task-specific head weights
+                    # (head.dense.*, decoder.*, head.norm.*) that are not
+                    # part of the base AutoModel architecture.  Passing
+                    # ignore_mismatched_sizes=True tells transformers to
+                    # drop these unexpected keys silently instead of
+                    # logging UNEXPECTED warnings.
                     try:
                         self.transformer = AutoModel.from_pretrained(
-                            base_model_name, 
+                            base_model_name,
                             local_files_only=True,
                             ignore_mismatched_sizes=True,
                         )
                     except TypeError:
+                        # Older transformers versions do not support
+                        # ignore_mismatched_sizes; fall back to plain load.
                         self.transformer = AutoModel.from_pretrained(
-                            base_model_name, 
-                            local_files_only=True
+                            base_model_name,
+                            local_files_only=True,
                         )
                     except Exception as e:
-                        logger.warning(f"Could not load local base model '{base_model_name}', trying HF...")
+                        logger.warning(
+                            f"Could not load local base model '{base_model_name}', "
+                            f"trying HF hub: {e}"
+                        )
                         self.transformer = AutoModel.from_pretrained(base_model_name)
-                    
+
                     hidden_size = self.transformer.config.hidden_size
                     self.classifier = nn.Linear(hidden_size, num_labels)
                     self.dropout = nn.Dropout(0.1)
                     self.crf = CRF(num_labels, batch_first=True)
 
                 def forward(self, input_ids, attention_mask, labels=None, **kwargs):
+                    # Some tokenizers emit token_type_ids; the ModernBERT
+                    # backbone does not accept them, so strip them.
                     kwargs.pop("token_type_ids", None)
-                    outputs = self.transformer(input_ids=input_ids, attention_mask=attention_mask)
+                    outputs = self.transformer(
+                        input_ids=input_ids,
+                        attention_mask=attention_mask,
+                    )
                     sequence_output = self.dropout(outputs.last_hidden_state)
                     emissions = self.classifier(sequence_output)
-                    
+
                     if labels is not None:
                         mask = attention_mask.bool()
+                        # CRF requires non-negative label IDs; -100 padding
+                        # tokens must be remapped to a valid index (0).
                         labels_for_crf = labels.clone()
                         labels_for_crf[labels_for_crf == -100] = 0
-                        loss = -self.crf(emissions, labels_for_crf, mask=mask, reduction='mean')
+                        loss = -self.crf(
+                            emissions, labels_for_crf,
+                            mask=mask, reduction='mean',
+                        )
                         return {"loss": loss, "logits": emissions}
                     else:
                         return {"logits": emissions}
@@ -1751,27 +1834,47 @@ class AnonymizationEngine:
                 def decode(self, emissions, mask):
                     return self.crf.decode(emissions, mask=mask)
 
-            # Instantiate model
+            # ------------------------------------------------------------------
+            # Model Instantiation
+            # ------------------------------------------------------------------
+
             local_base_model_path = self.model_path / crf_config["base_model_name"]
             if not local_base_model_path.exists():
-                logger.warning(f"Local base model not found at {local_base_model_path}. Trying HF name: {crf_config['base_model_name']}")
+                logger.warning(
+                    f"Local base model not found at {local_base_model_path}. "
+                    f"Trying HF name: {crf_config['base_model_name']}"
+                )
                 local_base_model_path = crf_config["base_model_name"]
-            
+
             self.model = ModernBertCRF(
                 base_model_name=local_base_model_path,
                 num_labels=crf_config["num_labels"],
                 id2label=self.original_id2label,
                 label2id=self.original_label2id,
-                flert_config=flert_config
+                flert_config=flert_config,
             )
-            
+
+            # Load the full CRF model weights (includes backbone + classifier
+            # + CRF transition parameters) from pytorch_model.bin.
             model_weights_path = self.model_path / "pytorch_model.bin"
-            state_dict = torch.load(model_weights_path, map_location=self.device, weights_only=True)
+            state_dict = torch.load(
+                model_weights_path,
+                map_location=self.device,
+                weights_only=True,
+            )
             self.model.load_state_dict(state_dict)
             self.model.to(self.device)
             self.model.eval()
-            
-            # Load tokenizer with mistral regex fix
+
+            # ------------------------------------------------------------------
+            # Tokenizer
+            #
+            # The tokenizer is derived from a Mistral-family vocabulary and
+            # ships with a regex pre-tokeniser pattern that triggers a
+            # spurious deprecation warning in newer transformers releases.
+            # fix_mistral_regex=True applies the corrected pattern.
+            # ------------------------------------------------------------------
+
             try:
                 self.tokenizer = AutoTokenizer.from_pretrained(
                     str(self.model_path),
@@ -1779,12 +1882,17 @@ class AnonymizationEngine:
                     fix_mistral_regex=True,
                 )
             except TypeError:
+                # Parameter introduced in transformers >= 4.44; older
+                # versions do not recognise it and raise TypeError.
                 self.tokenizer = AutoTokenizer.from_pretrained(
                     str(self.model_path),
                     local_files_only=True,
                 )
-            
-            # Build label mapping
+
+            # ------------------------------------------------------------------
+            # Label Mapping
+            # ------------------------------------------------------------------
+
             self.label_mapping = self._build_safe_label_mapping()
             logger.info("✅ New DFKI-SLT model loaded successfully with FLERT support")
 
