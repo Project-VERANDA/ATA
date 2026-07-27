@@ -531,19 +531,18 @@ log_info "Creating conda environment '${ENV_NAME}' with Python ${TARGET_PYTHON}.
 
 if conda env list | grep -q "^${ENV_NAME} "; then
     if [ "$FORCE_REFRESH" = true ]; then
-        log_info "🔄 Environment exists (--force-refresh). Removing and recreating..."
         conda env remove -n "$ENV_NAME" -y 2>/dev/null || true
         rm -rf "$HOME/miniconda3/envs/$ENV_NAME" 2>/dev/null || true
         rm -rf "$HOME/miniforge3/envs/$ENV_NAME" 2>/dev/null || true
+        conda create -n "$ENV_NAME" python="$TARGET_PYTHON" -c conda-forge -y  # Inside force refresh
     else
         log_warn "⚠️ Environment '${ENV_NAME}' already exists."
         log_info "Using existing environment (use --force-refresh to recreate)"
     fi
 else
     log_info "Creating fresh environment with Python ${TARGET_PYTHON}..."
+    conda create -n "$ENV_NAME" python="$TARGET_PYTHON" -c conda-forge -y  # Inside new env branch
 fi
-
-conda create -n "$ENV_NAME" python="$TARGET_PYTHON" -c conda-forge -y
 
 # 4. Activate the environment
 log_info "Activating environment..."
