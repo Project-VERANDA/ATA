@@ -4,9 +4,9 @@
 
 import os
 
-# Pin HF Hub and Transformers to offline mode.  Both libraries attempt
+# Pin HF Hub and Transformers to offline mode. Both libraries attempt
 # metadata API calls (commit refs, PR discussions, safetensors index probes)
-# even when local_files_only=True is passed downstream.  Setting these
+# even when local_files_only=True is passed downstream. Setting these
 # environment variables before import suppresses all network activity,
 # eliminating spurious 404s and connection-timeout delays.
 os.environ.setdefault('HF_HUB_OFFLINE', '1')
@@ -15,18 +15,6 @@ os.environ.setdefault('TRANSFORMERS_OFFLINE', '1')
 # Reduce transformers logging verbosity to WARNING so that benign load-time
 # messages do not clutter production logs.
 os.environ.setdefault('TRANSFORMERS_VERBOSITY', 'warning')
-
-# Enable TF32 for CUDA matmul and cuDNN convolution kernels.  pyannote-audio
-# emits a ReproducibilityWarning when TF32 is disabled because it both
-# slows inference (~3× on Ampere+) and can marginally reduce diarization
-# accuracy.  TF32 uses the first 19 bits of the FP32 mantissa, which is
-# well within the tolerance band for ASR/diarization pipelines.
-try:
-    import torch
-    torch.backends.cuda.matmul.allow_tf32 = True
-    torch.backends.cudnn.allow_tf32 = True
-except ImportError:
-    pass  # torch is imported in full below
 
 # ============================================================================
 # STANDARD IMPORTS
@@ -49,8 +37,21 @@ from openai import OpenAI
 from dotenv import load_dotenv
 from typing import Optional, Dict, List
 
-# ML libraries imported after environment is configured
+# Import torch FIRST, configure TF32 BEFORE importing pyannote/whisperx
 import torch
+
+# Enable TF32 for CUDA matmul and cuDNN convolution kernels IMMEDIATELY
+# after torch import. pyannote-audio emits a ReproducibilityWarning when
+# TF32 is disabled because it both slows inference (~3× on Ampere+) and
+# can marginally reduce diarization accuracy. TF32 uses the first 19 bits
+# of the FP32 mantissa, which is well within the tolerance band for
+# ASR/diarization pipelines.
+cuda_available = torch.cuda.is_available()
+if cuda_available:
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
+
+# ML libraries imported after torch and TF32 are configured
 import whisperx
 import ffmpeg
 
@@ -1136,11 +1137,11 @@ def transcribe_audio_locally(audio_path, language='de'):
                 for turn, _, speaker in speaker_diarization.itertracks(yield_label=True):
                     duration = turn.end - turn.start
 
-                    # Discard sub-second turns.  pyannote's pooling layer
+                    # Discard sub-second turns. pyannote's pooling layer
                     # computes std(dim=-1, correction=1) over the frame
                     # sequences; when a turn yields fewer than 2 frames,
                     # degrees of freedom drops to zero and triggers a
-                    # UserWarning from ATen/native/ReduceOps.  These
+                    # UserWarning from ATen/native/ReduceOps. These
                     # fragments are acoustically meaningless and would be
                     # filtered by the downstream merge step anyway.
                     if duration < 0.5:
@@ -1155,7 +1156,7 @@ def transcribe_audio_locally(audio_path, language='de'):
 
                 logger.info(f"Diarization extracted {len(segments_list)} speaker segments.")
 
-                # Sort chronologically before speaker assignment.  pyannote
+                # Sort chronologically before speaker assignment. pyannote
                 # may return tracks ordered by speaker cluster rather than
                 # by time; unsorted segments cause misaligned word-to-speaker
                 # mapping in whisperx.assign_word_speakers.
