@@ -20,6 +20,11 @@ from dotenv import load_dotenv
 from typing import Optional, Dict, List
 load_dotenv()
 
+os.environ.setdefault('HF_HUB_OFFLINE', '1')
+os.environ.setdefault('TRANSFORMERS_OFFLINE', '1')
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
+
 # GPU Detection Check
 
 def check_gpu_resources():
@@ -1035,8 +1040,47 @@ def transcribe_audio_locally(audio_path, language='de'):
                 align_model, metadata = whisperx.load_align_model(
                     language_code=result["language"], device=device
                 )
-                result = whisperx.align(result["segments"], align_model, metadata, audio, device, return_char_alignments=False)
-                logger.info("Alignment completed.")
+
+                # Pre-split overly long segments to reduce backtrack failures.
+                # The alignment model struggles with segments > ~30 words or
+                # segments containing multiple sentences with disfluencies.
+                MAX_ALIGN_WORDS = 30
+                pre_split_segments = []
+                for seg in result["segments"]:
+                    text = seg.get("text", "").strip()
+                    words = text.split()
+                    if len(words) <= MAX_ALIGN_WORDS:
+                        pre_split_segments.append(seg)
+                    else:
+                        # Split on sentence boundaries first, then by word count
+                        import re as _re
+                        sentences = _re.split(r'(?<=[.!?])\s+', text)
+                        current_chunk = ""
+                        for sent in sentences:
+                            tentative = (current_chunk + " " + sent).strip()
+                            if len(tentative.split()) <= MAX_ALIGN_WORDS:
+                                current_chunk = tentative
+                            else:
+                                if current_chunk:
+                                    pre_split_segments.append({
+                                        "start": seg["start"],
+                                        "end": seg["end"],
+                                        "text": current_chunk
+                                    })
+                                current_chunk = sent
+                        if current_chunk:
+                            pre_split_segments.append({
+                                "start": seg["start"],
+                                "end": seg["end"],
+                                "text": current_chunk
+                            })
+
+                result["segments"] = pre_split_segments
+                result = whisperx.align(
+                    result["segments"], align_model, metadata,
+                    audio, device, return_char_alignments=False
+                )
+                logger.info(f"Alignment completed for {len(result.get('segments', []))} segments.")
             except Exception as e:
                 logger.warning(f"Alignment failed: {e}. Proceeding without alignment.")
 
@@ -1054,6 +1098,13 @@ def transcribe_audio_locally(audio_path, language='de'):
                 import pandas as pd
                 segments_list = []
                 for turn, _, speaker in speaker_diarization.itertracks(yield_label=True):
+                    duration = turn.end - turn.start
+                    # Filter out sub-second segments that cause the
+                    # std() degrees-of-freedom <= 0 warning in pyannote's
+                    # pooling layer (too few frames for valid statistics).
+                    if duration < 0.5:
+                        logger.debug(f"Discarding short diarization turn: {duration:.3f}s")
+                        continue
                     segments_list.append({
                         'start': turn.start,
                         'end': turn.end,
@@ -1611,12 +1662,12 @@ class AnonymizationEngine:
             return
 
         try:
-            from transformers import AutoModel, AutoTokenizer
+            from transformers import AutoConfig, AutoModel, AutoTokenizer
             from torchcrf import CRF
             import torch.nn as nn
             import json
             
-            # 1. Load CRF Config (required for this model)
+            # Load CRF configuration
             crf_config_path = self.model_path / "crf_config.json"
             if not crf_config_path.exists():
                 logger.error(f"crf_config.json not found at {crf_config_path}")
@@ -1626,7 +1677,6 @@ class AnonymizationEngine:
             with open(crf_config_path, "r") as f:
                 crf_config = json.load(f)
             
-            # Validate required keys
             required_keys = ["base_model_name", "num_labels", "id2label", "label2id"]
             if not all(k in crf_config for k in required_keys):
                 logger.error(f"Missing required keys in crf_config.json: {required_keys}")
@@ -1635,10 +1685,9 @@ class AnonymizationEngine:
 
             self.original_id2label = crf_config.get("id2label", {})
             self.original_label2id = crf_config.get("label2id", {})
-            
             logger.info(f"Loaded {len(self.original_id2label)} original model labels from crf_config.json")
 
-            # 2. Try to load FLERT config if available (for context windowing)
+            # Load FLERT config if available
             flert_config_path = self.model_path / "flert_config.json"
             flert_config = None
             if flert_config_path.exists():
@@ -1646,7 +1695,16 @@ class AnonymizationEngine:
                     flert_config = json.load(f)
                 logger.info("FLERT config loaded successfully")
 
-            # 3. Define Model Architecture
+            # Register custom model type to suppress transformers warning
+            try:
+                AutoConfig.register("mmbert", type("MMBERTConfig", (), {
+                    "model_type": "mmbert",
+                    "is_composition": False,
+                }))
+            except Exception:
+                pass
+
+            # Define model architecture
             class ModernBertCRF(nn.Module):
                 def __init__(self, base_model_name, num_labels, id2label, label2id, flert_config=None):
                     super().__init__()
@@ -1656,6 +1714,12 @@ class AnonymizationEngine:
                     self.flert_config = flert_config
                     
                     try:
+                        self.transformer = AutoModel.from_pretrained(
+                            base_model_name, 
+                            local_files_only=True,
+                            ignore_mismatched_sizes=True,
+                        )
+                    except TypeError:
                         self.transformer = AutoModel.from_pretrained(
                             base_model_name, 
                             local_files_only=True
@@ -1685,10 +1749,9 @@ class AnonymizationEngine:
                         return {"logits": emissions}
 
                 def decode(self, emissions, mask):
-
                     return self.crf.decode(emissions, mask=mask)
 
-            # 4. Instantiate Model
+            # Instantiate model
             local_base_model_path = self.model_path / crf_config["base_model_name"]
             if not local_base_model_path.exists():
                 logger.warning(f"Local base model not found at {local_base_model_path}. Trying HF name: {crf_config['base_model_name']}")
@@ -1708,9 +1771,20 @@ class AnonymizationEngine:
             self.model.to(self.device)
             self.model.eval()
             
-            self.tokenizer = AutoTokenizer.from_pretrained(str(self.model_path), local_files_only=True)
+            # Load tokenizer with mistral regex fix
+            try:
+                self.tokenizer = AutoTokenizer.from_pretrained(
+                    str(self.model_path),
+                    local_files_only=True,
+                    fix_mistral_regex=True,
+                )
+            except TypeError:
+                self.tokenizer = AutoTokenizer.from_pretrained(
+                    str(self.model_path),
+                    local_files_only=True,
+                )
             
-            # 5. Build Dynamic Mapping (same as before)
+            # Build label mapping
             self.label_mapping = self._build_safe_label_mapping()
             logger.info("✅ New DFKI-SLT model loaded successfully with FLERT support")
 
@@ -2427,7 +2501,10 @@ try:
 except ImportError:
     PYDUB_AVAILABLE = False
     AudioSegment = None
-    logger.warning("Pydub not available - using ffmpeg fallback for beep generation")
+    logger.warning(
+        "Pydub not available — using ffmpeg fallback for beep generation. "
+        "Install with: pip install pydub  (requires ffmpeg in PATH)"
+    )
 
 # TTS configuration from environment (UPDATED)
 TTS_BACKEND = os.getenv('TTS_BACKEND', 'piper').lower()
