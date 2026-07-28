@@ -184,10 +184,10 @@ EOF
 server {
     listen 80;
     listen [::]:80;
-    server_name _;
+    server_name transcriber.cloud.cci.charite.de localhost 127.0.0.1 _;
 
     # Redirect HTTP to HTTPS
-    return 301 https://\$server_name\$request_uri;
+    return 301 https://$http_host$request_uri;
 }
 
 # HTTPS Server - Main Application
