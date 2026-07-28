@@ -1838,25 +1838,24 @@ class AnonymizationEngine:
             logger.error(traceback.format_exc())
             self.method = None
 
-        def anonymize(self, text):
-            """Anonymizes text using FLERT-style context windowing."""
-            if not self.method or not self.model or not self.tokenizer:
-                return None, False, "Anonymization model not loaded"
+    def anonymize(self, text):
+        """Anonymizes text using FLERT-style context windowing."""
+        if not self.method or not self.model or not self.tokenizer:
+            return None, False, "Anonymization model not loaded"
+        logger.info("Running anonymization with FLERT context windowing...")
 
-            logger.info("Running anonymization with FLERT context windowing...")
-
-            # 1. Split into Sentences
-            sentences_data = split_dialogue_into_sentences(text)
+        # 1. Split into Sentences
+        sentences_data = split_dialogue_into_sentences(text)
             
-            if not sentences_data:
-                return text, False, "No sentences detected"
+        if not sentences_data:
+            return text, False, "No sentences detected"
 
-            # === DEBUG: Log input sentences ===
-            logger.info(f"Split text into {len(sentences_data)} sentence blocks")
-            for i, (speaker, tokens, _) in enumerate(sentences_data[:2]):
-                logger.info(f"  [{i}] {speaker}: {' '.join(tokens[:8])}... ({len(tokens)} tokens)")
+        # === DEBUG: Log input sentences ===
+        logger.info(f"Split text into {len(sentences_data)} sentence blocks")
+        for i, (speaker, tokens, _) in enumerate(sentences_data[:2]):
+            logger.info(f"  [{i}] {speaker}: {' '.join(tokens[:8])}... ({len(tokens)} tokens)")
 
-            sentences_tokens = [tokens for _, tokens, _ in sentences_data]
+        sentences_tokens = [tokens for _, tokens, _ in sentences_data]
         
         # 2. Run Inference WITH CONTEXT WINDOW
         predictions = predict_dialogue_with_context(
