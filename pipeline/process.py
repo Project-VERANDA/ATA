@@ -1742,8 +1742,14 @@ class AnonymizationEngine:
                         return {"logits": emissions}
 
                 def decode(self, emissions, mask):
+<<<<<<< HEAD
 
                     return self.crf.decode(emissions, mask=mask)
+=======
+                    """Use raw argmax instead of CRF (CRF transitions not trained)."""
+                    # Raw argmax predictions (skip CRF entirely - uses trained classifier directly)
+                    return torch.argmax(emissions, dim=-1).cpu().tolist()
+>>>>>>> parent of 9a83177 (Re-enable CRF)
 
             # 4. Instantiate Model
             local_base_model_path = self.model_path / crf_config["base_model_name"]
