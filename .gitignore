@@ -1,4 +1,4 @@
-pipeline/model/*
+/pipeline/model/*
 pipeline/models/*
 pipeline/annonym/*
 !pipeline/model/*/.GithubCreateDir
@@ -37,7 +37,10 @@ pipeline/transcripts/
 pipeline/annonym/
 pipeline/logs/
 pipeline/videos/
-pipeline/LLM_Anon
+pipeline/LLM_Anon/
+
+# Unrelated files
+*.csvrm pip	Dok	
 
 # Python cache
 __pycache__/
