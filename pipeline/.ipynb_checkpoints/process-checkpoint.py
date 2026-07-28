@@ -1223,7 +1223,7 @@ def transcribe_audio_locally(audio_path, language='de'):
     except Exception as e:
         error_msg = f"Transcription failed: {e}"
         logger.error(error_msg, exc_info=True)  # Log full traceback to console
-        return error_msg
+        return error_msg, []
 
 # --- Anonymization Engine Class (Custom CRF Implementation) ---
 

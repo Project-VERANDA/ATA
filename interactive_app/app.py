@@ -601,7 +601,9 @@ def upload_file():
         if file.filename == '':
             return jsonify({'error': 'No file selected'}), 400
         
-        language = request.form.get('language', 'de')
+        language = request.form.get('language', None)
+        if not language or language == 'auto':
+            language = None
         
         if file and allowed_file(file.filename):
             filename = secure_filename(file.filename)
@@ -612,14 +614,23 @@ def upload_file():
             transcription, wordOffS = transcribe_audio_locally(filepath, language=language)
             
             # Check if transcription resulted in an error message
-            if isinstance(transcription, str) and transcription.startswith("Error:") or transcription.startswith("Transcription failed:"):
+            if not isinstance(transcription, str):
+                logger.error(f"Unexpected transcription type: {type(transcription)}")
+                return jsonify({'error': 'Transcription service returned invalid data'}), 500
+            
+            # Check for error messages
+            if transcription.startswith("Error:") or transcription.startswith("Transcription failed:"):
                 logger.error(f"Transcription returned error: {transcription}")
                 return jsonify({'error': transcription}), 500
+            
+            # Ensure wordOffS is always a list
+            if not isinstance(wordOffS, list):
+                wordOffS = []
             
             return jsonify({
                 'success': True,
                 'transcription': transcription if transcription else "",
-                'offsets': wordOffS if wordOffS else [],
+                'offsets': wordOffS,
                 'audio_name': filepath
             })
         
@@ -651,7 +662,9 @@ def transcribe_recording():
             return jsonify({'error': 'No audio recording provided'}), 400
         
         audio_blob = request.files['audio']
-        language = request.form.get('language', 'de')
+        language = request.form.get('language', None)
+        if not language or language == 'auto':
+            language = None
         
         logger.info(f"Received audio file: filename='{audio_blob.filename}', language='{language}'")
         

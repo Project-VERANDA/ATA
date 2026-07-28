@@ -1010,7 +1010,7 @@ def load_models():
     logger.info("Models loaded successfully.")
     return _loaded_whisper_model, _loaded_diarize_model
 
-def transcribe_audio_locally(audio_path, language='de'):
+def transcribe_audio_locally(audio_path, language=None):
     """
     Transcribes a single audio file using local models.
     Logs progress to console AND returns text for web interface.
@@ -1223,7 +1223,7 @@ def transcribe_audio_locally(audio_path, language='de'):
     except Exception as e:
         error_msg = f"Transcription failed: {e}"
         logger.error(error_msg, exc_info=True)  # Log full traceback to console
-        return error_msg
+        return error_msg, []
 
 # --- Anonymization Engine Class (Custom CRF Implementation) ---
 

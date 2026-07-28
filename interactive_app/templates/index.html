@@ -903,17 +903,19 @@
                         method: 'POST',
                         body: formData
                     });
-                
+                    
+                    // ✅ Check content type first
+                    const contentType = response.headers.get('content-type');
+                    if (!contentType || !contentType.includes('application/json')) {
+                        const text = await response.text();
+                        console.error('Non-JSON response received:', text.substring(0, 200));
+                        throw new Error(`Server returned ${response.status} with non-JSON content`);
+                    }
+                    
                     const result = await response.json();
-                    // console.log (`File-Audio Name...`); 
-                    // console.log (`File-Audio Name ${result.audio_name} and ${fileToTranscribe} and ${uploadedFile} and ${fileName}`); 
+                    
                     if (response.ok && result.success) {
-                        transcribedText.value = result.transcription;
-                        offsetData = result.offsets;  // #RRX
-                        audioName = result.audio_name;  // #RRX
-                        anonymizeBtn.disabled = false;
-                        downloadOriginalBtn.disabled = false;
-                        updateStatus("Transcription successful!", false);
+                        ...
                     } else {
                         throw new Error(result.error || "An unknown error occurred during transcription.");
                     }
