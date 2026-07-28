@@ -1761,7 +1761,7 @@ def _load_model(self):
         # Model Instantiation - Load FULL checkpoint
         # ------------------------------------------------------------------
         self.model = ModernBertCRF(
-            base_model_name=c rf_config["base_model_name"],
+            base_model_name=crf_config["base_model_name"],
             num_labels=crf_config["num_labels"],
             id2label=self.original_id2label,
             label2id=self.original_label2id,
