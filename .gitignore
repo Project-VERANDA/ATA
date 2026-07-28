@@ -8,8 +8,6 @@ pipeline_Test.py
 !.gitkeep
 !models_manifest.txt
 ModelTraining/*
-key.pem
-cert.pem
 .env
 
 # ===== LARGE MODEL FILES (Do not commit) =====
@@ -40,7 +38,8 @@ pipeline/videos/
 pipeline/LLM-Anon/
 
 # SSL files
-ssl_certs/
+key.pem
+cert.pem
 
 # Unrelated files
 *.csv
