@@ -1755,7 +1755,9 @@ class AnonymizationEngine:
                         return {"logits": logits}
 
                 def decode(self, emissions, mask):
-                    return self.crf.decode(emissions, mask=mask)
+                    """Use raw argmax instead of CRF (CRF transitions not trained)."""
+                    # Raw argmax predictions (skip CRF entirely - uses trained classifier directly)
+                    return torch.argmax(emissions, dim=-1).cpu().tolist()
 
             # ------------------------------------------------------------------
             # Model Instantiation - Load FULL checkpoint
