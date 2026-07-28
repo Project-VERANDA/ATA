@@ -1275,11 +1275,14 @@ def parse_transcript_into_blocks(transcript_text):
 
     return blocks
 
-def predict_dialogue_with_context(sentences_tokens, model, tokenizer, id_to_tag_map, device="cpu", context_window=1):
+def predict_dialogue_with_context(sentences_tokens, model, tokenizer, id_to_tag_map, device="cuda", context_window=1):
     """
     Predicts NER labels using FLERT-style context windowing.
-    Includes surrounding sentences for better dialogue context.
+    FIXED: Proper offset tracking + subword aggregation.
     """
+    from collections import Counter
+    from collections import defaultdict
+    
     all_predictions = []
     sep_token = tokenizer.sep_token if hasattr(tokenizer, 'sep_token') else '[SEP]'
     
@@ -1305,10 +1308,6 @@ def predict_dialogue_with_context(sentences_tokens, model, tokenizer, id_to_tag_
             for ctx_sent in right_ctx:
                 flat_tokens.extend(ctx_sent)
         
-        # === DEBUG: Show flattened tokens (first sentence only) ===
-        if i == 0:
-            logger.debug(f"Flattened tokens ({len(flat_tokens)} total): {flat_tokens[:20]}...")
-        
         # Tokenize
         enc = tokenizer(
             flat_tokens,
@@ -1326,34 +1325,30 @@ def predict_dialogue_with_context(sentences_tokens, model, tokenizer, id_to_tag_
             mask = enc["attention_mask"].bool()
             preds = model.decode(emissions, mask)[0]
         
-        # === DEBUG: Verify word_id alignment ===
-        if i == 0:
-            valid_ids = [wid for wid in word_ids if wid is not None]
-            logger.debug(f"Word IDs: min={min(valid_ids)}, max={max(valid_ids)}, count={len(valid_ids)}")
-            logger.debug(f"Target token range: {tgt_start_idx}-{tgt_end_idx} ({tgt_end_idx - tgt_start_idx} tokens)")
-        
-        # Extract predictions for target sentence only
-        target_labels = []
-        seen_word_indices = set()
-        
+        # STEP 1: Collect subword predictions grouped by word ID
+        word_predictions = defaultdict(list)
         for idx, wid in enumerate(word_ids):
-            if wid is None or wid in seen_word_indices:
+            if wid is None or wid < tgt_start_idx or wid >= tgt_end_idx:
                 continue
-            
-            if tgt_start_idx <= wid < tgt_end_idx:
-                pred_id = preds[idx]
-                key = str(pred_id)
-                tag = id_to_tag_map.get(key, "O")
-                target_labels.append(tag)
-                seen_word_indices.add(wid)
-                
-                # === DEBUG: First 5 token predictions ===
-                if i == 0 and len(target_labels) <= 5:
-                    logger.debug(f"Token {wid}: '{target_tokens[wid] if wid < len(target_tokens) else 'OUT_OF_BOUNDS'}' → {tag} (pred_id={pred_id})")
+            pred_id = preds[idx]
+            tag = id_to_tag_map.get(str(pred_id), "O")
+            target_position = wid - tgt_start_idx
+            if 0 <= target_position < len(target_tokens):
+                word_predictions[target_position].append(tag)
         
-        # === DEBUG: Verify we got predictions for all target tokens ===
-        if i == 0 and len(target_labels) != len(target_tokens):
-            logger.warning(f"⚠️ Prediction mismatch! Target tokens: {len(target_tokens)}, Got labels: {len(target_labels)}")
+        # STEP 2: Aggregate subword predictions (majority vote)
+        target_labels = ["O"] * len(target_tokens)
+        for pos in range(len(target_tokens)):
+            if pos in word_predictions and word_predictions[pos]:
+                votes = word_predictions[pos]
+                # Use most frequent non-"O" label, or "O" if all are "O"
+                non_o_votes = [v for v in votes if v != "O"]
+                if non_o_votes:
+                    target_labels[pos] = Counter(non_o_votes).most_common(1)[0][0]
+                else:
+                    target_labels[pos] = "O"
+            else:
+                target_labels[pos] = "O"
         
         all_predictions.append(target_labels)
     
