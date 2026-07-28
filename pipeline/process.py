@@ -1862,7 +1862,7 @@ class AnonymizationEngine:
             tokenizer=self.tokenizer,
             id_to_tag_map=self.label_mapping,
             device=self.device,
-            context_window=2
+            context_window=0
         )
 
         # === DEBUG: Log prediction results ===
