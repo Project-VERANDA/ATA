@@ -1873,46 +1873,46 @@ class AnonymizationEngine:
 
     def anonymize(self, text):
         """Anonymizes text using FLERT-style context windowing."""
-    if not self.method or not self.model or not self.tokenizer:
-        return None, False, "Anonymization model not loaded"
+        if not self.method or not self.model or not self.tokenizer:
+            return None, False, "Anonymization model not loaded"
 
-    logger.info("Running anonymization with FLERT context windowing...")
+        logger.info("Running anonymization with FLERT context windowing...")
 
-    # 1. Split into Sentences (preserves original text)
-    sentences_data = split_dialogue_into_sentences(text)
-    
-    if not sentences_data:
-        return text, False, "No sentences detected"
+        # 1. Split into Sentences (preserves original text)
+        sentences_data = split_dialogue_into_sentences(text)
+        
+        if not sentences_data:
+            return text, False, "No sentences detected"
 
-    sentences_tokens = [tokens for _, tokens, _ in sentences_data]
-    
-    # 2. Run Inference with CONTEXT WINDOW (uses predict_dialogue_with_context)
-    predictions = predict_dialogue_with_context(
-        sentences_tokens=sentences_tokens,
-        model=self.model,
-        tokenizer=self.tokenizer,
-        id_to_tag_map=self.label_mapping,
-        device=self.device,
-        context_window=2
-    )
+        sentences_tokens = [tokens for _, tokens, _ in sentences_data]
+        
+        # 2. Run Inference with CONTEXT WINDOW (uses predict_dialogue_with_context)
+        predictions = predict_dialogue_with_context(
+            sentences_tokens=sentences_tokens,
+            model=self.model,
+            tokenizer=self.tokenizer,
+            id_to_tag_map=self.label_mapping,
+            device=self.device,
+            context_window=2
+        )
 
-    # 3. Reconstruct Text (PRESERVES SPACING)
-    reconstructed_text = reconstruct_text_from_predictions(
-        sentences_data, 
-        predictions, 
-        {}  # ✓ Added speaker_map parameter
-    )
-    
-    # 4. Fix punctuation IMMEDIATELY after reconstruction
-    reconstructed_text = normalize_punctuation(reconstructed_text)
-    reconstructed_text = merge_adjacent_tags(reconstructed_text)
-    
-    # 5. Fix repeated words and spacing
-    reconstructed_text = re.sub(r'\b(\w+)\s+\1\b', r'\1', reconstructed_text)  # "that's that's" → "that's"
-    reconstructed_text = re.sub(r'\s+', ' ', reconstructed_text)  # Multiple spaces → single
-    reconstructed_text = reconstructed_text.strip()
+        # 3. Reconstruct Text (PRESERVES SPACING)
+        reconstructed_text = reconstruct_text_from_predictions(
+            sentences_data, 
+            predictions, 
+            {}  # ✓ Added speaker_map parameter
+        )
+        
+        # 4. Fix punctuation IMMEDIATELY after reconstruction
+        reconstructed_text = normalize_punctuation(reconstructed_text)
+        reconstructed_text = merge_adjacent_tags(reconstructed_text)
+        
+        # 5. Fix repeated words and spacing
+        reconstructed_text = re.sub(r'\b(\w+)\s+\1\b', r'\1', reconstructed_text)  # "that's that's" → "that's"
+        reconstructed_text = re.sub(r'\s+', ' ', reconstructed_text)  # Multiple spaces → single
+        reconstructed_text = reconstructed_text.strip()
 
-    return reconstructed_text, True, "Success"
+        return reconstructed_text, True, "Success"
 
 def generate_paraphrase(raw_dialogue, lang='DE', model="gpt-oss-120b", temperature=0.3):
     """
