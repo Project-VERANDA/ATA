@@ -3,6 +3,7 @@
 # Nginx Configuration Setup for Speech Anonymizer
 # Uses unified SSL certificates from ATA/ssl_certs/
 # Compatible with setup_ssl.sh certificate management
+# FIXED: Includes limit_req_zone definition
 #===============================================================================
 
 set -e
@@ -20,6 +21,8 @@ MAX_BODY_SIZE="5G"
 PROXY_READ_TIMEOUT="600s"
 PROXY_SEND_TIMEOUT="600s"
 PROXY_CONNECT_TIMEOUT="60s"
+RATE_LIMIT_ZONE="api:10m"
+RATE_LIMIT_RATE="10r/s"
 
 # Unified SSL paths (managed by setup_ssl.sh)
 SSL_CERT_DIR="/mnt/Data_Mount/VERANDA_DataMount/ATA/ssl_certs"
@@ -150,7 +153,7 @@ fix_malformed_site_configs() {
 }
 
 #-------------------------------------------------------------------------------
-# CREATE NGINX SITES CONFIG
+# CREATE NGINX SITES CONFIG (FIXED WITH LIMIT_REQ_ZONE)
 #-------------------------------------------------------------------------------
 
 create_site_config() {
@@ -168,6 +171,9 @@ upstream speech_anonymizer {
     server 127.0.0.1:5001;
     keepalive 32;
 }
+
+# Rate limiting zone (FIXED - was missing in previous version)
+limit_req_zone $binary_remote_addr zone=api:10m rate=10r/s;
 
 EOF
 
@@ -231,6 +237,9 @@ EOF
     send_timeout 600s;
 
     location / {
+        # Rate limiting (exempt health check)
+        limit_req zone=api burst=20 nodelay;
+
         proxy_pass http://speech_anonymizer;
         proxy_http_version 1.1;
 
@@ -400,6 +409,14 @@ verify_changes() {
         all_ok=false
     fi
     
+    # Check limit_req_zone definition (CRITICAL FIX)
+    if grep -q "limit_req_zone.*zone=api" "$SPEECH_SITE"; then
+        print_success "Rate limiting zone defined: api (verified)"
+    else
+        print_error "Rate limiting zone NOT DEFINED - nginx will fail!"
+        all_ok=false
+    fi
+    
     # Check SSL paths (if HTTPS enabled)
     if [[ "${USE_HTTPS:-true}" == "true" ]]; then
         if grep -q "ssl_certificate ${SSL_CERT_FILE}" "$SPEECH_SITE"; then
@@ -434,6 +451,7 @@ show_summary() {
     
     echo -e "${GREEN}Configuration Summary:${NC}"
     echo "  • Max upload size:        5 GB"
+    echo "  • Rate limiting zone:     api:10m (10 req/s)"
     echo "  • Proxy read timeout:     600s"
     echo "  • Proxy send timeout:     600s"
     echo "  • SSL certificates:       ${SSL_CERT_DIR}"
