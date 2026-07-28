@@ -1589,14 +1589,15 @@ class AnonymizationEngine:
     def _build_safe_label_mapping(self):
         """
         Constructs a dynamic mapping from model labels to anonymization tags.
-        FIXED: Ensures robust fallback for unknown IDs.
+        FIXED: Handles both CITY/LOC_CITY variants and NAME/PERSON variants.
         """
         all_target_tags = {
             'PERSON': '[PERSON]',
             'PERSON_EMAIL': '[EMAIL]',
             'PERSON_SOCIAL_RELATION': '[NAME_RELATIVE]',
             'ORG': '[ORGANISATION]',
-            'LOC_CITY': '[CITY]',
+            'CITY': '[CITY]',                    # ★ NEW: Both B-CITY and B-LOC_CITY
+            'LOC_CITY': '[CITY]',                # Keep for backward compatibility
             'LOC_COUNTRY': '[COUNTRY]',
             'LOC_STREET': '[STREET]',
             'LOC_ZIP': '[ZIP]',
@@ -1611,15 +1612,8 @@ class AnonymizationEngine:
             'PRODUCT': '[PRODUCT]',
             'QUANTITY': '[QUANTITY]',
             'MISC': '[MISC]',
-            'O': '' # "O" means keep original word
+            'O': ''                              # "O" means keep original word
         }
-
-        def _debug_label_mapping(self):
-            """Debug helper to verify label mapping."""
-            logger.info("=== LABEL MAPPING DEBUG ===")
-            for model_id, anon_tag in sorted(self.label_mapping.items()):
-                logger.info(f"  Model ID {model_id} → {repr(anon_tag)}")
-            logger.info("===========================")
 
         active_tags = set(all_target_tags.keys())
 
@@ -1634,20 +1628,29 @@ class AnonymizationEngine:
             logger.info(f"Excluding tags: {exclude_set}")
 
         mapping = {}
-        # Ensure we map EVERY possible label ID from the model config
+        unmapped_labels = []
+        
         for label_id, label_name in self.original_id2label.items():
             clean_label = label_name.replace("B-", "").replace("I-", "").replace("S-", "").replace("E-", "")
-            
-            # Normalize label name for comparison
             clean_label_upper = clean_label.upper()
             
             if clean_label_upper in active_tags:
                 mapping[str(label_id)] = all_target_tags[clean_label_upper]
             else:
-                # If not active, map to empty string (keep original word)
                 mapping[str(label_id)] = ""
-                
+                unmapped_labels.append((label_id, label_name))
+        
         logger.info(f"Built label mapping with {len(mapping)} entries.")
+        
+        # Log what was mapped
+        logger.info(f"Sample mappings: {dict(list(mapping.items())[:10])}")
+        
+        # Log any unexpected unmapped labels (excluding O, DISEASE which we intentionally don't anonymize)
+        ignored = {'O', 'DISEASE'}
+        suspicious = [(lid, lname) for lid, lname in unmapped_labels if lname not in ignored]
+        if suspicious:
+            logger.warning(f"⚠️ Unmapped labels (may miss PII): {suspicious}")
+        
         return mapping
 
     def _debug_label_mapping(self):
@@ -1892,7 +1895,7 @@ class AnonymizationEngine:
         reconstructed_text = normalize_punctuation(reconstructed_text)
         reconstructed_text = merge_adjacent_tags(reconstructed_text)
         reconstructed_text = re.sub(r'\b(\w+)\s+\1\b', r'\1', reconstructed_text)
-        reconstructed_text = re.sub(r'\s+', ' ', reconstructed_text)
+        reconstructed_text = re.sub(r'[^\S\n]+', ' ', reconstructed_text)
         reconstructed_text = reconstructed_text.strip()
 
         # === DEBUG: Final check ===
