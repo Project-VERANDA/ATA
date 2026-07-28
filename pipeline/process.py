@@ -2335,7 +2335,7 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
         anonymizer = AnonymizationEngine(
             method=ANONYMIZATION_METHOD,
             level=ANONYMIZATION_LEVEL,
-            model_path=MODEL_FOLDER / "mmbert_multilingual_pii_ner"
+            model_path=MODEL_FOLDER / "mmbert_multilingual_pii_ner",
             include_tags=include_tags,
             exclude_tags=exclude_tags
         )
