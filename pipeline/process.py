@@ -1785,6 +1785,21 @@ class AnonymizationEngine:
                 )
                 local_base_model_path = crf_config["base_model_name"]
 
+            try:
+                base_transformer = AutoModel.from_pretrained(
+                    local_base_model_path,
+                    local_files_only=True,
+                    ignore_mismatched_sizes=False,  # ← Don't ignore!
+                )
+            except Exception as e:
+                # Fallback if no fine-tuned base model exists
+                logger.warning(f"Could not load base transformer: {e}")
+                base_transformer = AutoModel.from_pretrained(
+                    local_base_model_path,
+                    local_files_only=True,
+                )
+
+            # Step 2: Initialize ModernBertCRF wrapper
             self.model = ModernBertCRF(
                 base_model_name=local_base_model_path,
                 num_labels=crf_config["num_labels"],
@@ -1793,15 +1808,35 @@ class AnonymizationEngine:
                 flert_config=flert_config,
             )
 
+            # Step 3: Load ALL weights (base + classifier + CRF) from checkpoint
             model_weights_path = self.model_path / "pytorch_model.bin"
             state_dict = torch.load(
                 model_weights_path,
                 map_location=self.device,
                 weights_only=True,
             )
-            self.model.load_state_dict(state_dict)
+
+            # Step 4: Map checkpoint keys to wrapper keys
+            # Checkpoint uses: classifier.weight, crf.transitions
+            # Wrapper uses: self.classifier.weight, self.crf.transitions
+            # These should match, so load directly
+            missing_keys, unexpected_keys = self.model.load_state_dict(state_dict, strict=False)
+
+            logger.info(f"State dict loaded:")
+            logger.info(f"  Missing keys (expected): {missing_keys[:5] if missing_keys else 'None'}")
+            logger.info(f"  Unexpected keys (ignored): {unexpected_keys[:5] if unexpected_keys else 'None'}")
+
+            # Step 5: Move to device and evaluate
             self.model.to(self.device)
             self.model.eval()
+
+            # Step 6: Verify CRF weights loaded
+            crf_weight_count = sum(p.numel() for p in self.model.crf.parameters() if p.requires_grad)
+            logger.info(f"  CRF parameters loaded: {crf_weight_count:,}")
+            if crf_weight_count > 0:
+                logger.info("✅ Fine-tuned CRF transitions loaded successfully!")
+            else:
+                logger.warning("⚠️ CRF parameters may not have loaded correctly")
 
             # ------------------------------------------------------------------
             # Tokenizer
