@@ -37,7 +37,7 @@ pipeline/transcripts/
 pipeline/annonym/
 pipeline/logs/
 pipeline/videos/
-pipeline/LLM_Anon/
+pipeline/LLM-Anon/
 
 # Unrelated files
 *.csvrm pip	Dok	
