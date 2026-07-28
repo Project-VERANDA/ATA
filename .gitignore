@@ -43,6 +43,8 @@ cert.pem
 ssl_certs/server.key
 ssl_certs/.generated_by_ata
 ssl_certs/.backups/
+ssl_certs/server.crt
+ssl_certs/server.key
 
 # Unrelated files
 *.csv
