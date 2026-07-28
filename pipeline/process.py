@@ -1279,10 +1279,6 @@ def predict_dialogue_with_context(sentences_tokens, model, tokenizer, id_to_tag_
     """
     Predicts NER labels using FLERT-style context windowing.
     Includes surrounding sentences for better dialogue context.
-    
-    Args:
-        sentences_tokens: List of sentences (each a list of tokens)
-        context_window: Number of sentences before/after to include (default: 1)
     """
     all_predictions = []
     sep_token = tokenizer.sep_token if hasattr(tokenizer, 'sep_token') else '[SEP]'
@@ -1309,6 +1305,10 @@ def predict_dialogue_with_context(sentences_tokens, model, tokenizer, id_to_tag_
             for ctx_sent in right_ctx:
                 flat_tokens.extend(ctx_sent)
         
+        # === DEBUG: Show flattened tokens (first sentence only) ===
+        if i == 0:
+            logger.debug(f"Flattened tokens ({len(flat_tokens)} total): {flat_tokens[:20]}...")
+        
         # Tokenize
         enc = tokenizer(
             flat_tokens,
@@ -1326,6 +1326,12 @@ def predict_dialogue_with_context(sentences_tokens, model, tokenizer, id_to_tag_
             mask = enc["attention_mask"].bool()
             preds = model.decode(emissions, mask)[0]
         
+        # === DEBUG: Verify word_id alignment ===
+        if i == 0:
+            valid_ids = [wid for wid in word_ids if wid is not None]
+            logger.debug(f"Word IDs: min={min(valid_ids)}, max={max(valid_ids)}, count={len(valid_ids)}")
+            logger.debug(f"Target token range: {tgt_start_idx}-{tgt_end_idx} ({tgt_end_idx - tgt_start_idx} tokens)")
+        
         # Extract predictions for target sentence only
         target_labels = []
         seen_word_indices = set()
@@ -1340,6 +1346,14 @@ def predict_dialogue_with_context(sentences_tokens, model, tokenizer, id_to_tag_
                 tag = id_to_tag_map.get(key, "O")
                 target_labels.append(tag)
                 seen_word_indices.add(wid)
+                
+                # === DEBUG: First 5 token predictions ===
+                if i == 0 and len(target_labels) <= 5:
+                    logger.debug(f"Token {wid}: '{target_tokens[wid] if wid < len(target_tokens) else 'OUT_OF_BOUNDS'}' → {tag} (pred_id={pred_id})")
+        
+        # === DEBUG: Verify we got predictions for all target tokens ===
+        if i == 0 and len(target_labels) != len(target_tokens):
+            logger.warning(f"⚠️ Prediction mismatch! Target tokens: {len(target_tokens)}, Got labels: {len(target_labels)}")
         
         all_predictions.append(target_labels)
     
@@ -1456,21 +1470,13 @@ def merge_adjacent_tags(text):
     return out_str
     
 def reconstruct_text_from_predictions(original_sentences, predictions, speaker_map):
-    """
-    Reconstructs the text from predictions.
-    Merges consecutive sentences from the SAME speaker into a single block.
-    """
+    """Reconstructs text preserving speaker structure and original spacing."""
     reconstructed_blocks = []
     
-    current_speaker = None
-    current_text_parts = []
-
     for i, (speaker, tokens, original_text) in enumerate(original_sentences):
         labels = predictions[i] if i < len(predictions) else []
         
         # Use ORIGINAL text instead of rejoining tokens
-        # Only replace PII spans, keep everything else intact
-        
         reconstructed_text = original_text
         
         # Work backwards to avoid index shifts when replacing
@@ -1478,7 +1484,6 @@ def reconstruct_text_from_predictions(original_sentences, predictions, speaker_m
             if w_idx < len(labels) and labels[w_idx] not in ["O", ""]:
                 tag = labels[w_idx]
                 word = tokens[w_idx]
-                # Replace word with tag
                 reconstructed_text = re.sub(
                     r'\b' + re.escape(word) + r'\b', 
                     tag, 
@@ -1486,21 +1491,8 @@ def reconstruct_text_from_predictions(original_sentences, predictions, speaker_m
                     count=1
                 )
         
-        # --- MERGING LOGIC ---
-        if speaker == current_speaker:
-            current_text_parts.append(reconstructed_text)
-        else:
-            if current_speaker and current_text_parts:
-                full_text = " ".join(current_text_parts)
-                reconstructed_blocks.append(f"{current_speaker}: {full_text}")
-            
-            current_speaker = speaker
-            current_text_parts = [reconstructed_text]
+        reconstructed_blocks.append(f"{speaker}: {reconstructed_text}")
 
-    if current_speaker and current_text_parts:
-        full_text = " ".join(current_text_parts)
-        reconstructed_blocks.append(f"{current_speaker}: {full_text}")
-        
     return "\n".join(reconstructed_blocks)
 
 def predict_sentences(sentences_tokens, model, tokenizer, id_to_tag_map, device="cpu"):
@@ -1665,254 +1657,253 @@ class AnonymizationEngine:
             logger.info(f"  Model ID {model_id} → {repr(anon_tag)}")
         logger.info("===========================")
 
-    def _load_model(self):
-        """Loads the multilingual_DialogPII_NER model with FLERT config support."""
-        if not self.model_path.exists():
-            logger.error(f"Model path not found: {self.model_path}")
+def _load_model(self):
+    """Loads the multilingual_DialogPII_NER model with FLERT config support."""
+    if not self.model_path.exists():
+        logger.error(f"Model path not found: {self.model_path}")
+        self.method = None
+        return
+
+    try:
+        from transformers import AutoConfig, AutoModel, AutoTokenizer
+        from torchcrf import CRF
+        import torch.nn as nn
+        import json
+
+        # ------------------------------------------------------------------
+        # CRF Configuration
+        # ------------------------------------------------------------------
+
+        crf_config_path = self.model_path / "crf_config.json"
+        if not crf_config_path.exists():
+            logger.error(f"crf_config.json not found at {crf_config_path}")
             self.method = None
             return
 
-        try:
-            from transformers import AutoConfig, AutoModel, AutoTokenizer
-            from torchcrf import CRF
-            import torch.nn as nn
-            import json
+        with open(crf_config_path, "r") as f:
+            crf_config = json.load(f)
 
-            # ------------------------------------------------------------------
-            # CRF Configuration
-            # ------------------------------------------------------------------
-
-            crf_config_path = self.model_path / "crf_config.json"
-            if not crf_config_path.exists():
-                logger.error(f"crf_config.json not found at {crf_config_path}")
-                self.method = None
-                return
-
-            with open(crf_config_path, "r") as f:
-                crf_config = json.load(f)
-
-            required_keys = ["base_model_name", "num_labels", "id2label", "label2id"]
-            if not all(k in crf_config for k in required_keys):
-                logger.error(f"Missing required keys in crf_config.json: {required_keys}")
-                self.method = None
-                return
-
-            self.original_id2label = crf_config.get("id2label", {})
-            self.original_label2id = crf_config.get("label2id", {})
-            logger.info(f"Loaded {len(self.original_id2label)} original model labels from crf_config.json")
-
-            # ------------------------------------------------------------------
-            # FLERT Configuration (optional, enables context-windowed inference)
-            # ------------------------------------------------------------------
-
-            flert_config_path = self.model_path / "flert_config.json"
-            flert_config = None
-            if flert_config_path.exists():
-                with open(flert_config_path, "r") as f:
-                    flert_config = json.load(f)
-                logger.info("FLERT config loaded successfully")
-
-            # ------------------------------------------------------------------
-            # Model Type Registration
-            #
-            # The base model's config.json declares model_type="mmbert", but
-            # this type is not registered in the transformers AutoConfig
-            # registry.  Without registration, transformers logs a warning
-            # ("model of type mmbert to instantiate model of type ''").
-            # Registering a lightweight config stub silences the warning
-            # and allows AutoModel to resolve the architecture correctly.
-            # ------------------------------------------------------------------
-
-            # ------------------------------------------------------------------
-            # Custom configuration for mmbert
-            # ------------------------------------------------------------------
-            class MMBERTConfig(PretrainedConfig):
-                """Configuration class for the multilingual BERT‑based PII‑NER model."""
-                model_type = "mmbert"
-                is_composition = False
-
-            try:
-                AutoConfig.register("mmbert", MMBERTConfig)
-                logger.info("[AnonymizationEngine] Registered custom 'mmbert' config.")
-            except Exception as exc:  # noqa: BLE001
-                logger.debug(
-                    f"[AnonymizationEngine] Failed to register custom 'mmbert' config: {exc}"
-                )
-
-            # ------------------------------------------------------------------
-            # Model architecture – ModernBertCRF
-            # ------------------------------------------------------------------
-            class ModernBertCRF(nn.Module):
-                """
-                Wraps a pretrained transformer backbone with:
-                * a linear classification head
-                * a CRF decoding layer
-
-                Designed for sequence‑labelling of PII entities in dialogue transcripts.
-                """
-
-                def __init__(
-                    self,
-                    base_model_name: str,
-                    num_labels: int,
-                    id2label: dict,
-                    label2id: dict,
-                    flert_config=None,
-                ):
-                    super().__init__()
-                    self.num_labels = num_labels
-                    self.id2label = id2label
-                    self.label2id = label2id
-                    self.flert_config = flert_config
-
-                    # Load the transformer backbone.
-                    try:
-                        self.transformer = AutoModel.from_pretrained(
-                            base_model_name,
-                            local_files_only=True,
-                            ignore_mismatched_sizes=True,
-                        )
-                    except Exception as e:
-                        logger.error(f"Failed to load base model '{base_model_name}': {e}")
-                        raise
-
-                    hidden_size = self.transformer.config.hidden_size
-                    # Linear classification head
-                    self.classifier = nn.Linear(hidden_size, num_labels)
-                    # Optional dropout – tweak the rate if needed
-                    self.dropout = nn.Dropout(0.1)
-                    # CRF layer for structured predictions
-                    self.crf = CRF(num_labels, batch_first=True)
-
-                def forward(self, input_ids, attention_mask, labels=None, **kwargs):
-                    outputs = self.transformer(
-                        input_ids=input_ids,
-                        attention_mask=attention_mask,
-                        **kwargs,
-                    )
-                    emissions = self.dropout(outputs.last_hidden_state)
-                    logits = self.classifier(emissions)
-
-                    if labels is not None:
-                        loss = -self.crf(logits, labels, mask=attention_mask.bool(), reduction="mean")
-                        return {"loss": loss, "logits": logits}
-                    else:
-                        return {"logits": logits}
-
-                def decode(self, emissions, mask):
-                    """Return the best tag sequence for each example in the batch."""
-                    return self.crf.decode(emissions, mask=mask)
-
-            # ------------------------------------------------------------------
-            # Model Instantiation
-            # ------------------------------------------------------------------
-
-            local_base_model_path = self.model_path / crf_config["base_model_name"]
-            if not local_base_model_path.exists():
-                logger.warning(
-                    f"Local base model not found at {local_base_model_path}. "
-                    f"Trying HF name: {crf_config['base_model_name']}"
-                )
-                local_base_model_path = crf_config["base_model_name"]
-
-            self.model = ModernBertCRF(
-                base_model_name=local_base_model_path,
-                num_labels=crf_config["num_labels"],
-                id2label=self.original_id2label,
-                label2id=self.original_label2id,
-                flert_config=flert_config,
-            )
-
-            # Load the full CRF model weights (includes backbone + classifier
-            # + CRF transition parameters) from pytorch_model.bin.
-            model_weights_path = self.model_path / "pytorch_model.bin"
-            state_dict = torch.load(
-                model_weights_path,
-                map_location=self.device,
-                weights_only=True,
-            )
-            self.model.load_state_dict(state_dict)
-            self.model.to(self.device)
-            self.model.eval()
-
-            # ------------------------------------------------------------------
-            # Tokenizer
-            #
-            # The tokenizer is derived from a Mistral-family vocabulary and
-            # ships with a regex pre-tokeniser pattern that triggers a
-            # spurious deprecation warning in newer transformers releases.
-            # fix_mistral_regex=True applies the corrected pattern.
-            # ------------------------------------------------------------------
-
-            try:
-                self.tokenizer = AutoTokenizer.from_pretrained(
-                    str(self.model_path),
-                    local_files_only=True,
-                    fix_mistral_regex=True,
-                )
-            except TypeError:
-                # Parameter introduced in transformers >= 4.44; older
-                # versions do not recognise it and raise TypeError.
-                self.tokenizer = AutoTokenizer.from_pretrained(
-                    str(self.model_path),
-                    local_files_only=True,
-                )
-
-            # ------------------------------------------------------------------
-            # Label Mapping
-            # ------------------------------------------------------------------
-
-            self.label_mapping = self._build_safe_label_mapping()
-            logger.info("✅ New DFKI-SLT model loaded successfully with FLERT support")
-
-        except Exception as e:
-            import traceback
-            logger.error(f"Failed to load multilingual_DialogPII_NER model: {e}")
-            logger.error(traceback.format_exc())
+        required_keys = ["base_model_name", "num_labels", "id2label", "label2id"]
+        if not all(k in crf_config for k in required_keys):
+            logger.error(f"Missing required keys in crf_config.json: {required_keys}")
             self.method = None
+            return
+
+        self.original_id2label = crf_config.get("id2label", {})
+        self.original_label2id = crf_config.get("label2id", {})
+        logger.info(f"Loaded {len(self.original_id2label)} original model labels from crf_config.json")
+        
+        # === DEBUG: Show first 5 labels ===
+        logger.info(f"Sample original labels: {dict(list(self.original_id2label.items())[:5])}")
+
+        # ------------------------------------------------------------------
+        # FLERT Configuration (optional, enables context-windowed inference)
+        # ------------------------------------------------------------------
+
+        flert_config_path = self.model_path / "flert_config.json"
+        flert_config = None
+        if flert_config_path.exists():
+            with open(flert_config_path, "r") as f:
+                flert_config = json.load(f)
+            logger.info("FLERT config loaded successfully")
+
+        # ------------------------------------------------------------------
+        # Custom configuration for mmbert
+        # ------------------------------------------------------------------
+        class MMBERTConfig(PretrainedConfig):
+            """Configuration class for the multilingual BERT‑based PII‑NER model."""
+            model_type = "mmbert"
+            is_composition = False
+
+        try:
+            AutoConfig.register("mmbert", MMBERTConfig)
+            logger.info("[AnonymizationEngine] Registered custom 'mmbert' config.")
+        except Exception as exc:
+            logger.debug(f"[AnonymizationEngine] Failed to register custom 'mmbert' config: {exc}")
+
+        # ------------------------------------------------------------------
+        # Model architecture – ModernBertCRF
+        # ------------------------------------------------------------------
+        class ModernBertCRF(nn.Module):
+            """Wraps a pretrained transformer backbone with linear head + CRF decoding."""
+
+            def __init__(
+                self,
+                base_model_name: str,
+                num_labels: int,
+                id2label: dict,
+                label2id: dict,
+                flert_config=None,
+            ):
+                super().__init__()
+                self.num_labels = num_labels
+                self.id2label = id2label
+                self.label2id = label2id
+                self.flert_config = flert_config
+
+                try:
+                    self.transformer = AutoModel.from_pretrained(
+                        base_model_name,
+                        local_files_only=True,
+                        ignore_mismatched_sizes=True,
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to load base model '{base_model_name}': {e}")
+                    raise
+
+                hidden_size = self.transformer.config.hidden_size
+                self.classifier = nn.Linear(hidden_size, num_labels)
+                self.dropout = nn.Dropout(0.1)
+                self.crf = CRF(num_labels, batch_first=True)
+
+            def forward(self, input_ids, attention_mask, labels=None, **kwargs):
+                outputs = self.transformer(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    **kwargs,
+                )
+                emissions = self.dropout(outputs.last_hidden_state)
+                logits = self.classifier(emissions)
+
+                if labels is not None:
+                    loss = -self.crf(logits, labels, mask=attention_mask.bool(), reduction="mean")
+                    return {"loss": loss, "logits": logits}
+                else:
+                    return {"logits": logits}
+
+            def decode(self, emissions, mask):
+                """Return the best tag sequence for each example in the batch."""
+                return self.crf.decode(emissions, mask=mask)
+
+        # ------------------------------------------------------------------
+        # Model Instantiation
+        # ------------------------------------------------------------------
+
+        local_base_model_path = self.model_path / crf_config["base_model_name"]
+        if not local_base_model_path.exists():
+            logger.warning(
+                f"Local base model not found at {local_base_model_path}. "
+                f"Trying HF name: {crf_config['base_model_name']}"
+            )
+            local_base_model_path = crf_config["base_model_name"]
+
+        self.model = ModernBertCRF(
+            base_model_name=local_base_model_path,
+            num_labels=crf_config["num_labels"],
+            id2label=self.original_id2label,
+            label2id=self.original_label2id,
+            flert_config=flert_config,
+        )
+
+        model_weights_path = self.model_path / "pytorch_model.bin"
+        state_dict = torch.load(
+            model_weights_path,
+            map_location=self.device,
+            weights_only=True,
+        )
+        self.model.load_state_dict(state_dict)
+        self.model.to(self.device)
+        self.model.eval()
+
+        # ------------------------------------------------------------------
+        # Tokenizer
+        # ------------------------------------------------------------------
+
+        try:
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                str(self.model_path),
+                local_files_only=True,
+                fix_mistral_regex=True,
+            )
+        except TypeError:
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                str(self.model_path),
+                local_files_only=True,
+            )
+
+        # ------------------------------------------------------------------
+        # Label Mapping
+        # ------------------------------------------------------------------
+
+        self.label_mapping = self._build_safe_label_mapping()
+        logger.info(f"✅ Built safe label mapping with {len(self.label_mapping)} entries")
+        
+        # === DEBUG: Show final label mapping sample ===
+        logger.info(f"Safe label mapping sample: {dict(list(self.label_mapping.items())[:10])}")
+        logger.info("✅ New DFKI-SLT model loaded successfully with FLERT support")
+
+    except Exception as e:
+        import traceback
+        logger.error(f"Failed to load multilingual_DialogPII_NER model: {e}")
+        logger.error(traceback.format_exc())
+        self.method = None
 
     def anonymize(self, text):
-        """Anonymizes text using FLERT-style context windowing."""
-        if not self.method or not self.model or not self.tokenizer:
-            return None, False, "Anonymization model not loaded"
+    """Anonymizes text using FLERT-style context windowing."""
+    if not self.method or not self.model or not self.tokenizer:
+        return None, False, "Anonymization model not loaded"
 
-        logger.info("Running anonymization with FLERT context windowing...")
+    logger.info("Running anonymization with FLERT context windowing...")
 
-        # 1. Split into Sentences (preserves original text)
-        sentences_data = split_dialogue_into_sentences(text)
-        
-        if not sentences_data:
-            return text, False, "No sentences detected"
+    # 1. Split into Sentences
+    sentences_data = split_dialogue_into_sentences(text)
+    
+    if not sentences_data:
+        return text, False, "No sentences detected"
 
-        sentences_tokens = [tokens for _, tokens, _ in sentences_data]
-        
-        # 2. Run Inference with CONTEXT WINDOW (uses predict_dialogue_with_context)
-        predictions = predict_dialogue_with_context(
-            sentences_tokens=sentences_tokens,
-            model=self.model,
-            tokenizer=self.tokenizer,
-            id_to_tag_map=self.label_mapping,
-            device=self.device,
-            context_window=2
-        )
+    # === DEBUG: Log input sentences ===
+    logger.info(f"Split text into {len(sentences_data)} sentence blocks")
+    for i, (speaker, tokens, _) in enumerate(sentences_data[:2]):
+        logger.info(f"  [{i}] {speaker}: {' '.join(tokens[:8])}... ({len(tokens)} tokens)")
 
-        # 3. Reconstruct Text (PRESERVES SPACING)
-        reconstructed_text = reconstruct_text_from_predictions(
-            sentences_data, 
-            predictions, 
-            {}  # ✓ Added speaker_map parameter
-        )
-        
-        # 4. Fix punctuation IMMEDIATELY after reconstruction
-        reconstructed_text = normalize_punctuation(reconstructed_text)
-        reconstructed_text = merge_adjacent_tags(reconstructed_text)
-        
-        # 5. Fix repeated words and spacing
-        reconstructed_text = re.sub(r'\b(\w+)\s+\1\b', r'\1', reconstructed_text)  # "that's that's" → "that's"
-        reconstructed_text = re.sub(r'\s+', ' ', reconstructed_text)  # Multiple spaces → single
-        reconstructed_text = reconstructed_text.strip()
+    sentences_tokens = [tokens for _, tokens, _ in sentences_data]
+    
+    # 2. Run Inference WITH CONTEXT WINDOW
+    predictions = predict_dialogue_with_context(
+        sentences_tokens=sentences_tokens,
+        model=self.model,
+        tokenizer=self.tokenizer,
+        id_to_tag_map=self.label_mapping,
+        device=self.device,
+        context_window=2
+    )
 
-        return reconstructed_text, True, "Success"
+    # === DEBUG: Log prediction results ===
+    for i, pred in enumerate(predictions[:3]):  # First 3 sentences
+        non_o_labels = [(j, tokens[j], l) for j, l in enumerate(pred) 
+                        if j < len(sentences_tokens[i]) and l not in ["O", ""]]
+        if non_o_labels:
+            logger.info(f"Sentence {i} ({len(pred)} tokens): Found {len(non_o_labels)} entities:")
+            for tok_idx, tok_text, tag in non_o_labels[:5]:
+                logger.info(f"  - '{tok_text}' → {tag}")
+        else:
+            logger.info(f"Sentence {i}: No entities detected")
+
+    # 3. Reconstruct Text
+    reconstructed_text = reconstruct_text_from_predictions(
+        sentences_data, 
+        predictions, 
+        {}
+    )
+    
+    # === DEBUG: Compare before/after ===
+    logger.info(f"Original length: {len(text)}, Anonymized length: {len(reconstructed_text)}")
+    
+    # 4-5. Punctuation + spacing fixes
+    reconstructed_text = normalize_punctuation(reconstructed_text)
+    reconstructed_text = merge_adjacent_tags(reconstructed_text)
+    reconstructed_text = re.sub(r'\b(\w+)\s+\1\b', r'\1', reconstructed_text)
+    reconstructed_text = re.sub(r'\s+', ' ', reconstructed_text)
+    reconstructed_text = reconstructed_text.strip()
+
+    # === DEBUG: Final check ===
+    if '[' in reconstructed_text and ']' in reconstructed_text:
+        anon_count = len(re.findall(r'\[[A-Z_]+\]', reconstructed_text))
+        logger.info(f"✅ Anonymization complete: {anon_count} entities replaced")
+    else:
+        logger.warning("⚠️ No anonymization tags found in output!")
+
+    return reconstructed_text, True, "Success"
 
 def generate_paraphrase(raw_dialogue, lang='DE', model="gpt-oss-120b", temperature=0.3):
     """
