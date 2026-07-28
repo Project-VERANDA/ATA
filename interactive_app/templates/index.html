@@ -880,42 +880,58 @@
                 whisperModelSelect.disabled = true;
                 transcriptionLanguageSelect.disabled = true;
                 updateStatus("Transcription in progress...", false);
-            
+
                 const formData = new FormData();
                 const fileToTranscribe = audioBlob || uploadedFile;
                 const fileName = audioBlob ? 'recording.webm' : uploadedFile.name;
-                
+
                 formData.append('audio', fileToTranscribe, fileName);
-                
+
                 const modelSize = whisperModelSelect.value;
                 formData.append('model_size', modelSize);
-                
+
                 const selectedLang = transcriptionLanguageSelect.value;
                 if (selectedLang !== 'auto') {
-                    const langCode = selectedLang.toLowerCase(); 
+                    const langCode = selectedLang.toLowerCase();
                     formData.append('language', langCode);
                 }
-                // If 'auto', we do NOT append 'language', so the backend defaults to None
-                
+
                 try {
                     const endpoint = audioBlob ? '/transcribe_recording' : '/upload';
                     const response = await fetch(endpoint, {
                         method: 'POST',
                         body: formData
                     });
-                    
-                    // ✅ Check content type first
+
                     const contentType = response.headers.get('content-type');
                     if (!contentType || !contentType.includes('application/json')) {
                         const text = await response.text();
                         console.error('Non-JSON response received:', text.substring(0, 200));
                         throw new Error(`Server returned ${response.status} with non-JSON content`);
                     }
-                    
+
                     const result = await response.json();
-                    
+
                     if (response.ok && result.success) {
-                        ...
+                        // ✅ COMPLETE CODE - NO "..." ALLOWED
+                        transcribedText.value = result.transcription || "";
+                        offsetData = result.offsets || [];
+                        audioName = result.audio_name;
+
+                        updateStatus("Transcription successful!", false);
+                        downloadOriginalBtn.disabled = false;
+                        anonymizeBtn.disabled = false;
+                        ttsContainer.classList.add('hidden');
+                        downloadBertBtn.disabled = true;
+                        downloadLlmBtn.disabled = true;
+                        downloadSpeechBtn.disabled = true;
+
+                        // Store values for later use
+                        window.lastTranscriptionData = {
+                            text: result.transcription,
+                            offsets: result.offsets,
+                            audio_name: result.audio_name
+                        };
                     } else {
                         throw new Error(result.error || "An unknown error occurred during transcription.");
                     }
@@ -924,13 +940,11 @@
                     updateStatus(`Transcription failed: ${error.message}`, true);
                 } finally {
                     showLoader(false);
-                    transcribeBtn.disabled = true;
+                    transcribeBtn.disabled = false;  // ✅ Fixed: should NOT be disabled
                     recordBtn.disabled = false;
                     fileInput.disabled = false;
                     whisperModelSelect.disabled = false;
                     transcriptionLanguageSelect.disabled = false;
-                    audioBlob = null;
-                    uploadedFile = null;
                 }
             }
 
