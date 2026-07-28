@@ -112,7 +112,7 @@ import torch
 from flask import Flask, render_template, request, jsonify, send_file
 
 app = Flask(__name__)
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
+app.config['MAX_CONTENT_LENGTH'] = 5 * 1024 * 1024 * 1024
 app.config['UPLOAD_FOLDER'] = 'uploads'
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
@@ -562,6 +562,15 @@ def handle_exception(error):
     """Catch-all for unhandled exceptions."""
     logger.error(f"Unhandled exception: {error}", exc_info=True)
     return jsonify({'error': 'Server error', 'message': str(error)}), 500
+@app.errorhandler(413)
+def request_entity_too_large(error):
+    """Handle file upload too large errors with JSON response."""
+    logger.warning(f"File too large: {request.content_length} bytes")
+    return jsonify({
+        'error': 'File too large',
+        'message': 'The uploaded audio file exceeds the 5 GB size limit.',
+        'max_size_gb': 5
+    }), 413
 
 # --- ROUTES ---
 
@@ -1225,14 +1234,14 @@ if __name__ == '__main__':
             cert_file, key_file = create_self_signed_cert()
             if cert_file and key_file:
                 logger.info("Starting server with HTTPS (self-signed certificate)")
-                app.run(debug=False, host='0.0.0.0', port=5001, ssl_context=(cert_file, key_file))
+                app.run(debug=False, host='0.0.0.0', port=5001, ssl_context=(cert_file, key_file), threaded=True)
             else:
                 logger.info("Starting server with HTTPS (ad-hoc certificate)")
-                app.run(debug=False, host='0.0.0.0', port=5001, ssl_context='adhoc')
+                app.run(debug=False, host='0.0.0.0', port=5001, ssl_context='adhoc', threaded=True)
         except Exception as e:
             logger.error(f"Failed to start HTTPS server: {e}")
             logger.info("Falling back to HTTP")
-            app.run(debug=False, host='0.0.0.0', port=5001)
+            app.run(debug=False, host='0.0.0.0', port=5001, threaded=True)
     else:
         logger.info("Starting server with HTTP")
-        app.run(debug=False, host='0.0.0.0', port=5001)
+        app.run(debug=False, host='0.0.0.0', port=5001, threaded=True)

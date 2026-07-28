@@ -36,6 +36,8 @@ pipeline/audios/
 pipeline/transcripts/
 pipeline/annonym/
 pipeline/logs/
+pipeline/videos/
+pipeline/LLM_Anon
 
 # Python cache
 __pycache__/
