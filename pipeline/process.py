@@ -1392,29 +1392,9 @@ def split_dialogue_into_sentences(text, nlp_pipeline=None):
     Returns:
         list of tuples: [(speaker_id, [token1, token2, ...]), ...]
     """
-    if nlp_pipeline is None:
-        nlp_pipeline = get_nlp_pipeline()
-    
     sentences_with_speakers = []
-    
-    # If no pipeline, fallback to simple regex split (less accurate)
-    if nlp_pipeline is None:
-        logger.warning("SpaCy not available. Using naive sentence splitting.")
-        lines = text.strip().split('\n')
-        for line in lines:
-            match = re.match(r"^(SPEAKER_\d+)\s*:\s*(.*)", line.strip())
-            if match:
-                speaker = match.group(1)
-                content = match.group(2)
-                # Naive split on period/exclamation/question
-                raw_sents = re.split(r'(?<=[.!?])\s+', content)
-                for sent in raw_sents:
-                    tokens = sent.split()
-                    if tokens:
-                        sentences_with_speakers.append((speaker, tokens))
-        return sentences_with_speakers
-
     lines = text.strip().split('\n')
+    
     for line in lines:
         line = line.strip()
         if not line:
@@ -1429,17 +1409,15 @@ def split_dialogue_into_sentences(text, nlp_pipeline=None):
         
         if not content:
             continue
-            
-        # Process with SpaCy
-        doc = nlp_pipeline(content)
         
-        for sent in doc.sents:
-            # Extract tokens, filtering out spaces
-            tokens = [tok.text for tok in sent if not tok.is_space]
-            if tokens:
-                sentences_with_speakers.append((speaker, tokens))
+        # Use original text directly - don't split into sentences!
+        # The NER model needs full context for person detection
+        tokens = content.split()
+        if tokens:
+            sentences_with_speakers.append((speaker, tokens, content))  # Keep original text!
                 
     return sentences_with_speakers
+
 
 def merge_adjacent_tags(text):
     # split into tags, whitespace, and normal text
@@ -1480,46 +1458,45 @@ def merge_adjacent_tags(text):
 def reconstruct_text_from_predictions(original_sentences, predictions, speaker_map):
     """
     Reconstructs the text from predictions.
-    FIXED: Merges consecutive sentences from the SAME speaker into a single block.
+    Merges consecutive sentences from the SAME speaker into a single block.
     """
     reconstructed_blocks = []
     
     current_speaker = None
     current_text_parts = []
 
-    for i, (speaker, tokens) in enumerate(original_sentences):
-        # Get predictions for this sentence
+    for i, (speaker, tokens, original_text) in enumerate(original_sentences):
         labels = predictions[i] if i < len(predictions) else []
         
-        reconstructed_words = []
+        # Use ORIGINAL text instead of rejoining tokens
+        # Only replace PII spans, keep everything else intact
         
-        # Align tokens with labels
-        for w_idx, word in enumerate(tokens):
-            tag = labels[w_idx] if w_idx < len(labels) else "O"
-            
-            if not tag or tag == "O":
-                reconstructed_words.append(word)
-            else:
-                reconstructed_words.append(tag)
+        reconstructed_text = original_text
         
-        sentence_text = " ".join(reconstructed_words)
+        # Work backwards to avoid index shifts when replacing
+        for w_idx in reversed(range(len(tokens))):
+            if w_idx < len(labels) and labels[w_idx] not in ["O", ""]:
+                tag = labels[w_idx]
+                word = tokens[w_idx]
+                # Replace word with tag
+                reconstructed_text = re.sub(
+                    r'\b' + re.escape(word) + r'\b', 
+                    tag, 
+                    reconstructed_text,
+                    count=1
+                )
         
         # --- MERGING LOGIC ---
         if speaker == current_speaker:
-            # Same speaker: append to current block with a space
-            current_text_parts.append(sentence_text)
+            current_text_parts.append(reconstructed_text)
         else:
-            # Different speaker: finalize previous block if it exists
             if current_speaker and current_text_parts:
-                # Join the parts with a space to form one continuous paragraph
                 full_text = " ".join(current_text_parts)
                 reconstructed_blocks.append(f"{current_speaker}: {full_text}")
             
-            # Start new block
             current_speaker = speaker
-            current_text_parts = [sentence_text]
+            current_text_parts = [reconstructed_text]
 
-    # Append the final block
     if current_speaker and current_text_parts:
         full_text = " ".join(current_text_parts)
         reconstructed_blocks.append(f"{current_speaker}: {full_text}")
@@ -1533,8 +1510,7 @@ def predict_sentences(sentences_tokens, model, tokenizer, id_to_tag_map, device=
     """
     all_predictions = []
     
-    for tokens in sentences_tokens:
-        # Tokenize
+    for sentence_idx, tokens in enumerate(sentences_tokens):
         enc = tokenizer(
             tokens, 
             is_split_into_words=True,
@@ -1545,38 +1521,30 @@ def predict_sentences(sentences_tokens, model, tokenizer, id_to_tag_map, device=
         
         word_ids = enc.word_ids(batch_index=0)
         
-        # Inference
         with torch.no_grad():
             outputs = model(**enc)
             emissions = outputs["logits"]
             mask = enc["attention_mask"].bool()
             preds = model.decode(emissions, mask)[0]
         
-        # Map predictions to tokens
+        # FIXED: Initialize all labels to "O" first
         word_labels = ["O"] * len(tokens)
-        seen = set()
+        
+        # FIXED: Track which token indices we've actually assigned
+        assigned_indices = set()
         
         for idx, wid in enumerate(word_ids):
-            if wid is None or wid in seen:
+            if wid is None:
                 continue
-            seen.add(wid)
-            
-            # Map prediction ID to tag
+            if wid in assigned_indices:
+                continue
+            if wid >= len(tokens):
+                continue
+                
+            assigned_indices.add(wid)
             pred_id = preds[idx]
-            # Ensure key is string if map uses strings
-            key = str(pred_id)
-            tag = id_to_tag_map.get(key, "O")
-            
+            tag = id_to_tag_map.get(str(pred_id), "O")
             word_labels[wid] = tag
-        if len(word_labels) != len(tokens):
-            logger.warning(f"Alignment Mismatch in sentence {i}: Tokens={len(tokens)}, Labels={len(word_labels)}")
-            logger.warning(f"Tokens: {tokens[:10]}...")
-            logger.warning(f"Labels: {word_labels[:10]}...")
-            # Force alignment to prevent reconstruction crash
-            if len(word_labels) < len(tokens):
-                word_labels.extend(["O"] * (len(tokens) - len(word_labels)))
-            else:
-                word_labels = word_labels[:len(tokens)]
         
         all_predictions.append(word_labels)
         
@@ -1905,43 +1873,46 @@ class AnonymizationEngine:
 
     def anonymize(self, text):
         """Anonymizes text using FLERT-style context windowing."""
-        if not self.method or not self.model or not self.tokenizer:
-            return None, False, "Anonymization model not loaded"
+    if not self.method or not self.model or not self.tokenizer:
+        return None, False, "Anonymization model not loaded"
 
-        logger.info("Running anonymization with FLERT context windowing...")
+    logger.info("Running anonymization with FLERT context windowing...")
 
-        # 1. Split into Sentences (returns list of (speaker, tokens))
-        sentences_data = split_dialogue_into_sentences(text)
-        
-        if not sentences_data:
-            return text, False, "No sentences detected"
+    # 1. Split into Sentences (preserves original text)
+    sentences_data = split_dialogue_into_sentences(text)
+    
+    if not sentences_data:
+        return text, False, "No sentences detected"
 
-        # Extract token lists for prediction
-        sentences_tokens = [tokens for _, tokens in sentences_data]
-        
-        # 2. Run Inference WITH CONTEXT WINDOWING
-        try:
-            # Use enhanced FLERT prediction with context
-            predictions = predict_dialogue_with_context(
-                sentences_tokens=sentences_tokens,
-                model=self.model,
-                tokenizer=self.tokenizer,
-                id_to_tag_map=self.label_mapping,
-                device=self.device,
-                context_window=1  # Include 1 sentence before/after
-            )
-        except Exception as e:
-            logger.error(f"Inference failed: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-            return text, False, str(e)
+    sentences_tokens = [tokens for _, tokens, _ in sentences_data]
+    
+    # 2. Run Inference with CONTEXT WINDOW (uses predict_dialogue_with_context)
+    predictions = predict_dialogue_with_context(
+        sentences_tokens=sentences_tokens,
+        model=self.model,
+        tokenizer=self.tokenizer,
+        id_to_tag_map=self.label_mapping,
+        device=self.device,
+        context_window=2
+    )
 
-        # 3. Reconstruct Text
-        reconstructed_text = reconstruct_text_from_predictions(sentences_data, predictions, {})
-        reconstructed_text = normalize_punctuation(reconstructed_text)
-        reconstructed_text = merge_adjacent_tags(reconstructed_text)
+    # 3. Reconstruct Text (PRESERVES SPACING)
+    reconstructed_text = reconstruct_text_from_predictions(
+        sentences_data, 
+        predictions, 
+        {}  # ✓ Added speaker_map parameter
+    )
+    
+    # 4. Fix punctuation IMMEDIATELY after reconstruction
+    reconstructed_text = normalize_punctuation(reconstructed_text)
+    reconstructed_text = merge_adjacent_tags(reconstructed_text)
+    
+    # 5. Fix repeated words and spacing
+    reconstructed_text = re.sub(r'\b(\w+)\s+\1\b', r'\1', reconstructed_text)  # "that's that's" → "that's"
+    reconstructed_text = re.sub(r'\s+', ' ', reconstructed_text)  # Multiple spaces → single
+    reconstructed_text = reconstructed_text.strip()
 
-        return reconstructed_text, True, "Success"
+    return reconstructed_text, True, "Success"
 
 def generate_paraphrase(raw_dialogue, lang='DE', model="gpt-oss-120b", temperature=0.3):
     """
