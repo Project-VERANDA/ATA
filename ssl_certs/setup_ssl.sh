@@ -123,16 +123,20 @@ backup_self_generated_cert() {
 # MAIN LOGIC
 #-------------------------------------------------------------------------------
 
+
 validate_certificate() {
     if [[ ! -f "$CERT_FILE" || ! -f "$KEY_FILE" ]]; then
         return 1
     fi
     
-    # Check key matches cert
-    if ! openssl x509 -noout -modulus -in "$CERT_FILE" 2>/dev/null | \
-       openssl md5 2>/dev/null | \
-       openssl md5 -compare <(openssl rsa -noout -modulus -in "$KEY_FILE" 2>/dev/null | openssl md5); then
+    # Check key matches cert using proper OpenSSL comparison
+    local cert_modulus=$(openssl x509 -noout -modulus -in "$CERT_FILE" 2>/dev/null | openssl md5 | awk '{print $NF}')
+    local key_modulus=$(openssl rsa -noout -modulus -in "$KEY_FILE" 2>/dev/null | openssl md5 | awk '{print $NF}')
+    
+    if [[ "$cert_modulus" != "$key_modulus" ]]; then
         print_error "Certificate and key do not match!"
+        print_info "Cert MD5: $cert_modulus"
+        print_info "Key MD5:  $key_modulus"
         return 1
     fi
     
