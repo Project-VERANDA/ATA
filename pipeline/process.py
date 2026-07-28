@@ -1587,71 +1587,66 @@ class AnonymizationEngine:
             self._load_model()
 
     def _build_safe_label_mapping(self):
-        """
-        Constructs a dynamic mapping from model labels to anonymization tags.
-        FIXED: Handles both CITY/LOC_CITY variants and NAME/PERSON variants.
-        """
-        all_target_tags = {
-            'PERSON': '[PERSON]',
-            'PERSON_EMAIL': '[EMAIL]',
-            'PERSON_SOCIAL_RELATION': '[NAME_RELATIVE]',
-            'ORG': '[ORGANISATION]',
-            'CITY': '[CITY]',                    # ★ NEW: Both B-CITY and B-LOC_CITY
-            'LOC_CITY': '[CITY]',                # Keep for backward compatibility
-            'LOC_COUNTRY': '[COUNTRY]',
-            'LOC_STREET': '[STREET]',
-            'LOC_ZIP': '[ZIP]',
-            'LOC_HOUSENUMBER': '[HOUSENUMBER]',
-            'LOC_OTHER': '[LOCATION]',
-            'DATETIME': '[DATETIME]',
-            'DATETIME_AGE': '[AGE]',
-            'CODE': '[CODE]',
-            'CODE_PHONE': '[PHONE]',
-            'CODE_URL': '[URL]',
-            'PROFESSION': '[PROFESSION]',
-            'PRODUCT': '[PRODUCT]',
-            'QUANTITY': '[QUANTITY]',
-            'MISC': '[MISC]',
-            'O': ''                              # "O" means keep original word
-        }
+    """
+    Constructs a dynamic mapping from model labels to anonymization tags.
+    FIXED: Handles both CITY/LOC_CITY variants and NAME/PERSON variants.
+    """
+    all_target_tags = {
+        'PERSON': '[PERSON]',
+        'PERSON_EMAIL': '[EMAIL]',
+        'PERSON_SOCIAL_RELATION': '[NAME_RELATIVE]',
+        'ORG': '[ORGANISATION]',
+        'CITY': '[CITY]',
+        'LOC_CITY': '[CITY]',
+        'LOC_COUNTRY': '[COUNTRY]',
+        'LOC_STREET': '[STREET]',
+        'LOC_ZIP': '[ZIP]',
+        'LOC_HOUSENUMBER': '[HOUSENUMBER]',
+        'LOC_OTHER': '[LOCATION]',
+        'DATETIME': '[DATETIME]',
+        'DATETIME_AGE': '[AGE]',
+        'CODE': '[CODE]',
+        'CODE_PHONE': '[PHONE]',
+        'CODE_URL': '[URL]',
+        'PROFESSION': '[PROFESSION]',
+        'PRODUCT': '[PRODUCT]',
+        'QUANTITY': '[QUANTITY]',
+        'MISC': '[MISC]',
+        'NAME': '[PERSON]',
+        'O': ''
+    }
 
-        active_tags = set(all_target_tags.keys())
+    active_tags = set(all_target_tags.keys())
 
-        if self.include_tags:
-            include_set = set(t.upper() for t in self.include_tags)
-            active_tags = active_tags.intersection(include_set)
-            logger.info(f"Restricting anonymization to specific tags: {active_tags}")
-        
-        if self.exclude_tags:
-            exclude_set = set(t.upper() for t in self.exclude_tags)
-            active_tags = active_tags.difference(exclude_set)
-            logger.info(f"Excluding tags: {exclude_set}")
+    if self.include_tags:
+        include_set = set(t.upper() for t in self.include_tags)
+        active_tags = active_tags.intersection(include_set)
+        logger.info(f"Restricting anonymization to specific tags: {active_tags}")
+    
+    if self.exclude_tags:
+        exclude_set = set(t.upper() for t in self.exclude_tags)
+        active_tags = active_tags.difference(exclude_set)
+        logger.info(f"Excluding tags: {exclude_set}")
 
-        mapping = {}
-        unmapped_labels = []
+    mapping = {}
+    
+    for label_id, label_name in self.original_id2label.items():
+        clean_label = label_name.replace("B-", "").replace("I-", "").replace("S-", "").replace("E-", "")
+        clean_label_upper = clean_label.upper()
         
-        for label_id, label_name in self.original_id2label.items():
-            clean_label = label_name.replace("B-", "").replace("I-", "").replace("S-", "").replace("E-", "")
-            clean_label_upper = clean_label.upper()
-            
-            if clean_label_upper in active_tags:
-                mapping[str(label_id)] = all_target_tags[clean_label_upper]
-            else:
-                mapping[str(label_id)] = ""
-                unmapped_labels.append((label_id, label_name))
-        
-        logger.info(f"Built label mapping with {len(mapping)} entries.")
-        
-        # Log what was mapped
-        logger.info(f"Sample mappings: {dict(list(mapping.items())[:10])}")
-        
-        # Log any unexpected unmapped labels (excluding O, DISEASE which we intentionally don't anonymize)
-        ignored = {'O', 'DISEASE'}
-        suspicious = [(lid, lname) for lid, lname in unmapped_labels if lname not in ignored]
-        if suspicious:
-            logger.warning(f"⚠️ Unmapped labels (may miss PII): {suspicious}")
-        
-        return mapping
+        if clean_label_upper in active_tags:
+            mapping[str(label_id)] = all_target_tags[clean_label_upper]
+        else:
+            mapping[str(label_id)] = ""
+    
+    logger.info(f"Built label mapping with {len(mapping)} entries.")
+    logger.info(f"Sample mappings: {dict(list(mapping.items())[:15])}")
+    
+    # Log any labels that map to empty (expecting some: O, DISEASE, etc.)
+    empty_mappings = [(k, v) for k, v in self.original_id2label.items() if mapping.get(str(k), '') == '']
+    logger.info(f"Labels mapping to empty (kept): {[(l, n) for l, n in empty_mappings if n not in ['O', 'B-DISEASE', 'I-DISEASE']]}")
+    
+    return mapping
 
     def _debug_label_mapping(self):
         """Debug helper to verify label mapping."""
