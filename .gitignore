@@ -40,7 +40,11 @@ pipeline/videos/
 pipeline/LLM-Anon/
 
 # Unrelated files
-*.csvrm pip	Dok	
+*.csv
+TextAnonym.py
+
+# Log files
+pipeline/anon_session_*
 
 # Python cache
 __pycache__/
