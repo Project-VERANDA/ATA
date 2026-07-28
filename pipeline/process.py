@@ -1575,7 +1575,7 @@ class AnonymizationEngine:
         self.method = method
         self.level = level
         # FIXED: Point to TRAINED checkpoint (not untrained default)
-        self.model_path = model_path or (MODEL_FOLDER / "mmbert_multilingual_pii_ner")
+        self.model_path = model_path or (MODEL_FOLDER / "multilingual_DialogPII_NER")
         self.include_tags = include_tags
         self.exclude_tags = exclude_tags
         self.model = None
