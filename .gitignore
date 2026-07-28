@@ -40,6 +40,9 @@ pipeline/LLM-Anon/
 # SSL files
 key.pem
 cert.pem
+ssl_certs/server.key
+ssl_certs/.generated_by_ata
+ssl_certs/.backups/
 
 # Unrelated files
 *.csv
