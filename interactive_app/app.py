@@ -108,7 +108,7 @@ BERT_ANONYMIZER_AVAILABLE = True
 DEFAULT_MODEL = 'bert-base-ner'
 TTS_AVAILABLE = TTS_ENABLED
 
-SSL_CERT_DIR = PROJECT_ROOT / "ssl_certs"
+SSL_CERT_DIR = project_root / "ssl_certs"
 SSL_CERT_FILE = SSL_CERT_DIR / "server.crt"
 SSL_KEY_FILE = SSL_CERT_DIR / "server.key"
 SSL_MARKER_FILE = SSL_CERT_DIR / ".generated_by_ata"
