@@ -39,6 +39,9 @@ pipeline/logs/
 pipeline/videos/
 pipeline/LLM-Anon/
 
+# SSL files
+ssl_certs/
+
 # Unrelated files
 *.csv
 TextAnonym.py
