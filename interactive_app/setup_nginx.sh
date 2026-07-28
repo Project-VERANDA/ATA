@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #===============================================================================
 # Nginx Configuration Setup for Speech Anonymizer
 # Uses unified SSL certificates from ATA/ssl_certs/

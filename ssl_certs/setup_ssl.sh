@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #===============================================================================
 # SSL Certificate Management for Speech Anonymizer
 # Features:
@@ -8,7 +8,7 @@
 #   - Self-contained in ATA repo
 #   - Works for both development and Docker deployments
 #===============================================================================
-
+chmod +x "$0"
 set -e
 
 #-------------------------------------------------------------------------------
