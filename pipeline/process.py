@@ -36,6 +36,12 @@ from pathlib import Path
 from openai import OpenAI
 from dotenv import load_dotenv
 from typing import Optional, Dict, List
+import logging
+from pathlib import Path
+import json
+import torch.nn as nn
+from transformers import AutoConfig, AutoModel, PretrainedConfig
+from torchcrf import CRF
 
 # Import torch FIRST, configure TF32 BEFORE importing pyannote/whisperx
 import torch
@@ -56,6 +62,7 @@ import whisperx
 import ffmpeg
 
 load_dotenv()
+logger = logging.getLogger(__name__)
 
 # GPU Detection Check
 
@@ -1748,91 +1755,84 @@ class AnonymizationEngine:
             # and allows AutoModel to resolve the architecture correctly.
             # ------------------------------------------------------------------
 
+            # ------------------------------------------------------------------
+            # Custom configuration for mmbert
+            # ------------------------------------------------------------------
+            class MMBERTConfig(PretrainedConfig):
+                """Configuration class for the multilingual BERT‑based PII‑NER model."""
+                model_type = "mmbert"
+                is_composition = False
+
             try:
-                AutoConfig.register("mmbert", type("MMBERTConfig", (), {
-                    "model_type": "mmbert",
-                    "is_composition": False,
-                }))
-            except Exception:
-                pass  # Already registered or incompatible transformers version
+                AutoConfig.register("mmbert", MMBERTConfig)
+                logger.info("[AnonymizationEngine] Registered custom 'mmbert' config.")
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(
+                    f"[AnonymizationEngine] Failed to register custom 'mmbert' config: {exc}"
+                )
 
             # ------------------------------------------------------------------
-            # Model Architecture: ModernBERT + Linear Classifier + CRF Decoder
+            # Model architecture – ModernBertCRF
             # ------------------------------------------------------------------
-
             class ModernBertCRF(nn.Module):
                 """
-                Wraps a pretrained transformer backbone with a linear
-                classification head and a CRF decoding layer for sequence
-                labelling of PII entities in dialogue transcripts.
+                Wraps a pretrained transformer backbone with:
+                * a linear classification head
+                * a CRF decoding layer
+
+                Designed for sequence‑labelling of PII entities in dialogue transcripts.
                 """
 
-                def __init__(self, base_model_name, num_labels, id2label,
-                             label2id, flert_config=None):
+                def __init__(
+                    self,
+                    base_model_name: str,
+                    num_labels: int,
+                    id2label: dict,
+                    label2id: dict,
+                    flert_config=None,
+                ):
                     super().__init__()
                     self.num_labels = num_labels
                     self.id2label = id2label
                     self.label2id = label2id
                     self.flert_config = flert_config
 
-                    # Load the transformer backbone.  The base model
-                    # checkpoint may contain task-specific head weights
-                    # (head.dense.*, decoder.*, head.norm.*) that are not
-                    # part of the base AutoModel architecture.  Passing
-                    # ignore_mismatched_sizes=True tells transformers to
-                    # drop these unexpected keys silently instead of
-                    # logging UNEXPECTED warnings.
+                    # Load the transformer backbone.
                     try:
                         self.transformer = AutoModel.from_pretrained(
                             base_model_name,
                             local_files_only=True,
                             ignore_mismatched_sizes=True,
                         )
-                    except TypeError:
-                        # Older transformers versions do not support
-                        # ignore_mismatched_sizes; fall back to plain load.
-                        self.transformer = AutoModel.from_pretrained(
-                            base_model_name,
-                            local_files_only=True,
-                        )
                     except Exception as e:
-                        logger.warning(
-                            f"Could not load local base model '{base_model_name}', "
-                            f"trying HF hub: {e}"
-                        )
-                        self.transformer = AutoModel.from_pretrained(base_model_name)
+                        logger.error(f"Failed to load base model '{base_model_name}': {e}")
+                        raise
 
                     hidden_size = self.transformer.config.hidden_size
+                    # Linear classification head
                     self.classifier = nn.Linear(hidden_size, num_labels)
+                    # Optional dropout – tweak the rate if needed
                     self.dropout = nn.Dropout(0.1)
+                    # CRF layer for structured predictions
                     self.crf = CRF(num_labels, batch_first=True)
 
                 def forward(self, input_ids, attention_mask, labels=None, **kwargs):
-                    # Some tokenizers emit token_type_ids; the ModernBERT
-                    # backbone does not accept them, so strip them.
-                    kwargs.pop("token_type_ids", None)
                     outputs = self.transformer(
                         input_ids=input_ids,
                         attention_mask=attention_mask,
+                        **kwargs,
                     )
-                    sequence_output = self.dropout(outputs.last_hidden_state)
-                    emissions = self.classifier(sequence_output)
+                    emissions = self.dropout(outputs.last_hidden_state)
+                    logits = self.classifier(emissions)
 
                     if labels is not None:
-                        mask = attention_mask.bool()
-                        # CRF requires non-negative label IDs; -100 padding
-                        # tokens must be remapped to a valid index (0).
-                        labels_for_crf = labels.clone()
-                        labels_for_crf[labels_for_crf == -100] = 0
-                        loss = -self.crf(
-                            emissions, labels_for_crf,
-                            mask=mask, reduction='mean',
-                        )
-                        return {"loss": loss, "logits": emissions}
+                        loss = -self.crf(logits, labels, mask=attention_mask.bool(), reduction="mean")
+                        return {"loss": loss, "logits": logits}
                     else:
-                        return {"logits": emissions}
+                        return {"logits": logits}
 
                 def decode(self, emissions, mask):
+                    """Return the best tag sequence for each example in the batch."""
                     return self.crf.decode(emissions, mask=mask)
 
             # ------------------------------------------------------------------
