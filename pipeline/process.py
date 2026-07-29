@@ -1796,73 +1796,83 @@ class AnonymizationEngine:
         return sentences_with_speakers
 
     def predict_dialogue_with_context(self, sentences_tokens, context_window=2):
-        """
-        Predicts NER labels using FLERT-style context windowing.
-        Matches the official HuggingFace inference pattern exactly.
-        """
-        sep_token = self.tokenizer.sep_token if hasattr(self.tokenizer, 'sep_token') else '[SEP]'
-        use_sep_marker = True
-        all_predictions = []
+    """
+    Predicts NER labels using FLERT-style context windowing.
+    FIXED: Proper offset tracking + subword aggregation.
+    """
+    from collections import Counter
+    from collections import defaultdict
+    
+    sep_token = self.tokenizer.sep_token if hasattr(self.tokenizer, 'sep_token') else '[SEP]'
+    all_predictions = []
 
-        for i, target_tokens in enumerate(sentences_tokens):
-            # Build context window
-            left_ctx = sentences_tokens[max(0, i - context_window):i]
-            right_ctx = sentences_tokens[i + 1:i + 1 + context_window]
+    for i, target_tokens in enumerate(sentences_tokens):
+        # Build context window
+        left_ctx = sentences_tokens[max(0, i - context_window):i]
+        right_ctx = sentences_tokens[i + 1:i + 1 + context_window]
 
-            # Flatten tokens with SEP markers
-            flat_tokens = []
-            for ctx_sent in left_ctx:
+        # Flatten tokens with SEP markers
+        flat_tokens = []
+        for ctx_sent in left_ctx:
+            flat_tokens.extend(ctx_sent)
+            flat_tokens.append(sep_token)
+
+        # Record target boundaries
+        tgt_start_idx = len(flat_tokens)
+        flat_tokens.extend(target_tokens)
+        tgt_end_idx = len(flat_tokens)
+
+        # Add right context
+        if right_ctx:
+            flat_tokens.append(sep_token)
+            for ctx_sent in right_ctx:
                 flat_tokens.extend(ctx_sent)
-                if use_sep_marker:
-                    flat_tokens.append(sep_token)
 
-            # Record target boundaries
-            tgt_start_idx = len(flat_tokens)
-            flat_tokens.extend(target_tokens)
-            tgt_end_idx = len(flat_tokens)
+        # Tokenize
+        enc = self.tokenizer(
+            flat_tokens,
+            is_split_into_words=True,
+            return_tensors="pt",
+            truncation=False
+        ).to(self.device)
 
-            # Add right context
-            if right_ctx:
-                if use_sep_marker:
-                    flat_tokens.append(sep_token)
-                for ctx_sent in right_ctx:
-                    flat_tokens.extend(ctx_sent)
+        word_ids = enc.word_ids(batch_index=0)
 
-            # Tokenize
-            enc = self.tokenizer(
-                flat_tokens,
-                is_split_into_words=True,
-                return_tensors="pt",
-                truncation=False
-            ).to(self.device)
+        # Run inference
+        with torch.no_grad():
+            outputs = self.model(**enc)
+            emissions = outputs["logits"]
+            mask = enc["attention_mask"].bool()
+            preds = self.model.decode(emissions, mask)[0]
 
-            word_ids = enc.word_ids(batch_index=0)
+        # STEP 1: Collect subword predictions grouped by word ID
+        word_predictions = defaultdict(list)
+        for idx, wid in enumerate(word_ids):
+            if wid is None or wid < tgt_start_idx or wid >= tgt_end_idx:
+                continue
+            pred_id = preds[idx]
+            tag = self.label_mapping.get(str(pred_id), "O")
+            target_position = wid - tgt_start_idx
+            if 0 <= target_position < len(target_tokens):
+                word_predictions[target_position].append(tag)
 
-            # Run inference
-            with torch.no_grad():
-                outputs = self.model(**enc)
-                emissions = outputs["logits"]
-                mask = enc["attention_mask"].bool()
-                preds = self.model.decode(emissions, mask)[0]
+        # STEP 2: Aggregate subword predictions (majority vote)
+        target_labels = ["O"] * len(target_tokens)
+        for pos in range(len(target_tokens)):
+            if pos in word_predictions and word_predictions[pos]:
+                votes = word_predictions[pos]
+                # Use most frequent non-"O" label, or "O" if all are "O"
+                non_o_votes = [v for v in votes if v != "O"]
+                if non_o_votes:
+                    target_labels[pos] = Counter(non_o_votes).most_common(1)[0][0]
+                else:
+                    target_labels[pos] = "O"
+            else:
+                target_labels[pos] = "O"
 
-            # Extract predictions for target sentence only
-            target_labels = ["O"] * len(target_tokens)
-            seen_word_indices = set()
+        all_predictions.append(target_labels)
 
-            for idx, wid in enumerate(word_ids):
-                if wid is None or wid in seen_word_indices:
-                    continue
-
-                if tgt_start_idx <= wid < tgt_end_idx:
-                    pred_id = preds[idx]
-                    # Map from model label ID to anonymization tag
-                    tag = self.label_mapping.get(str(pred_id), "O")
-                    target_labels[wid - tgt_start_idx] = tag
-                    seen_word_indices.add(wid)
-
-            all_predictions.append(target_labels)
-
-        return all_predictions
+    return all_predictions
 
     def reconstruct_text_from_predictions(self, original_sentences, predictions):
         """Reconstructs text preserving speaker structure and original spacing."""
