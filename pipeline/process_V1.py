@@ -1513,7 +1513,7 @@ class AnonymizationEngine:
                  include_tags=None, exclude_tags=None):
         self.method = method
         self.level = level
-        self.model_path = model_path or (MODEL_FOLDER / "mmbert_multilingual_pii_ner")
+        self.model_path = model_path or (MODEL_FOLDER / "multilingual_DialogPII_NER")
         self.include_tags = include_tags
         self.exclude_tags = exclude_tags
         self.model = None
