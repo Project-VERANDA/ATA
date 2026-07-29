@@ -1792,7 +1792,7 @@ class AnonymizationEngine:
     def predict_dialogue_with_context(self, sentences_tokens, context_window=2):
         """
         Predicts NER labels using FLERT-style context windowing.
-        FIXED: Proper offset tracking + subword aggregation.
+        FIXED: Proper offset tracking + subword aggregation + FIRST SENTENCE HANDLING.
         """
         from collections import Counter
         from collections import defaultdict
@@ -1801,8 +1801,12 @@ class AnonymizationEngine:
         all_predictions = []
 
         for i, target_tokens in enumerate(sentences_tokens):
-            # Build context window
-            left_ctx = sentences_tokens[max(0, i - context_window):i]
+            # FIX: Add dummy left context for first sentence to stabilize tokenization
+            if i == 0:
+                left_ctx = [[]]  # Dummy empty sentence with SEP
+            else:
+                left_ctx = sentences_tokens[max(0, i - context_window):i]
+            
             right_ctx = sentences_tokens[i + 1:i + 1 + context_window]
 
             # Flatten tokens with SEP markers
@@ -1916,6 +1920,21 @@ class AnonymizationEngine:
                 sentences_tokens=sentences_tokens,
                 context_window=context_window
             )
+            
+            # DEBUG: Log predictions per sentence
+            logger.info("=== PREDICTION DEBUG ===")
+            for i, (speaker, tokens, original_text) in enumerate(sentences_data):
+                labels = predictions[i] if i < len(predictions) else ["O"] * len(tokens)
+                logger.info(f"Sentence {i}: {speaker}")
+                logger.info(f"  Tokens: {tokens}")
+                logger.info(f"  Labels: {labels}")
+                
+                # Show "nadine" detection specifically
+                for j, (tok, lab) in enumerate(zip(tokens, labels)):
+                    if tok.lower() == "nadine":
+                        logger.info(f"  ⚠️  'nadine' at position {j}: TAG={lab}")
+            logger.info("========================")
+            
         except Exception as e:
             logger.error(f"Inference failed: {e}")
             import traceback
