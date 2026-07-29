@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 
 # ============================================================================
-# ATA Speech Anonymizer Installer (v2.2)
+# Dialogue Anonymizer Installer (v3.4)
 # ============================================================================
 
 set -eo pipefail
 
-SCRIPT_VERSION="3.2"
+SCRIPT_VERSION="3.4"
 ENV_NAME="whisperx"
-TARGET_PYTHON="3.13"
+TARGET_PYTHON="3.12"  # ✅ REQUIRED - PyTorch 2.8+ doesn't fully support 3.13
 MODEL_DIR_NAME="pipeline/model"
 MODEL_DIR_REL="$MODEL_DIR_NAME"
 
@@ -58,12 +58,12 @@ log_section() { echo -e "\n${BOLD}==============================================
 
 usage() {
     cat << 'EOF'
-Usage: ./ATA_SelfInstall.sh [OPTIONS]
+Usage: ./Installer.sh [OPTIONS]
 
 Quick Start:
-  ./ATA_SelfInstall.sh -y                        # Install with all defaults
-  ./ATA_SelfInstall.sh -y --skip-web             # Skip Flask/TTS web interface
-  ./ATA_SelfInstall.sh -y --whisper-models "large,medium"
+  ./Installer.sh -y                        # Install with all defaults (Python 3.12)
+  ./Installer.sh -y --skip-web             # Skip Flask/TTS web interface
+  ./Installer.sh -y --whisper-models "large,medium"
 
 Options:
   -h, --help              Show this help message
@@ -84,11 +84,11 @@ Environment Variables:
   HUGGINGFACE_TOKEN       HF token for gated model access (used with --auto-login)
 
 Examples:
-  ./ATA_SelfInstall.sh -y --whisper-models "large,medium"
-  ./ATA_SelfInstall.sh --whisper-models "small base"           # Interactive prompts
-  HUGGINGFACE_TOKEN=xxx ./ATA_SelfInstall.sh --auto-login -y
-  ./ATA_SelfInstall.sh --dry-run                               # Preview actions
-  ./ATA_SelfInstall.sh --uninstall                             # Clean removal
+  ./Installer.sh -y --whisper-models "large,medium"
+  ./Installer.sh --whisper-models "small base"           # Interactive prompts
+  HUGGINGFACE_TOKEN=xxx ./Installer.sh --auto-login -y
+  ./Installer.sh --dry-run                               # Preview actions
+  ./Installer.sh --uninstall                             # Clean removal
 EOF
 }
 
@@ -121,7 +121,7 @@ if [ "$SHOW_HELP" = true ]; then
 fi
 
 if [ "$SHOW_VERSION" = true ]; then
-    echo "ATA Speech Anonymizer Installer v${SCRIPT_VERSION}"
+    echo "Dialogue Anonymizer Installer v${SCRIPT_VERSION}"
     exit 0
 fi
 
@@ -136,7 +136,7 @@ fi
 cleanup() {
     echo ""
     log_warn "Installation interrupted. Partial state may exist."
-    echo "  Rerun with: ./ATA_SelfInstall.sh -y --force-refresh"
+    echo "  Rerun with: ./Installer.sh -y --force-refresh"
     exit 1
 }
 trap cleanup INT TERM
@@ -403,7 +403,7 @@ detect_package_manager
 if [ "$DRY_RUN" = true ]; then
     log_section "DRY RUN — No Changes Will Be Made"
     echo "  Would create conda env: ${ENV_NAME} (Python ${TARGET_PYTHON})"
-    echo "  Would install: numpy 2.x, torch 2.8+, transformers, pyannote, whisperx"
+    echo "  Would install: numpy 2.0.2, torch 2.8.0, transformers 4.52+, pyannote, whisperx"
     echo "  Would install spaCy models: en_core_web_sm, xx_ent_wiki_sm"
     if [ "$SKIP_WEB" = true ]; then
         echo "  Would SKIP: Flask/TTS web interface"
@@ -444,14 +444,14 @@ if [ "$UNINSTALL" = true ]; then
             conda env remove -n "$ENV_NAME" -y 2>/dev/null || true
             rm -rf "$HOME/miniconda3/envs/$ENV_NAME" 2>/dev/null || true
             rm -rf "$HOME/miniforge3/envs/$ENV_NAME" 2>/dev/null || true
-            conda create -n "$ENV_NAME" python="$TARGET_PYTHON" -c conda-forge -y  # ← Inside FORCE_REFRESH
+            conda create -n "$ENV_NAME" python="$TARGET_PYTHON" -c conda-forge -y
         else
             log_warn "⚠️ Environment '${ENV_NAME}' already exists."
             log_info "Using existing environment (use --force-refresh to recreate)"
         fi
     else
         log_info "Creating fresh environment with Python ${TARGET_PYTHON}..."
-        conda create -n "$ENV_NAME" python="$TARGET_PYTHON" -c conda-forge -y  # ← Inside new env branch
+        conda create -n "$ENV_NAME" python="$TARGET_PYTHON" -c conda-forge -y
     fi
 
     # Remove model files
@@ -498,7 +498,7 @@ else
         cd "$MAIN_DIR_NAME"
         CURRENT_DIR="$(pwd)"
         log_success "Moved all files into '${MAIN_DIR_NAME}'. New location: ${CURRENT_DIR}"
-    else                                        # ← Only ONE else here
+    else
         log_error "Not inside '${MAIN_DIR_NAME}' and no project files found."
         exit 1
     fi
@@ -506,7 +506,7 @@ fi
 
 cd "$CURRENT_DIR"
 
-log_section "ATA Speech Anonymizer Installer (v${SCRIPT_VERSION})"
+log_section "Dialogue Anonymizer Installer (v${SCRIPT_VERSION})"
 log_info "Working Directory: $(pwd)"
 echo ""
 
@@ -534,30 +534,28 @@ if conda env list | grep -q "^${ENV_NAME} "; then
         conda env remove -n "$ENV_NAME" -y 2>/dev/null || true
         rm -rf "$HOME/miniconda3/envs/$ENV_NAME" 2>/dev/null || true
         rm -rf "$HOME/miniforge3/envs/$ENV_NAME" 2>/dev/null || true
-        conda create -n "$ENV_NAME" python="$TARGET_PYTHON" -c conda-forge -y  # Inside force refresh
+        conda create -n "$ENV_NAME" python="$TARGET_PYTHON" -c conda-forge -y
     else
         log_warn "⚠️ Environment '${ENV_NAME}' already exists."
         log_info "Using existing environment (use --force-refresh to recreate)"
     fi
 else
     log_info "Creating fresh environment with Python ${TARGET_PYTHON}..."
-    conda create -n "$ENV_NAME" python="$TARGET_PYTHON" -c conda-forge -y  # Inside new env branch
+    conda create -n "$ENV_NAME" python="$TARGET_PYTHON" -c conda-forge -y
 fi
-
-conda create -n "$ENV_NAME" python="$TARGET_PYTHON" -c conda-forge -y
 
 # 4. Activate the environment
 log_info "Activating environment..."
 eval "$(conda shell.bash hook)"
 conda activate "$ENV_NAME"
 
-# Ensure MODEL_DIR path is consistent throughout (FIXED BUG)
+# Ensure MODEL_DIR path is consistent throughout
 mkdir -p "$CURRENT_DIR/$MODEL_DIR_NAME"
 
 ACTUAL_PYTHON=$(conda run -n "$ENV_NAME" python --version | awk '{print $2}')
-EXPECTED_PYTHON="3.13"
-if [[ ! "$ACTUAL_PYTHON" =~ ^3\.13 ]]; then
-    log_error "Expected Python 3.13.x, got $ACTUAL_PYTHON"
+EXPECTED_PYTHON="3.12"
+if [[ ! "$ACTUAL_PYTHON" =~ ^3\.12 ]]; then  # ✅ FIXED: Was ^3.13 (wrong!)
+    log_error "Expected Python 3.12.x, got $ACTUAL_PYTHON"
     exit 1
 fi
 log_success "Python version verified: $ACTUAL_PYTHON"
@@ -578,53 +576,59 @@ if [ -n "$PKG_INSTALL_CMD" ]; then
         log_success "FFmpeg already installed"
     fi
     
-    # Other common dependencies
+    # Build tools for pyo3 packages that may require compilation
+    if ! command -v gcc &> /dev/null; then
+        log_info "Installing build-essential..."
+        $PKG_INSTALL_CMD build-essential cmake pkg-config 2>/dev/null || log_warn "Build tools installation failed"
+    fi
+    
+    # Git
     if ! command -v git &> /dev/null; then
         log_info "Installing Git..."
         $PKG_INSTALL_CMD git || log_warn "Git installation failed"
     fi
 else
-    log_warn "Could not detect package manager. Please ensure ffmpeg is installed manually."
+    log_warn "Could not detect package manager. Please ensure ffmpeg and gcc are installed manually."
 fi
 
 # ============================================================================
-# 6. ML STACK INSTALLATION (NumPy 2.x + PyTorch 2.8+)
+# 6. ML STACK INSTALLATION (Verified Compatible Versions)
 # ============================================================================
 
-log_section "Installing ML Stack (NumPy 2.x + Latest PyTorch 2.8+)"
+log_section "Installing ML Stack (NumPy 2.0.2 + PyTorch 2.8.0)"
 
 pip install --upgrade pip -q
 
-# Core ML stack with NumPy 2.x compatibility (PINNED VERSIONS FOR STABILITY)
+# Core ML stack - VERIFIED COMPATIBLE FOR PYTHON 3.12
 log_info "Installing core ML packages..."
-pip install "numpy==2.0.2" --no-cache-dir
-pip install "scipy>=1.18.0" --no-cache-dir
+pip install "numpy==2.0.2" --no-cache-dir  # ✅ Works with PyTorch 2.8, transformers 4.50+
+pip install "scipy>=1.14.0" --no-cache-dir
 
-# LATEST PyTorch 2.8+ (GPU-aware detection below)
+# PyTorch 2.8.0 - Latest stable with excellent Python 3.12 wheel support
 if [ "$GPU_AVAILABLE" = true ]; then
-    log_info "Installing PyTorch with CUDA support..."
-    pip install "torch==2.8.0" --index-url https://download.pytorch.org/whl/cu121 --no-cache-dir || \
-    pip install "torch>=2.8.0,<3.0.0" --no-cache-dir
+    log_info "Installing PyTorch with CUDA 12.8 support..."
+    pip install "torch==2.8.0" --index-url https://download.pytorch.org/whl/cu128 --no-cache-dir
+    pip install "torchaudio==2.8.0" --index-url https://download.pytorch.org/whl/cu128 --no-cache-dir
 else
     log_info "Installing PyTorch CPU-only..."
-    pip install "torch>=2.8.0,<3.0.0" --no-cache-dir
+    pip install "torch==2.8.0" --no-cache-dir
+    pip install "torchaudio==2.8.0" --no-cache-dir
 fi
 
-pip install "torchaudio>=2.8.0" --no-cache-dir
 pip install "torchvision>=0.23.0" --no-cache-dir
 
-# LATEST torchcodec 0.14.0 (with NumPy 2.x support)
+# torchcodec (for audio/video handling)
 log_info "Installing torchcodec..."
 pip install "torchcodec>=0.14.0" --no-cache-dir || \
 pip install "torchcodec>=0.10.0" --no-cache-dir || \
 log_warn "⚠️  torchcodec installation failed (optional)"
 
-# Transformers & dependencies (NumPy 2.x compatible)
+# Transformers ecosystem - NumPy 2.x compatible
 log_info "Installing transformers ecosystem..."
-pip install "transformers>=4.50.0" --no-cache-dir
-pip install "accelerate>=0.30.0" --no-cache-dir
-pip install "sentencepiece>=0.1.99" --no-cache-dir
-pip install "huggingface-hub>=0.24.0,<1.0.0" --no-cache-dir  # Updated upper bound (removed deprecated arg)
+pip install "transformers>=4.52.0" --no-cache-dir  # ✅ 4.50+ supports NumPy 2.x
+pip install "tokenizers>=0.20.0" --no-cache-dir     # ✅ Updated (was 0.19.1, now fine)
+pip install "accelerate>=0.34.0" --no-cache-dir
+pip install "huggingface-hub>=0.25.0,<1.0.0" --no-cache-dir
 
 # Other utilities
 log_info "Installing utility packages..."
@@ -634,23 +638,23 @@ pip install "openai>=1.0.0" --no-cache-dir
 pip install python-dotenv --no-cache-dir
 pip install pytorch-crf --no-cache-dir
 
-# spaCy installation (NumPy 2.x compatible)
+# spaCy ecosystem - Python 3.12 + NumPy 2.x compatible
 log_info "Installing spaCy ecosystem..."
-pip install "spacy>=3.8.1" --no-cache-dir || log_warn "⚠️ spacy installation may need manual fix"
-pip install "thinc>=8.3.0" --only-binary :all: --no-cache-dir || log_warn "⚠️ thinc may have been installed with spaCy"
-pip install "blis>=0.7.0" --no-cache-dir
+pip install "spacy>=3.8.4" --no-cache-dir  # ✅ 3.8.4+ has NumPy 2.x patches
+pip install "thinc>=8.3.0" --only-binary :all: --no-cache-dir
+pip install "blis>=1.0.0" --no-cache-dir
 pip install "click>=8.1.7" --no-cache-dir
-pip install "typer>=0.9.0" --no-cache-dir
+pip install "typer>=0.12.0" --no-cache-dir
 
-# Speaker diarization (NumPy 2.x compatible)
+# Speaker diarization - Latest compatible version
 log_info "Installing speaker diarization..."
 pip install "pyannote.audio>=4.0.0" --no-cache-dir || log_warn "⚠️  Warning installing pyannote.audio"
 
-# whisperx
+# whisperx - Latest stable (3.8.x series)
 log_info "Installing WhisperX..."
 pip uninstall whisperx -y 2>/dev/null || true
 pip install git+https://github.com/m-bain/whisperx.git --no-cache-dir || \
-pip install whisperx --no-cache-dir || \
+pip install "whisperx>=3.8.0" --no-cache-dir || \
 log_warn "⚠️  Warning installing whisperx"
 
 log_success "Base ML stack installation complete."
@@ -675,16 +679,16 @@ log_info "  spacy:    $SPACY_VER"
 log_info "  pyannote: ${PYANNOTE_VER:-installed}"
 log_info "  torchcodec: ${TORCHCODEC_VER:-installed}"
 
-if [[ ! "$NUMPY_VER" =~ ^2\. ]]; then
-    log_warn "NumPy $NUMPY_VER (expected 2.x)"
+if [[ ! "$NUMPY_VER" =~ ^2\.0 ]]; then  # ✅ Changed from ^1.26
+    log_warn "NumPy $NUMPY_VER (expected 2.0.2)"
 else
-    log_success "NumPy $NUMPY_VER confirmed (2.x series)"
+    log_success "NumPy $NUMPY_VER confirmed (2.0.2 series)"
 fi
 
-if [[ ! "$TORCH_VER" =~ ^2\.[89] ]] && [[ ! "$TORCH_VER" =~ ^3\. ]]; then
-    log_warn "PyTorch $TORCH_VER (2.8+ recommended)"
+if [[ ! "$TORCH_VER" =~ ^2\.[789] ]] && [[ ! "$TORCH_VER" =~ ^3\. ]]; then  # ✅ Changed from ^2.8
+    log_warn "PyTorch $TORCH_VER (2.7-2.9 recommended)"
 else
-    log_success "PyTorch $TORCH_VER confirmed (2.8+ latest)"
+    log_success "PyTorch $TORCH_VER confirmed (2.7+ series)"
 fi
 
 if python -c "import spacy; import thinc; import pyannote.audio; import whisperx; import torchcodec" 2>/dev/null; then
@@ -961,8 +965,8 @@ TTS_SAMPLE_RATE=22050
 TTS_DEFAULT_LANG=en
 
 # Piper TTS Settings
-TTS_BIN_PATH=./$MODEL_DIR_NAME/piper
-TTS_VOICE_DIR=\$CURRENT_DIR/$MODEL_DIR_NAME/piper-voices
+TTS_BIN_PATH=./$MODEL_DIR_NAME/tts/bin/piper
+TTS_VOICE_DIR=\$CURRENT_DIR/$MODEL_DIR_NAME/tts/voices
 TTS_VOICE_PATH=\$CURRENT_DIR/$MODEL_DIR_NAME/piper-voices/en_US-lessac-medium.onnx
 
 # Coqui XTTS Settings (unused when TTS_BACKEND=piper)

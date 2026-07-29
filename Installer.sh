@@ -965,8 +965,8 @@ TTS_SAMPLE_RATE=22050
 TTS_DEFAULT_LANG=en
 
 # Piper TTS Settings
-TTS_BIN_PATH=./$MODEL_DIR_NAME/piper
-TTS_VOICE_DIR=\$CURRENT_DIR/$MODEL_DIR_NAME/piper-voices
+TTS_BIN_PATH=./$MODEL_DIR_NAME/tts/bin/piper
+TTS_VOICE_DIR=\$CURRENT_DIR/$MODEL_DIR_NAME/tts/voices
 TTS_VOICE_PATH=\$CURRENT_DIR/$MODEL_DIR_NAME/piper-voices/en_US-lessac-medium.onnx
 
 # Coqui XTTS Settings (unused when TTS_BACKEND=piper)
