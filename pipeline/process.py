@@ -1907,7 +1907,7 @@ class AnonymizationEngine:
             return text, False, "No sentences detected"
 
         # Extract token lists for prediction
-        sentences_tokens = [tokens for _, tokens in sentences_data]
+        sentences_tokens = [tokens for _, tokens, _ in sentences_data]
 
         # 2. Run inference WITH CONTEXT WINDOWING
         try:
