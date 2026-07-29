@@ -298,30 +298,93 @@ Solution:
 * [ ] Local LLM Support: Switch from API calls to local LLM models (e.g., Ollama, LM Studio).
 * [ ] Live Streaming: Implement chunk-processing for live transcription and anonymization.
 * [ ] Non-NVIDIA GPU: Add support for AMD/Intel GPUs.
-* [x] Improved TTS: Switch from Google TTS to a local text-to-speech engine.
-* [ ] Production Web Interface: Upgrade the demo interface to a full production-ready UI.
 * [x] Re-adding the anonymization process.
-* [x] Add a web interface.
-  *   [ ] Update the existing web interface to be a "demo" interface.
-  *   [ ] Create a new production interface.
-      * [ ] Add buttons for the interface to enable/disable each feature in the pipeline.
 * [x] Add a recording button to the web interface for demos.
 * [ ] Add batch transcripting via selected folder instead of only with selected files.
 * [ ] Add automatic cleanup of the input video/audio folders. 
 * [ ] Add arguments for a debug running of the pipeline.
-* [x] Add text to speech for the output transcripts.
 * [x] Switch the diarization to speaker-diarization-community-1 from the older diarization model.
-* [x] Automate the downloading of WhisperX models.
-* [ ] Switch from API calls for the AI models to local model processing.
-  *  [ ] Add a check/installation for local models, and if not, fall back to API calls.
-  *  [ ] Disable the LLM rewrite function when no LLM model is available.
-  *  [x] Switch the .env file to also host the LLM API endpoint variable, instead of hardcoding it into the code.
-* [ ] Do some optimizations for the LLM system prompt.
-* [ ] Try getting all the local LLM models working.
 * [x] Update the Running the Script section of this ReadMe.
-* [ ] Add arguments for process.py to enable/disable each feature in the pipeline.
 * [ ] Add code enabling other non-nvidia GPUs.
-* [x] Disable the translation feature of WhisperX.
+
+* [ ] Setup & Installation
+  *  [x] Automate the downloading of WhisperX models.
+* [ ] Web interface
+  *   [ ] Update the existing web interface to be a "demo" interface.
+  *   [ ] Create a new production interface.
+      * [ ] Add buttons for the interface to enable/disable each feature in the pipeline.
+  *   [ ] Move from Flask to a production service.
+  *   [ ] Integrate Docker
+  *   [ ] Integrate Keycloak Auth
+    *   [ ] Connect to Charité Keycloak instance.
+    *   [ ] Spin-up local Keycloak server if no existing service detected.
+* [ ] Transcription & Audio Processing
+  *  [x] Disable the translation feature of WhisperX.
+  *  [ ] Confidence scoring	❌ Missing	Can't filter low-quality segments
+  *  [ ] Audio normalization	❌ Missing	Inconsistent volume levels affect ASR accuracy
+  *  [ ] Noise reduction preprocessing	❌ Missing	Background noise reduces transcription quality
+  *  [ ] Long-file segmentation	❌ Missing	Files >30min may timeout or degrade
+  *  [ ] Language detection confidence	⚠️ Limited	Auto-detect has no confidence metric exposed
+  *  [ ] Speaker count verification	❌ Missing	No validation of MIN/MAX speaker settings
+* [ ] Output & Formatting
+  *  [ ] SRT/VTT subtitle export	❌ Missing	No video subtitle generation
+  *  [ ] Timestamp preservation	❌ Missing	Final transcripts lose timing data
+  *  [ ] JSON structured export	❌ Missing	Only plaintext output
+  *  [ ] Speaker metadata retention	⚠️ Partial	Diarization info discarded after transcript generation
+  *  [ ] Word-level alignment export	❌ Missing	Character/timestamp data not saved
+* [ ] Batch Processing & Performance
+  *  [ ] Progress bars	❌ Missing	No real-time status during long runs
+  *  [ ] Parallel file processing	❌ Missing	Sequential only — slow for large batches
+  *  [ ] Retry/resume on failure	❌ Missing	Failed files abort entire batch
+  *  [ ] Checkpointing	❌ Missing	Can't restart mid-workflow
+  *  [ ] CPU/GPU utilization monitoring	❌ Missing	No resource usage visibility
+* [ ] Configuration & Usability
+  *  [ ] Config file support	❌ Missing	Everything via CLI args only
+  *  [ ] Named presets	❌ Missing	Can't save/load workflow configurations
+  *  [ ] Interactive prompts	❌ Missing	No guided setup for new users
+  *  [ ] Default profile switching	❌ Missing	All options reset per run
+  *  [ ] Verbose vs quiet modes	⚠️ Partial	Only one verbose flag
+  *  [x] Add arguments for process.py to enable/disable each feature in the pipeline.  
+* [ ] Validation & Quality Assurance
+  *  [ ] Post-transcription quality metrics	❌ Missing	No WER/CER scoring
+  *  [ ] PII leakage testing	❌ Missing	Can't verify anonymization completeness
+  *  [ ] Duplicate file detection	❌ Missing	Processes same file multiple times
+  *  [ ] File integrity checks	❌ Missing	No hash verification
+  *  [ ] Speaker overlap detection	❌ Missing	Can't identify overlapping speech
+* [ ] Data Management
+  *  [ ] Automatic cleanup	❌ Missing	Intermediate WAV files accumulate
+  *  [ ] Archive/backup	❌ Missing	No version control of outputs
+  *  [ ] Cross-run deduplication	❌ Missing	Same transcript regenerated repeatedly
+  *  [ ] Organized output structure	⚠️ Basic	Flat folders, no categorization
+  *  [ ] Retention policies	❌ Missing	Manual file deletion required
+* [ ] Integration & API
+  *  [ ] REST API endpoint	❌ Missing	No programmatic access
+  *  [ ] Webhook notifications	❌ Missing	Can't trigger downstream workflows
+  *  [ ] Cloud storage hooks	❌ Missing	S3/GCS/Azure integration missing
+  *  [ ] Database connectivity	❌ Missing	No persistent metadata store
+  *  [ ] Event logging system	⚠️ Basic	Only session logs, no event stream
+* [ ] Security & Compliance
+  *  [ ] Secure file deletion	❌ Missing	rm leaves recoverable data
+  *  [ ] Output encryption	❌ Missing	Plain-text files only
+  *  [ ] Access control	❌ Missing	No user authentication
+  *  [ ] Audit trail	⚠️ Basic	Session logs lack detailed actions
+  *  [ ] Compliance reporting	❌ Missing	No GDPR/HIPAA documentation
+* [ ] User Feedback & Monitoring
+  *  [ ] Real-time processing preview	❌ Missing	Wait blindly until completion
+  *  [ ] Cost estimation	❌ Missing	LLM token costs unknown upfront
+  *  [ ] Error aggregation/analytics	❌ Missing	Hard to spot systematic failures
+  *  [ ] Performance benchmarking	❌ Missing	No baseline for optimization
+  *  [ ] Health check endpoints	❌ Missing	Can't verify system readiness
+* [ ] Large language models
+  * [ ] Switch from API calls for the AI models to local model processing.
+    *  [ ] Add a check/installation for local models, and if not, fall back to API calls.
+    *  [ ] Disable the LLM rewrite function when no LLM model is available.
+    *  [x] Switch the .env file to also host the LLM API endpoint variable, instead of hardcoding it into the code.
+  * [ ] Do some optimizations for the LLM system prompt.
+  * [ ] Try getting all the local LLM models working.
+* [ ] Text-to-speech
+  *   [x] Add text to speech for the output transcripts.
+  *   [x] Improved TTS: Switch from Google TTS to a local text-to-speech engine.
 
 * [ ] 
 
@@ -336,7 +399,7 @@ This project utilizes:
 
 Developed for privacy-preserving audio analysis.
 
-# Future additions
+# Long-term improvements
 
 * Improved dialogue and accent handling.
 * K-Anonymity for databases or folders.
