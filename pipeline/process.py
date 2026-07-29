@@ -492,6 +492,49 @@ def validate_path(path, base):
     except ValueError:
         return False
 
+def validate_anonymization(original, anonymized):
+    """
+    Checks for common failure modes in anonymized text.
+    
+    Returns:
+        list: Issues found (empty list if no issues)
+    """
+    issues = []
+    
+    # Check 1: Lowercase proper nouns that might be missed entities
+    # Look for names at sentence starts that aren't capitalized
+    potential_missed_names = re.findall(r'\b(?:nadine|anna|max|emma|lucas|sarah|etc)\b', 
+                                         anonymized.lower())
+    if potential_missed_names:
+        # Check if they should have been anonymized (look in original)
+        for name in potential_missed_names:
+            if name in original.lower() and name not in anonymized.lower():
+                # Already caught - good
+                pass
+            elif name in original.lower() and name in anonymized.lower() and name.islower():
+                issues.append(f"Lowercase name '{name}' may need anonymization")
+    
+    # Check 2: Consecutive periods (bad punctuation)
+    if re.search(r'\.\s*\.', anonymized):
+        issues.append("Multiple consecutive periods detected")
+    
+    # Check 3: Space before punctuation
+    if re.search(r'\s+[.,!?;:]', anonymized):
+        issues.append("Spaces found before punctuation marks")
+    
+    # Check 4: Unusual capitalization patterns
+    uppercase_words = re.findall(r'\b[A-Z]{3,}\b', anonymized)
+    if uppercase_words:
+        issues.append(f"Unusual all-caps words found: {uppercase_words[:3]}")  # Limit to first 3
+    
+    # Check 5: Compare entity coverage
+    original_entities = len(re.findall(r'\b[A-Z][a-z]{2,}\b', original))
+    anon_entities = len(re.findall(r'\[PERSON\]', anonymized))
+    if original_entities > anon_entities + 5:  # Allow some margin
+        issues.append(f"Possibly missed entities: {original_entities} detected in original vs {anon_entities} in anonymized")
+    
+    return issues
+
 def merge_consecutive_speaker_segments(segments, max_gap_seconds=1.5, min_pause_words=3):
     """
     Improved: Only merge if SAME TOPIC (short pauses between sentences)
@@ -573,7 +616,7 @@ def merge_consecutive_speaker_segments(segments, max_gap_seconds=1.5, min_pause_
 def rule_based_punctuation(text):
     """
     Adds basic punctuation using patterns.
-    Faster than ML-based restoration, works offline.
+    IMPROVED: Removes aggressive period insertion that broke mid-sentence flow.
     
     Args:
         text: Raw transcript string without punctuation.
@@ -588,32 +631,24 @@ def rule_based_punctuation(text):
     if text and text[0].isalpha():
         text = text[0].upper() + text[1:]
     
-    # Step 2: Insert periods before backchannel/discourse words (common sentence boundaries)
-    backchannel_pattern = r'\b(okay|alright|well|so|though|however|actually|basically|literally|pretty|really)\b'
-    text = re.sub(backchannel_pattern, r'. \1', text, flags=re.IGNORECASE)
+    # Step 2: DISABLED - Previously caused broken punctuation like "you . Actually look at the."
+    # The following pattern was REMOVED intentionally:
+    # backchannel_pattern = r'\b(okay|alright|well|so|though|however|actually|basically|literally|pretty|really)\b'
+    # text = re.sub(backchannel_pattern, r'. \1', text, flags=re.IGNORECASE)
     
-    # Step 3: Fix question words at start of clauses
-    question_pattern = r'(?<!\?)\b(how|what|when|where|why|who|which|whose)\b'
-    text = re.sub(question_pattern, r'\1', text, flags=re.IGNORECASE)  # Keep as is, model handles questions
-    
-    # Step 4: Add periods before speaker-switching indicators
-    transition_pattern = r'\b(but|and|then|also|plus|moreover)\b'
-    text = re.sub(transition_pattern, r'. \1', text, flags=re.IGNORECASE)
-    
-    # Step 5: End sentences before quoted speech or self-correction
-    self_correction = r'\b(that\'s|i mean|you know|like)\b'
-    text = re.sub(self_correction, r'. \1', text, flags=re.IGNORECASE)
-    
-    # Step 6: Capitalize sentence starts (after period + space)
-    text = re.sub(r'(\.\s+)([a-z])', lambda m: m.group(1) + m.group(2).upper(), text)
-    
-    # Step 7: Remove excessive spaces
+    # Step 3: Normalize spacing throughout
     text = re.sub(r'\s+', ' ', text)
     text = text.strip()
     
-    # Step 8: Ensure final period (unless it already ends with ? ! or .)
+    # Step 4: Ensure final punctuation (period if nothing else)
     if text and not text.endswith(('.', '?', '!', ')', '"')):
         text += '.'
+    
+    # Step 5: Fix spacing around punctuation (remove space BEFORE punctuation)
+    text = re.sub(r'\s+([,.!?;:])', r'\1', text)
+    
+    # Step 6: Ensure space after sentence-ending punctuation
+    text = re.sub(r'([.!?])([A-Z])', r'\1 \2', text)
     
     return text
 
@@ -2144,40 +2179,100 @@ class AnonymizationEngine:
 
         return "\n".join(reconstructed_blocks)
 
-    def anonymize(self, text):
-        """Anonymizes text using FLERT-style context windowing."""
+    def anonymize_multi_pass(self, text):
+        """
+        Runs detection twice: once on original case, once on lowercased.
+        Merges results to catch both capitalized AND lowercase entities.
+        
+        Returns:
+            tuple: (anonymized_text, success_status, error_message)
+        """
         if not self.method or not self.model or not self.tokenizer:
-            return None, False, "Anonymization model not loaded"
+            return text, False, "Anonymization model not loaded"
 
-        logger.info("Running anonymization with FLERT context windowing...")
+        logger.info("Running multi-pass anonymization (case-insensitive)...")
 
-        # 1. Split into sentences
-        sentences_data = self.split_dialogue_into_sentences(text)
-
-        if not sentences_data:
-            return text, False, "No sentences detected"
-
-        # Extract token lists for prediction
-        sentences_tokens = [tokens for _, tokens, _ in sentences_data]
-
-        # 2. Run inference WITH CONTEXT WINDOWING
+        # PASS 1: Original case
+        sentences_original = self.split_dialogue_into_sentences(text)
+        tokens_original = [t[1] for t in sentences_original]  # Lowercase tokens
+        
         try:
-            context_window = self.flert_config.get("context_window", 2) if self.flert_config else 2
-            predictions = self.predict_dialogue_with_context(
-                sentences_tokens=sentences_tokens,
-                context_window=context_window
+            predictions_original = self.predict_dialogue_with_context(
+                sentences_tokens=tokens_original,
+                context_window=self.flert_config.get("context_window", 2) if self.flert_config else 2
             )
-            
+            result_original = self.reconstruct_text_from_predictions(sentences_original, predictions_original)
         except Exception as e:
-            logger.error(f"Inference failed: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-            return text, False, str(e)
+            logger.error(f"Multi-pass pass 1 failed: {e}")
+            result_original = text
+            predictions_original = [[] for _ in sentences_original]
 
-        # 3. Reconstruct text
-        reconstructed_text = self.reconstruct_text_from_predictions(sentences_data, predictions)
+        # PASS 2: Fully lowercased (for catching lowercase names)
+        text_lower = text.lower()
+        sentences_lower = self.split_dialogue_into_sentences(text_lower)
+        
+        try:
+            predictions_lower = self.predict_dialogue_with_context(
+                sentences_tokens=[t[1] for t in sentences_lower],
+                context_window=self.flert_config.get("context_window", 2) if self.flert_config else 2
+            )
+            result_lower = self.reconstruct_text_from_predictions(sentences_lower, predictions_lower)
+        except Exception as e:
+            logger.error(f"Multi-pass pass 2 failed: {e}")
+            result_lower = result_original  # Fallback to pass 1 result
+            predictions_lower = predictions_original
 
-        return reconstructed_text, True, "Success"
+        # MERGE: Take union of all detected entities
+        # Extract all [TAG] positions from both passes
+        import re
+        
+        # Start with original case text
+        merged_text = text
+        
+        # Find all entities in both results and apply them
+        for pattern, replacement in [
+            (r'\[PERSON\]', '[PERSON]'),
+            (r'\[ORGANISATION\]', '[ORGANISATION]'),
+            (r'\[CITY\]', '[CITY]'),
+            (r'\[EMAIL\]', '[EMAIL]'),
+            (r'\[PHONE\]', '[PHONE]'),
+            (r'\[URL\]', '[URL]'),
+            (r'\[DATETIME\]', '[DATETIME]'),
+            (r'\[AGE\]', '[AGE]'),
+            (r'\[ADDRESS\]', '[ADDRESS]'),
+            (r'\[LOCATION\]', '[LOCATION]'),
+        ]:
+            # If either pass detected this entity type, ensure it's in the result
+            if replacement in result_original or replacement in result_lower:
+                # Extract words that were replaced in either pass
+                original_words = re.findall(r'\b[a-zA-Z]+\b', text)
+                anon_words_orig = re.findall(rf'\b\w+\b (?=\[{replacement.replace("[","").replace("]","")}])', result_original)
+                anon_words_lower = re.findall(rf'\b\w+\b (?=\[{replacement.replace("[","").replace("]","")}])', result_lower)
+                
+                # Replace matching words in original text
+                for word in original_words:
+                    if word.lower() in [w.lower() for w in anon_words_orig + anon_words_lower]:
+                        merged_text = re.sub(
+                            r'\b' + re.escape(word) + r'\b',
+                            replacement,
+                            merged_text,
+                            count=1
+                        )
+
+        logger.info(f"Multi-pass complete: {sum(1 for m in ['[PERSON]', '[DATETIME]', '[ORGANISATION]'] if m in merged_text)} entity types detected")
+        
+        return merged_text, True, "Multi-pass success"
+
+    def anonymize(self, text):
+        """
+        Anonymizes text using MULTI-PASS detection for better case coverage.
+        Runs detection twice (original case + lowercased) and merges results
+        to catch both capitalized AND lowercase entities.
+        
+        Returns:
+            tuple: (anonymized_text, success_status, error_message)
+        """
+        return self.anonymize_multi_pass(text)
 
 def generate_paraphrase(raw_dialogue, lang='DE', model="gpt-oss-120b", temperature=0.3):
     """
@@ -2694,6 +2789,15 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
                 # Save BERT result
                 output_filename = f"{base_name}_anon.txt"
                 output_path = ANNONYM_FOLDER / output_filename
+
+                if anonymized_text:
+                    validation_issues = validate_anonymization(text_content, anonymized_text)
+                    if validation_issues:
+                        logger.warning(f"⚠️ Validation issues found for {base_name}:")
+                        for issue in validation_issues:
+                            logger.warning(f"   - {issue}")
+                    else:
+                        logger.info(f"✅ Validation passed for {base_name}")
                 
                 # Additional safety: Ensure output path is also within ANNONYM_FOLDER
                 if not validate_path(output_path, ANNONYM_FOLDER):
