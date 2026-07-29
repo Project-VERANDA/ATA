@@ -212,11 +212,11 @@ VIDEOS_FOLDER = pipeline_dir / "videos"
 AUDIOS_FOLDER = pipeline_dir / "audios"
 TRANSCRIPTS_FOLDER = pipeline_dir / "transcripts"
 MODEL_FOLDER = pipeline_dir / "model"
-ANNONYM_FOLDER = pipeline_dir / "anonym"
+ANONYM_FOLDER = pipeline_dir / "anonym"
 LLM_ANONNYM_FOLDER = pipeline_dir / "LLM-Anonymized"
 
 # Create directories if they don't exist
-for folder in [TRANSCRIPTS_FOLDER, ANNONYM_FOLDER, MODEL_FOLDER, LLM_ANONNYM_FOLDER]:
+for folder in [TRANSCRIPTS_FOLDER, ANONYM_FOLDER, MODEL_FOLDER, LLM_ANONNYM_FOLDER]:
     if not folder.exists():
         folder.mkdir(parents=True, exist_ok=True)
         logger.info(f"Created directory: {folder}")
@@ -1845,11 +1845,11 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
     llm_processed_count = 0
     llm_failed_count = 0
 
-    source_folder = TRANSCRIPTS_FOLDER if not skip_bert else ANNONYM_FOLDER
+    source_folder = TRANSCRIPTS_FOLDER if not skip_bert else ANONYM_FOLDER
     source_suffix = ".txt"
 
     if skip_bert:
-        logger.info("Skipping BERT anonymization. Processing existing files in 'annonym' folder for LLM rewrite.")
+        logger.info("Skipping BERT anonymization. Processing existing files in 'anonym' folder for LLM rewrite.")
         files = []
         for f in source_folder.iterdir():
             if f.is_file() and f.suffix.lower() == source_suffix:
@@ -1905,9 +1905,9 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
                     continue
 
                 output_filename = f"{base_name}_anon.txt"
-                output_path = ANNONYM_FOLDER / output_filename
+                output_path = ANONYM_FOLDER / output_filename
 
-                if not validate_path(output_path, ANNONYM_FOLDER):
+                if not validate_path(output_path, ANONYM_FOLDER):
                     logger.error(f"Security Alert: Output path traversal detected for {output_filename}. Skipping save.")
                     failed_count += 1
                     continue
@@ -2052,7 +2052,7 @@ __all__ = [
     # Paths and config
     'BASE_PATH',
     'pipeline_dir',
-    'ANNONYM_FOLDER',
+    'ANONYM_FOLDER',
     'LLM_ANONNYM_FOLDER',
     'MODEL_FOLDER',
     'TRANSCRIPTS_FOLDER',
@@ -2091,7 +2091,7 @@ Examples:
                         help='Disable LLM-based indirect identifier removal (Run BERT anonymization only)')
 
     parser.add_argument('--llm-only', action='store_true',
-                        help='Skip BERT anonymization and process existing files in "annonym" folder with LLM rewrite only.')
+                        help='Skip BERT anonymization and process existing files in "anonym" folder with LLM rewrite only.')
 
     parser.add_argument('--lang', type=str, default=None,
                         choices=list(SUPPORTED_LANGUAGES.keys()),
@@ -2149,7 +2149,7 @@ Examples:
     logger.info(f"  BERT Anonymization:                {'✅ ENABLED' if run_anonymization and not skip_bert_for_llm else '❌ DISABLED (or Skipped for LLM-only)'}")
     logger.info(f"  LLM Indirect Identifier Removal:   {'✅ ENABLED' if run_llm else '❌ DISABLED'}")
     if skip_bert_for_llm:
-        logger.info(f"    └─ Mode: LLM-only (processing existing 'annonym' folder)")
+        logger.info(f"    └─ Mode: LLM-only (processing existing 'anonym' folder)")
     logger.info("="*60)
 
     logger.info("Starting Audio Anonymizer full pipeline...")
