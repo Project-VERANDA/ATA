@@ -56,7 +56,6 @@ try:
         CHAT_AI_ENDPOINT,
         anonymize_text_locally,
         MODEL_FOLDER as PROCESS_MODEL_FOLDER,
-        # TTS functions - now properly exported
         generate_speech,
         generate_beep,
         synthesize_segment,
@@ -64,7 +63,6 @@ try:
         get_tts_status,
         TTS_BACKEND,
         TTS_ENABLED,
-        # Fixed path (now spelled correctly)
         LLM_ANONYM_FOLDER,
         ANONYM_FOLDER,
         BASE_PATH,
