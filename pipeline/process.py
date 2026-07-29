@@ -1962,8 +1962,7 @@ __all__ = [
     'pipeline_dir',
     'MODEL_FOLDER',
     'ANONYM_FOLDER',
-    'LLM_ANONYM_FOLDER',       # Fixed spelling (single N)
-    'LLM_ANONNYM_FOLDER',      # Legacy alias (double N)
+    'LLM_ANONYM_FOLDER',
     'TRANSCRIPTS_FOLDER',
     'VIDEOS_FOLDER',
     'AUDIOS_FOLDER',
