@@ -63,8 +63,8 @@ try:
         get_tts_status,
         TTS_BACKEND,
         TTS_ENABLED,
-        ANNONYM_FOLDER,
-        LLM_ANONNYM_FOLDER,
+        ANONYM_FOLDER,
+        LLM_ANONYM_FOLDER,
         BASE_PATH,
         )
 except ImportError as e:
@@ -1193,8 +1193,8 @@ def download_text(file_type, filename):
         # Map file types to folders
         folder_map = {
             'original': app.config['UPLOAD_FOLDER'], # Assuming original is saved here or in a specific folder
-            'bert': ANNONYM_FOLDER,
-            'llm': LLM_ANONNYM_FOLDER
+            'bert': ANONYM_FOLDER,
+            'llm': LLM_ANONYM_FOLDER
         }
         
         if file_type not in folder_map:
