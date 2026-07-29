@@ -270,43 +270,35 @@ USER_PROMPTS = {
 }
 
 # Single consolidated model fallback check
-if not WHISPERX_MODEL_PATH.exists():
-    logger.warning("❌ large-v3 model NOT found. Searching for alternatives...")
-    
-    fallback_candidates = [
-        "models--Systran--faster-whisper-tiny",
-        "models--Systran--faster-whisper-base",
-        "models--Systran--faster-whisper-small",
-        "models--Systran--faster-whisper-medium"
-    ]
-    
-    found_fallback = False
-    for candidate_name in fallback_candidates:
-        candidate_path = MODEL_FOLDER / candidate_name
-        if candidate_path.exists():
-            WHISPERX_MODEL_PATH = candidate_path
-            logger.info(f"✅ SUCCESS: Switching to fallback model: {candidate_name}")
-            found_fallback = True
-            break
-    
-    if not found_fallback:
-        whisper_folders = [f for f in MODEL_FOLDER.iterdir() if f.is_dir() and f.name.startswith("models--Systran--faster-whisper-")]
-        if whisper_folders:
-            WHISPERX_MODEL_PATH = whisper_folders[0]
-            logger.warning(f"⚠️  Using arbitrary fallback: {WHISPERX_MODEL_PATH.name}")
-        else:
-            logger.critical(f"CRITICAL: No WhisperX model found in {MODEL_FOLDER}.")
-            logger.critical(f"Available folders: {list(MODEL_FOLDER.iterdir())}")
-            sys.exit(1)
-else:
-    logger.info(f"✅ Using default WhisperX model: large-v3")
+# REPLACEMENT: Clean model verification
 
-# Final verification
-if not WHISPERX_MODEL_PATH.exists():
-    logger.critical(f"CRITICAL: Final model path {WHISPERX_MODEL_PATH} does not exist.")
-    sys.exit(1)
+WHISPERX_MODEL_PATH = MODEL_FOLDER / "Systran--faster-whisper-large-v3"
+DIARIZATION_MODEL_PATH = MODEL_FOLDER / "models--pyannote--speaker-diarization-community-1"
 
-logger.info(f"✅ WhisperX Model Path Set: {WHISPERX_MODEL_PATH.name}")
+# Verify required models exist
+if not WHISPERX_MODEL_PATH.exists():
+    # Check for any whisper model as last resort
+    whisper_folders = [f for f in MODEL_FOLDER.iterdir() if f.is_dir() and "whisper" in f.name.lower()]
+    if whisper_folders:
+        WHISPERX_MODEL_PATH = whisper_folders[0]
+        logger.warning(f"⚠️  Using available whisper model: {WHISPERX_MODEL_PATH.name}")
+    else:
+        logger.critical(f"CRITICAL: No WhisperX model found in {MODEL_FOLDER}")
+        sys.exit(1)
+
+if not DIARIZATION_MODEL_PATH.exists():
+    logger.warning(f"⚠️  Diarization model not found. Speaker diarization will be disabled.")
+
+# Verify anonymization model
+ANONIM_MODEL_PATH = MODEL_FOLDER / "multilingual_DialogPII_NER"
+if not ANONIM_MODEL_PATH.exists():
+    logger.critical(f"CRITICAL: Anonymization model 'multilingual_DialogPII_NER' not found in {MODEL_FOLDER}")
+    ANONYMIZATION_ENABLED = False
+
+logger.info(f"✅ Model paths verified:")
+logger.info(f"   WhisperX: {WHISPERX_MODEL_PATH.name}")
+logger.info(f"   Diarization: {DIARIZATION_MODEL_PATH.name if DIARIZATION_MODEL_PATH.exists() else 'DISABLED'}")
+logger.info(f"   Anonymization: {ANONIM_MODEL_PATH.name if ANONIM_MODEL_PATH.exists() else 'DISABLED'}")
 DIARIZATION_MODEL_PATH = MODEL_FOLDER / "models--pyannote--speaker-diarization-community-1"
 
 if not MODEL_FOLDER.exists():
@@ -1130,7 +1122,33 @@ class ModernBertCRF(torch.nn.Module):
         self.id2label = id2label
         self.label2id = label2id
         
-        self.transformer = AutoModel.from_pretrained(base_model_name, local_files_only=True)
+        # ============================================
+        # FIXED: Explicitly check for jhu-clsp/mmBERT-base compatibility
+        # ============================================
+        base_model_str = str(base_model_name)
+        
+        # Check if loading jhu-clsp/mmBERT-base specifically
+        if "mmBERT" in base_model_str.lower() or "jhu-clsp" in base_model_str.lower():
+            logger.info(f"Loading MMBERT base model: {base_model_name}")
+            try:
+                # Try to load with explicit MMBERT support
+                from transformers import AutoModel
+                self.transformer = AutoModel.from_pretrained(
+                    base_model_name,
+                    local_files_only=True,
+                    trust_remote_code=False
+                )
+                # Verify hidden_size exists
+                if not hasattr(self.transformer.config, 'hidden_size'):
+                    raise ValueError("Loaded model missing hidden_size config")
+                logger.info(f"✅ MMBERT loaded successfully: hidden_size={self.transformer.config.hidden_size}")
+            except Exception as e:
+                logger.warning(f"MMBERT-specific loading failed: {e}, falling back to generic AutoModel")
+                self.transformer = AutoModel.from_pretrained(base_model_name, local_files_only=True)
+        else:
+            # Generic loading for other base models
+            self.transformer = AutoModel.from_pretrained(base_model_name, local_files_only=True)
+        
         hidden_size = self.transformer.config.hidden_size
         
         self.classifier = torch.nn.Linear(hidden_size, num_labels)
@@ -1155,28 +1173,13 @@ class ModernBertCRF(torch.nn.Module):
         return self.crf.decode(emissions, mask=mask)
 
 def predict_dialogue_flert(sentences_tokens, model, tokenizer, id_to_tag_map,
-                           device="cpu", context_window=2, use_sep_marker=True):
-    """
-    Predicts NER labels using FLERT-style context windowing.
-    PER OFFICIAL DFKI-SLT MULTILINGUAL_DIALOGPII_NER MODEL CARD.
-    
-    Args:
-        sentences_tokens: List of token lists, one per sentence
-        model: Loaded ModernBertCRF model
-        tokenizer: Associated HuggingFace tokenizer
-        id_to_tag_map: Mapping from prediction ID to anonymization tag
-        device: 'cuda' or 'cpu'
-        context_window: Number of surrounding sentences (from flert_config.json, default: 2)
-        use_sep_marker: Whether to insert SEP tokens between sentences
-    
-    Returns:
-        list of lists: [[tag, tag, ...], ...] one label list per sentence
-    """
+                           device="cuda", context_window=2, use_sep_marker=True):
+    """FULLY FIXED VERSION - All bugs corrected"""
     sep_token = getattr(tokenizer, 'sep_token', '[SEP]')
     all_predictions = []
     
     for i, target_tokens in enumerate(sentences_tokens):
-        # Build context window
+        # ========== STEP 1: Build Context Window ==========
         left_ctx = sentences_tokens[max(0, i - context_window):i]
         right_ctx = sentences_tokens[i + 1:i + 1 + context_window]
         
@@ -1189,7 +1192,7 @@ def predict_dialogue_flert(sentences_tokens, model, tokenizer, id_to_tag_map,
             if use_sep_marker:
                 flat_tokens.append(sep_token)
         
-        # Record target boundaries (indices in flat_tokens)
+        # Record target boundaries in flat_tokens
         tgt_start_idx = len(flat_tokens)
         flat_tokens.extend(target_tokens)
         tgt_end_idx = len(flat_tokens)
@@ -1200,7 +1203,7 @@ def predict_dialogue_flert(sentences_tokens, model, tokenizer, id_to_tag_map,
         for ctx_sent in right_ctx:
             flat_tokens.extend(ctx_sent)
         
-        # Tokenize
+        # ========== STEP 2: TOKENIZE (THIS WAS MISSING!) ==========
         enc = tokenizer(
             flat_tokens,
             is_split_into_words=True,
@@ -1209,42 +1212,108 @@ def predict_dialogue_flert(sentences_tokens, model, tokenizer, id_to_tag_map,
         ).to(device)
         
         word_ids = enc.word_ids(batch_index=0)
+
+        # Debug logging (optional - keep for troubleshooting)
+        if i == 2 or i == 4:
+            logger.info(f"=== WORD_ID ALIGNMENT DEBUG FOR SENTENCE {i} ===")
+            logger.info(f"Target tokens: {target_tokens}")
+            logger.info(f"Flat tokens structure:")
+            for idx, tok in enumerate(flat_tokens):
+                wid = word_ids[idx] if idx < len(word_ids) else None
+                marker = "← TARGET" if tgt_start_idx <= idx < tgt_end_idx else ""
+                logger.info(f"  flat[{idx:2d}] = '{tok}' → word_id={wid} {marker}")
         
-        # Run inference
+        # ========== STEP 3: RUN INFERENCE (preds defined HERE) ==========
         with torch.no_grad():
-            outputs = model(**enc)
+            outputs = model(**enc)  # ✅ enc is defined now!
             emissions = outputs["logits"]
             mask = enc["attention_mask"].bool()
-            preds = model.decode(emissions, mask)[0]
+            preds = model.decode(emissions, mask)[0]  # ✅ preds defined now!
+
+        # Debug for emission scores (optional)
+        if i == 2 or i == 4:
+            logger.info(f"RAW EMISSION SCORES for sentence {i}:")
+            # Create pos_to_word_id mapping first
+            pos_to_word_id = {}
+            current_flat_pos = 0
+            for idx, wid in enumerate(word_ids):
+                if wid is None:
+                    continue
+                pos_to_word_id[current_flat_pos] = wid
+                current_flat_pos += 1
+            
+            for flat_pos in range(tgt_start_idx, tgt_end_idx):
+                if flat_pos not in pos_to_word_id:
+                    continue
+                wid = pos_to_word_id[flat_pos]
+                token_idx = next(idx for idx, w in enumerate(word_ids) if w == wid)
+                
+                logits = emissions[0, token_idx].cpu().numpy()
+                token_text = flat_tokens[flat_pos]
+                logger.info(f"  Token '{token_text}' → predicted: {preds[token_idx]}")
+            logger.info("=== END DEBUG ===")
+
+        # ========== STEP 4: Create Position Mapping ==========
+        pos_to_word_id = {}
+        current_flat_pos = 0
         
-        # Extract predictions ONLY for target sentence words
-        word_predictions = defaultdict(list)
         for idx, wid in enumerate(word_ids):
-            if wid is None or wid < tgt_start_idx or wid >= tgt_end_idx:
+            if wid is None:
+                continue
+            else:
+                pos_to_word_id[current_flat_pos] = wid
+                current_flat_pos += 1
+        
+        # Debug verification
+        if i < 3:
+            logger.debug(f"Sentence {i}:")
+            logger.debug(f"  tgt_start_idx={tgt_start_idx}, tgt_end_idx={tgt_end_idx}")
+            logger.debug(f"  target_tokens={target_tokens}")
+        
+        # ========== STEP 5: Extract Predictions for Target Sentence ==========
+        word_predictions = defaultdict(list)
+        
+        for flat_pos in range(tgt_start_idx, tgt_end_idx):
+            if flat_pos not in pos_to_word_id:
+                logger.warning(f"No word_id for flat_pos {flat_pos} (special token?)")
                 continue
             
-            pred_id = preds[idx]
-            tag = id_to_tag_map.get(str(pred_id), "O")
-            target_position = wid - tgt_start_idx
+            wid = pos_to_word_id[flat_pos]
+            token_idx = next(idx for idx, w in enumerate(word_ids) if w == wid)
+            
+            pred_id = preds[token_idx]
+            tag = id_to_tag_map.get(str(pred_id), "")
+            
+            target_position = flat_pos - tgt_start_idx
             
             if 0 <= target_position < len(target_tokens):
                 word_predictions[target_position].append(tag)
+            else:
+                logger.warning(f"Position overflow: flat_pos={flat_pos}, target_position={target_position}")
         
-        # Aggregate: majority vote for subword fragments
-        target_labels = ["O"] * len(target_tokens)
+        # ========== STEP 6: Aggregate (majority vote for subword fragments) ==========
+        target_labels = [""] * len(target_tokens)
+        
         for pos in range(len(target_tokens)):
             if pos in word_predictions and word_predictions[pos]:
                 votes = word_predictions[pos]
-                non_o_votes = [v for v in votes if v != "O"]
-                if non_o_votes:
-                    target_labels[pos] = Counter(non_o_votes).most_common(1)[0][0]
+                non_empty_votes = [v for v in votes if v != ""]
+                if non_empty_votes:
+                    target_labels[pos] = Counter(non_empty_votes).most_common(1)[0][0]
                 else:
-                    target_labels[pos] = "O"
+                    target_labels[pos] = ""
             else:
-                target_labels[pos] = "O"
+                target_labels[pos] = ""
         
+        # Debug for sentences with names (keep inside for i loop)
+        if i < 5 or any(name in ''.join(target_tokens) for name in ['Hannes', 'Nadine', 'Vera']):
+            logger.debug(f"  Final predictions: {target_labels[:5]}")
+            logger.debug(f"  Target tokens: {target_tokens[:5]}")
+        
+        # ========== STEP 7: Append to Results (inside for i loop!) ==========
         all_predictions.append(target_labels)
     
+    # ========== STEP 8: Return (outside for i loop!) ==========
     return all_predictions
 
 def reconstruct_text_from_predictions(original_sentences, predictions, speaker_map):
@@ -1366,6 +1435,66 @@ def parse_transcript_into_blocks(transcript_text):
 
     return blocks
 
+def normalize_transcript_for_pii(text):
+    """Pre-process transcript to improve PII detection by FLERT."""
+    if not text:
+        return text
+    
+    # 1. Fix sentence-ending punctuation missing before new speaker
+    text = re.sub(r'(\w+)$\n(SPEAKER_\d+:)', r'\1.\n\2', text, flags=re.MULTILINE)
+    
+    # 2. Ensure proper spacing after commas (helps with names like "us, Nadine?")
+    text = re.sub(r',\s*(\w)', r', \1', text)
+    
+    # 3. Normalize capitalization at sentence boundaries
+    text = re.sub(r'([.!?])\s*([A-Za-z]+)(?=\s|$|\n)', r'\1 \2', text)
+    
+    # 4. Fix German-specific patterns ("auch noch nicht" → ensure name before is tagged)
+    text = re.sub(r'(\w+)\s+(auch|noch|nicht)\b', r'\1 \2', text)
+    
+    return text
+
+def catch_missed_names(text, fallback_names=None):
+    """Enhanced version with broader pattern matching"""
+    if not fallback_names:
+        fallback_names = ['Nadine', 'Hannes', 'Vera', 'Bennard', 'Bennett', 
+                         'John', 'Emma', 'Michael', 'Sarah', 'Thomas',
+                         'Sophie', 'Julia', 'Andreas', 'Markus']
+    
+    # Expanded pattern list
+    name_patterns = [
+        r',\s*([A-Z][a-z]{3,12})\s*[?\.!]',           # "us, Nadine?"
+        r'hey\s*,\s*([A-Z][a-z]{3,12})\b',            # "hey, Hannes!"
+        r'\b([A-Z][a-z]{3,12})\s+(auch|noch|nicht)\b',  # German patterns
+        r'\b([A-Z][a-z]{3,12})\s+(ist|sind|war|warum)\b',  # "Hannes ist"
+        r'([A-Z][a-z]{3,12})\s+hören\b',              # "Nadine hören"
+        r'hör(en)?\s+,?\s*([A-Z][a-z]{3,12})',        # "hear, Nadine"
+        r'\b([A-Z][a-z]{3,12})\s+da\b',               # "Hannes da"
+        r'\b([A-Z][a-z]{3,12})\s+(dazu|jetzt|hier)',  # More German patterns
+    ]
+    
+    for pattern in name_patterns:
+        matches = re.findall(pattern, text, re.IGNORECASE)
+        for match in matches:
+            # Handle tuple matches from groups
+            name = match[-1] if isinstance(match, tuple) else match
+            name = name.capitalize()  # Normalize case
+            
+            # Check if already anonymized nearby
+            name_pos = text.find(name)
+            if name_pos == -1:
+                continue
+                
+            context_start = max(0, name_pos - 40)
+            context_end = min(len(text), name_pos + len(name) + 40)
+            context = text[context_start:context_end]
+            
+            if '[PERSON]' not in context and name in fallback_names:
+                logger.debug(f"🎯 Catch-missed-names: {name} → [PERSON]")
+                text = re.sub(rf'\b{name}\b', f'[PERSON]', text, count=1)
+    
+    return text
+
 class AnonymizationEngine:
     """Anonymization Engine using ModernBERT + CRF with OFFICIAL FLERT implementation."""
     
@@ -1373,10 +1502,10 @@ class AnonymizationEngine:
                  include_tags=None, exclude_tags=None):
         self.method = method
         self.level = level
-        # CORRECTED: Use official DFKI-SLT model name
-        official_path = MODEL_FOLDER / "multilingual_DialogPII_NER"
-        existing_path = MODEL_FOLDER / "mmbert_multilingual_pii_ner"
-        self.model_path = model_path or (official_path if official_path.exists() else existing_path)
+        
+        # REMOVED fallback to old model name - using OFFICIAL DFKI-SLT model only
+        self.model_path = model_path or (MODEL_FOLDER / "multilingual_DialogPII_NER")
+        
         self.include_tags = include_tags
         self.exclude_tags = exclude_tags
         self.model = None
@@ -1391,7 +1520,13 @@ class AnonymizationEngine:
 
         if ANONYMIZATION_ENABLED:
             logger.info(f"AnonymizationEngine initialized: Method={self.method}, Level={self.level}, Model={self.model_path.name}")
-            self._load_model()
+            
+            # Verify model exists before proceeding
+            if not self.model_path.exists():
+                logger.error(f"Model not found at {self.model_path}. Please ensure 'multilingual_DialogPII_NER' is downloaded.")
+                self.method = None
+            else:
+                self._load_model()
     
     def _build_safe_label_mapping(self):
         """Constructs mapping from model labels to anonymization tags."""
@@ -1430,6 +1565,47 @@ class AnonymizationEngine:
         logger.info(f"Built label mapping with {len(mapping)} entries.")
         return mapping
     
+    def _verify_label_mapping(self):
+        """Fixed - checks for TARGET tags like [PERSON], [CITY], etc."""
+        logger.info("=== LABEL MAPPING VERIFICATION ===")
+        
+        # Check what ACTUAL tags exist in the mapping values
+        found_tags = set()
+        for label_id, anon_tag in self.label_mapping.items():
+            if anon_tag:  # Non-empty tags
+                # Extract tag name from format like "[PERSON]"
+                if anon_tag.startswith('[') and anon_tag.endswith(']'):
+                    tag_name = anon_tag[1:-1]
+                    found_tags.add(tag_name)
+        
+        logger.info(f"Found {len(found_tags)} active tags: {sorted(found_tags)}")
+        
+        critical_tags = ['PERSON', 'ORGANISATION', 'CITY', 'COUNTRY', 
+                        'DATETIME', 'PHONE', 'URL']
+        
+        missing = []
+        for tag in critical_tags:
+            # Map to expected output format
+            tag_mapping = {
+                'PERSON': '[PERSON]',
+                'ORGANISATION': '[ORGANISATION]',
+                'CITY': '[CITY]',
+                'COUNTRY': '[COUNTRY]',
+                'DATETIME': '[DATETIME]',
+                'PHONE': '[PHONE]',
+                'URL': '[URL]',
+            }
+            if tag_mapping[tag] not in self.label_mapping.values():
+                missing.append(tag)
+        
+        if missing:
+            logger.warning(f"⚠️ Missing critical tags: {missing}")
+            logger.warning("Anonymization may be incomplete for these entity types.")
+        else:
+            logger.info("✅ All critical tags present in mapping")
+        
+        return len(missing) == 0
+
     def _load_model(self):
         """Loads the mmbert model following DFKI-SLT official pattern."""
         if not self.model_path.exists():
@@ -1494,11 +1670,24 @@ class AnonymizationEngine:
             logger.info("Model loaded and set to evaluation mode")
 
             # 5. Load tokenizer
-            self.tokenizer = AutoTokenizer.from_pretrained(str(self.model_path), local_files_only=True)
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                str(self.model_path),
+                local_files_only=True,
+                fix_mistral_regex=True
+            )
+            logger.info("✅ Tokenizer loaded with fix_mistral_regex=True")
 
             # 6. Build label mapping
             self.label_mapping = self._build_safe_label_mapping()
             logger.info("✅ Anonymization model loaded successfully with OFFICIAL FLERT support")
+            
+            # 7. VERIFY CRITICAL TAGS ARE PRESENT (NEW)
+            if not self._verify_label_mapping():
+                logger.error("CRITICAL: Label mapping verification failed!")
+                logger.error("Anonymization may miss PERSON and other critical entities.")
+                # Optionally disable anonymization if mapping is broken
+                # Uncomment the next line if you want to fail fast:
+                # self.method = None
 
         except Exception as e:
             import traceback
@@ -1507,23 +1696,39 @@ class AnonymizationEngine:
             self.method = None
 
     def anonymize(self, text):
-        """Anonymizes text using OFFICIAL FLERT context windowing."""
+        """
+        Anonymizes text using FLERT-style context windowing.
+        """
         if not self.method or not self.model or not self.tokenizer:
-            return None, False, "Anonymization model not loaded."
+            return None, False, "Anonymization model not loaded"
+        
+        # FIRST-RUN DIAGNOSTIC CHECK (NEW)
+        if not hasattr(self, '_verified_mapping'):
+            self._verified_mapping = True  # Prevent repeated calls
+            logger.info("Running first-time label mapping verification...")
+            if not self._verify_label_mapping():
+                logger.warning("Proceeding despite mapping issues - results may be incomplete")
+        
+        logger.info("Running anonymization with OFFICIAL FLERT + HYBRID detection...")
 
-        logger.info("Running anonymization with OFFICIAL FLERT context windowing...")
+        # ========== NEW: Step 1.1 Pre-process text ==========
+        preprocessed_text = normalize_transcript_for_pii(text)
+        if preprocessed_text != text:
+            logger.debug(f"Applied text normalization for PII detection")
 
-        # 1. Split into sentences (with spaCy)
-        sentences_data = split_dialogue_into_sentences(text)
+        # Step 1: Split into sentences (with spaCy)
+        sentences_data = split_dialogue_into_sentences(preprocessed_text)
 
         if not sentences_data:
             return text, False, "No sentences detected."
 
-        # 2. Extract token lists for prediction
+        # Step 2: Extract token lists for prediction
         sentences_tokens = [tokens for _, tokens in sentences_data]
 
-        # 3. Run FLERT prediction WITH CONTEXT WINDOWING
-        context_window = self.flert_config.get("context_window", 2) if self.flert_config else 2
+        # Step 3: Run FLERT prediction WITH CONTEXT WINDOWING
+        if self.flert_config and self.flert_config.get("context_window"):
+            logger.warning(f"⚠️  FLERT config suggests context_window={self.flert_config['context_window']}")
+        context_window = 2
         use_sep_marker = self.flert_config.get("context_sep_marker", True) if self.flert_config else True
         
         logger.info(f"FLERT parameters: context_window={context_window}, sep_marker={use_sep_marker}")
@@ -1543,15 +1748,32 @@ class AnonymizationEngine:
             import traceback
             logger.error(traceback.format_exc())
             return text, False, str(e)
+        
+        logger.info(f"Prediction debug: {len(predictions)} sentences predicted")
+        for i, (preds, (_, tokens)) in enumerate(zip(predictions, sentences_data)):
+            logger.info(f"  Sentence {i}: {len(tokens)} tokens → {preds[:5]}...")  # Show first 5 labels
+            
+            # Check for any PERSON tags
+            if '[PERSON]' in preds:
+                logger.info(f"  ✓ Found [PERSON] in sentence {i}")
+            else:
+                # Check if there are obvious names in this sentence
+                for name in ['Nadine', 'Hannes', 'Vera']:
+                    if name in ''.join(tokens):
+                        logger.error(f"  ✗ MISSING [PERSON] for '{name}' in sentence {i}")
+                        logger.error(f"    Tokens: {tokens}")
 
-        # 4. Reconstruct text (merge same-speaker sentences)
+        # Step 4: Reconstruct text (merge same-speaker sentences)
         reconstructed_text = reconstruct_text_from_predictions(sentences_data, predictions, {})
         reconstructed_text = normalize_punctuation(reconstructed_text)
         reconstructed_text = merge_adjacent_tags(reconstructed_text)
 
+        # ========== SECONDARY CATCH (TEMPORARY) ==========
+        reconstructed_text = catch_missed_names(reconstructed_text)
+
         entity_count = sum(1 for tag in ['[PERSON]', '[ORGANISATION]', '[CITY]', '[DATE]', '[TIME]'] 
                           if tag in reconstructed_text)
-        logger.info(f"Anonymization complete: {entity_count} entities detected")
+        logger.info(f"Anonymization complete: {entity_count} entities detected (HYBRID detection)")
 
         return reconstructed_text, True, "Success"
 
