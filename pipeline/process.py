@@ -528,7 +528,7 @@ def merge_consecutive_speaker_segments(segments, max_gap_seconds=1.5, min_pause_
             # Calculate gap
             gap = start - current_segment["end"]
             
-            # NEW: Detect topic shift indicators (backchannels, discourse markers)
+            # Detect topic shift indicators (backchannels, discourse markers)
             prev_text = current_segment["text"].strip().lower()
             curr_text = text.strip().lower()
             
@@ -549,7 +549,7 @@ def merge_consecutive_speaker_segments(segments, max_gap_seconds=1.5, min_pause_
             
             if (current_segment["speaker"] == speaker and 
                 gap <= max_gap_seconds and 
-                not is_topic_shift):  # ← NEW: Only merge if no topic shift
+                not is_topic_shift):  # Only merge if no topic shift
                 
                 # Merge: extend text and end time
                 current_segment["text"] += " " + text
@@ -1027,10 +1027,10 @@ def process_audios(enable_diarization=True, lang_code=None, file_list=None):
             audio = whisperx.load_audio(str(audio_path))
             
             transcribe_kwargs = {
-                "batch_size": 16,  # Reduced from 32 per official guidance
+                "batch_size": BATCH_SIZE,
                 "verbose": False,
                 "print_progress": False,
-                "vad_filter": True,  # ← NEW: Official recommendation
+                "vad_filter": True,
             }
             if whisper_code:
                 transcribe_kwargs["language"] = whisper_code
@@ -1440,20 +1440,20 @@ def transcribe_audio_locally(audio_path, language=None):
             for i, seg in enumerate(result["segments"]):
                 seg["speaker"] = f"SPEAKER_{i % 2:02d}"
 
-        # 6. MERGE CONSECUTIVE SEGMENTS (IMPROVED VERSION) ← NEW
+        # 6. Merge consecutive segments
         logger.info("Merging consecutive speaker segments with topic-aware logic...")
         result["segments"] = merge_consecutive_speaker_segments(result["segments"])
         
-        # 7. SPLIT LONG BLOCKS (NEW STEP) ← NEW
+        # 7. Split long blocks
         logger.info("Splitting long blocks to improve readability...")
         result["segments"] = split_long_blocks(result["segments"])
         
-        # 8. DETECT BACKCHANNELS (LOG ONLY) ← NEW
+        # 8. Detect backchannels (log only)
         backchannel_indices = detect_backchannels(result["segments"], log_detected=True)
         if backchannel_indices:
             logger.info(f"Detected {len(backchannel_indices)} potential backchannel responses")
         
-        # 9. RECONSTRUCT TEXT WITH PUNCTUATION ← NEW
+        # 9. Reconstruct text with punctuation
         logger.info("Applying rule-based punctuation restoration...")
         result_lines = []
         for seg in result["segments"]:
