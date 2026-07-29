@@ -1872,7 +1872,7 @@ class AnonymizationEngine:
 
             all_predictions.append(target_labels)
 
-    return all_predictions
+        return all_predictions
 
     def reconstruct_text_from_predictions(self, original_sentences, predictions):
         """Reconstructs text preserving speaker structure and original spacing."""
