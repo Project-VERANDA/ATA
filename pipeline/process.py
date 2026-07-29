@@ -1527,7 +1527,6 @@ def parse_transcript_into_blocks(transcript_text):
 def predict_dialogue_with_context(sentences_tokens, model, tokenizer, id_to_tag_map, device="cuda", context_window=1):
     """
     Predicts NER labels using FLERT-style context windowing.
-    FIXED: Proper offset tracking + subword aggregation.
     """
     from collections import Counter
     from collections import defaultdict
@@ -2041,7 +2040,6 @@ class AnonymizationEngine:
     def predict_dialogue_with_context(self, sentences_tokens, context_window=2):
         """
         Predicts NER labels using FLERT-style context windowing.
-        FIXED: Proper offset tracking + subword aggregation + FIRST SENTENCE HANDLING.
         """
         from collections import Counter
         from collections import defaultdict
@@ -2169,20 +2167,6 @@ class AnonymizationEngine:
                 sentences_tokens=sentences_tokens,
                 context_window=context_window
             )
-            
-            # DEBUG: Log predictions per sentence
-"""             logger.info("=== PREDICTION DEBUG ===")
-            for i, (speaker, tokens, original_text) in enumerate(sentences_data):
-                labels = predictions[i] if i < len(predictions) else ["O"] * len(tokens)
-                logger.info(f"Sentence {i}: {speaker}")
-                logger.info(f"  Tokens: {tokens}")
-                logger.info(f"  Labels: {labels}")
-                
-                # Show "nadine" detection specifically
-                for j, (tok, lab) in enumerate(zip(tokens, labels)):
-                    if tok.lower() == "nadine":
-                        logger.info(f"  ⚠️  'nadine' at position {j}: TAG={lab}")
-            logger.info("========================") """
             
         except Exception as e:
             logger.error(f"Inference failed: {e}")
