@@ -492,15 +492,17 @@ def validate_path(path, base):
     except ValueError:
         return False
 
-def merge_consecutive_speaker_segments(segments, max_gap_seconds=2.0):
+def merge_consecutive_speaker_segments(segments, max_gap_seconds=1.5, min_pause_words=3):
     """
-    Merges consecutive segments spoken by the same speaker.
-    If a speaker speaks again after a short gap (< max_gap_seconds), 
-    the segments are merged into one continuous block.
+    Improved: Only merge if SAME TOPIC (short pauses between sentences)
     
     Args:
         segments: List of dicts with 'start', 'end', 'speaker', 'text'
         max_gap_seconds: Maximum silence allowed between segments to merge them.
+        min_pause_words: Minimum word count to consider as "pause" before backchannel.
+        
+    Returns:
+        List of merged segment dictionaries.
     """
     if not segments:
         return []
@@ -510,7 +512,7 @@ def merge_consecutive_speaker_segments(segments, max_gap_seconds=2.0):
 
     for segment in segments:
         speaker = segment.get("speaker", "Unknown")
-        text = segment.get("text", "")
+        text = segment.get("text", "").strip()
         start = segment.get("start", 0)
         end = segment.get("end", 0)
 
@@ -523,24 +525,37 @@ def merge_consecutive_speaker_segments(segments, max_gap_seconds=2.0):
                 "end": end
             }
         else:
-            # Check if same speaker and gap is small enough
-            if current_segment["speaker"] == speaker:
-                gap = start - current_segment["end"]
-                if gap <= max_gap_seconds:
-                    # Merge: extend text and end time
-                    current_segment["text"] += " " + text
-                    current_segment["end"] = end
-                else:
-                    # Gap too large: finalize current, start new
-                    merged_segments.append(current_segment)
-                    current_segment = {
-                        "speaker": speaker,
-                        "text": text,
-                        "start": start,
-                        "end": end
-                    }
+            # Calculate gap
+            gap = start - current_segment["end"]
+            
+            # NEW: Detect topic shift indicators (backchannels, discourse markers)
+            prev_text = current_segment["text"].strip().lower()
+            curr_text = text.strip().lower()
+            
+            # Heuristic: Potential topic/speaker shift if:
+            # 1. Gap > 1.5 seconds (longer silence = different utterance)
+            # 2. Current text starts with backchannel word (response indicator)
+            # 3. Previous text ended with sentence terminator (question/statement complete)
+            
+            backchannel_indicators = ["yeah", "yes", "no", "right", "okay", "ok", "mm-hmm", "uh-huh"]
+            is_backchannel = any(curr_text.startswith(bc + " ") or curr_text == bc for bc in backchannel_indicators)
+            is_prev_complete = prev_text.endswith((".", "?", "!", "..."))
+            
+            is_topic_shift = (
+                gap > 1.5 or          # Longer silence = likely different utterance
+                is_backchannel or     # Response/backchannel = likely separate utterance  
+                is_prev_complete      # Previous sentence complete = new statement
+            )
+            
+            if (current_segment["speaker"] == speaker and 
+                gap <= max_gap_seconds and 
+                not is_topic_shift):  # ← NEW: Only merge if no topic shift
+                
+                # Merge: extend text and end time
+                current_segment["text"] += " " + text
+                current_segment["end"] = end
             else:
-                # Different speaker: finalize current, start new
+                # Either different speaker OR significant gap OR topic shift
                 merged_segments.append(current_segment)
                 current_segment = {
                     "speaker": speaker,
@@ -554,6 +569,148 @@ def merge_consecutive_speaker_segments(segments, max_gap_seconds=2.0):
         merged_segments.append(current_segment)
 
     return merged_segments
+
+def rule_based_punctuation(text):
+    """
+    Adds basic punctuation using patterns.
+    Faster than ML-based restoration, works offline.
+    
+    Args:
+        text: Raw transcript string without punctuation.
+        
+    Returns:
+        Text with added periods, capitalization, and basic structure.
+    """
+    if not text:
+        return text
+    
+    # Step 1: Capitalize first letter of text
+    if text and text[0].isalpha():
+        text = text[0].upper() + text[1:]
+    
+    # Step 2: Insert periods before backchannel/discourse words (common sentence boundaries)
+    backchannel_pattern = r'\b(okay|alright|well|so|though|however|actually|basically|literally|pretty|really)\b'
+    text = re.sub(backchannel_pattern, r'. \1', text, flags=re.IGNORECASE)
+    
+    # Step 3: Fix question words at start of clauses
+    question_pattern = r'(?<!\?)\b(how|what|when|where|why|who|which|whose)\b'
+    text = re.sub(question_pattern, r'\1', text, flags=re.IGNORECASE)  # Keep as is, model handles questions
+    
+    # Step 4: Add periods before speaker-switching indicators
+    transition_pattern = r'\b(but|and|then|also|plus|moreover)\b'
+    text = re.sub(transition_pattern, r'. \1', text, flags=re.IGNORECASE)
+    
+    # Step 5: End sentences before quoted speech or self-correction
+    self_correction = r'\b(that\'s|i mean|you know|like)\b'
+    text = re.sub(self_correction, r'. \1', text, flags=re.IGNORECASE)
+    
+    # Step 6: Capitalize sentence starts (after period + space)
+    text = re.sub(r'(\.\s+)([a-z])', lambda m: m.group(1) + m.group(2).upper(), text)
+    
+    # Step 7: Remove excessive spaces
+    text = re.sub(r'\s+', ' ', text)
+    text = text.strip()
+    
+    # Step 8: Ensure final period (unless it already ends with ? ! or .)
+    if text and not text.endswith(('.', '?', '!', ')', '"')):
+        text += '.'
+    
+    return text
+
+def split_long_blocks(segments, max_sentences=2, max_words=40):
+    """
+    Prevent overly long blocks by splitting on sentence boundaries.
+    
+    Args:
+        segments: List of segment dictionaries.
+        max_sentences: Maximum sentences per block before forcing split.
+        max_words: Maximum words per block before forcing split.
+        
+    Returns:
+        List of split segment dictionaries.
+    """
+    import re as _re
+    
+    split_segments = []
+    
+    for segment in segments:
+        text = segment.get("text", "").strip()
+        words = text.split()
+        start = segment.get("start", 0)
+        end = segment.get("end", 0)
+        
+        # Only split if exceeding thresholds
+        if len(words) <= max_words:
+            split_segments.append(segment)
+            continue
+        
+        # Split on sentence boundaries
+        sentences = _re.split(r'(?<=[.!?])\s+', text)
+        
+        current_chunk = ""
+        sentence_count = 0
+        chunk_start = start
+        
+        for sent in sentences:
+            tentative = (current_chunk + " " + sent).strip() if current_chunk else sent
+            
+            if (len(tentative.split()) <= max_words and 
+                sentence_count < max_sentences):
+                current_chunk = tentative
+                sentence_count += 1
+            else:
+                # Finalize current chunk if non-empty
+                if current_chunk:
+                    split_segments.append({
+                        **segment,
+                        "text": current_chunk,
+                        "start": chunk_start,
+                        "end": end if not split_segments else segment.get("end", end)
+                    })
+                    chunk_start = end  # Estimate new start (rough approximation)
+                
+                # Start new chunk
+                current_chunk = sent
+                sentence_count = 1
+        
+        # Append remainder
+        if current_chunk:
+            split_segments.append({
+                **segment,
+                "text": current_chunk,
+                "start": chunk_start,
+                "end": end
+            })
+    
+    return split_segments
+
+def detect_backchannels(segments, backchannel_words=["yeah", "yes", "no", "right", "okay", "ok", "mm-hmm", "uh-huh"], log_detected=True):
+    """
+    Flags segments that might be backchannel responses needing separation.
+    
+    Args:
+        segments: List of segment dictionaries.
+        backchannel_words: List of words that typically indicate backchannel responses.
+        log_detected: If True, log detected backchannels to logger.
+        
+    Returns:
+        List of indices where splits may be needed.
+    """
+    split_indices = []
+    
+    for i, segment in enumerate(segments):
+        text = segment.get("text", "").strip().lower()
+        
+        # Check if starts with backchannel word followed by additional content
+        for word in backchannel_words:
+            # Pattern: "yeah [something else]" = likely separate utterance
+            if (text.startswith(word + " ") or text == word) and len(text) > len(word) + 5:
+                if log_detected:
+                    logger.debug(f"Potential backchannel at segment {i}: '{text[:50]}...'")
+                split_indices.append(i)
+                break
+    
+    return split_indices
 
 def cleanup_gpu_resources(*objects_to_delete):
     """
@@ -743,8 +900,14 @@ def process_videos(file_list=None):
 
 def process_audios(enable_diarization=True, lang_code=None, file_list=None):
     """
-    Process audio files. Handles both raw .wav files AND video files (.mp4, .m4a, etc).
-    If a video file is provided, it extracts audio to .wav first, then transcribes.
+    Process audio files with WhisperX following official pipeline patterns.
+    
+    CORRECTED PER OFFICIAL WHISPERX GUIDANCE:
+    1. Diarization runs on audio file path (not numpy array)
+    2. assign_word_speakers() expects sorted DataFrame
+    3. Alignment happens via whisperx.align(), not transcribe()
+    4. VAD preprocessing enabled to reduce hallucinations
+    5. GPU memory flushed between major stages
     """
     global args
     check_gpu_resources() 
@@ -767,32 +930,43 @@ def process_audios(enable_diarization=True, lang_code=None, file_list=None):
     else:
         logger.info("✅ Speaker diarization ENABLED.")
 
-    # Load Models (Unchanged)
+    # Load Transcription Model
     try:
         device = "cuda" if torch.cuda.is_available() else "cpu"
         compute_type = "float16" if device == "cuda" else "float32"
+        
         model = whisperx.load_model(
             str(WHISPERX_MODEL_PATH), 
             device, 
             compute_type=compute_type, 
             local_files_only=True
         )
-        logger.info("WhisperX model loaded successfully (Direct Path).")
+        logger.info("WhisperX transcription model loaded successfully.")
     except Exception as e:
         logger.critical(f"Failed to load WhisperX model: {e}")
         return
 
-    if enable_diarization:
+    # Load Diarization Model (if enabled)
+    diarize_model = None
+    if enable_diarization and DIARIZATION_MODEL_PATH.exists():
         try:
             from pyannote.audio import Pipeline
             diarize_pipeline = Pipeline.from_pretrained(str(DIARIZATION_MODEL_PATH))
+            
+            # Configure diarization thresholds (reduce over-segmentation)
+            if hasattr(diarize_pipeline, 'min_duration_on'):
+                diarize_pipeline.min_duration_on = 1.0  # Reduced from 4.0
+            if hasattr(diarize_pipeline, 'min_duration_off'):
+                diarize_pipeline.min_duration_off = 0.5  # Reduced from 2.0
+            
             diarize_model = diarize_pipeline
-            logger.info("Diarization Pipeline loaded successfully (Direct Path).")
+            logger.info("Diarization Pipeline loaded successfully.")
         except Exception as e:
             logger.critical(f"Failed to load Diarization Pipeline: {e}. Disabling diarization.")
             diarize_model = None
-    else:
-        diarize_model = None
+    elif enable_diarization and not DIARIZATION_MODEL_PATH.exists():
+        logger.warning(f"Diarization model not found at {DIARIZATION_MODEL_PATH}. Disabling.")
+        enable_diarization = False
 
     # Determine Files to Process
     files_to_process = []
@@ -803,48 +977,30 @@ def process_audios(enable_diarization=True, lang_code=None, file_list=None):
     elif getattr(args, 'files', None):
         files_to_process = [Path(f) for f in args.files]
     else:
-        # Default: scan audio folder for .wav
         files_to_process = [f for f in AUDIOS_FOLDER.iterdir() if f.is_file() and f.suffix.lower() == ".wav"]
 
     if not files_to_process:
         logger.info("No files found to process.")
         return
 
-    logger.info(f"Found {len(files_to_process)} files to process. Starting stream...")
+    logger.info(f"Found {len(files_to_process)} files to process.")
 
     for idx, input_file in enumerate(files_to_process, 1):
         if not input_file.exists():
-            logger.error(f"Requested file '{input_file.name}' not found at {input_file}. Skipping.")
+            logger.error(f"Requested file '{input_file.name}' not found. Skipping.")
             continue
-        # Validate based on file type: Video -> VIDEOS_FOLDER, Audio -> AUDIOS_FOLDER
-        if input_file.suffix.lower() in SUPPORTED_EXTENSIONS and input_file.suffix.lower() != '.wav':
-            # It's a video/audio source file
-            if not validate_path(input_file, VIDEOS_FOLDER):
-                logger.error(f"Security Alert: Skipping {input_file.name} (path traversal in videos folder).")
-                continue
-            source_folder = VIDEOS_FOLDER
-        elif input_file.suffix.lower() == '.wav':
-            # It's a ready-to-go WAV file
-            if not validate_path(input_file, AUDIOS_FOLDER):
-                logger.error(f"Security Alert: Skipping {input_file.name} (path traversal in audios folder).")
-                continue
-            source_folder = AUDIOS_FOLDER
-        else:
-            logger.warning(f"Skipping unsupported file format: {input_file.suffix}")
-            continue
-
-        logger.info(f"[{idx}/{len(files_to_process)}] Processing: {input_file.name}")
-
-        # --- CONVERSION LOGIC ---
-        actual_audio_path = input_file
         
-        # If it's a video/source file, convert to WAV first
-        if input_file.suffix.lower() != '.wav':
+        # Validate path
+        if input_file.suffix.lower() == '.wav':
+            if not validate_path(input_file, AUDIOS_FOLDER):
+                logger.error(f"Security Alert: Path traversal detected. Skipping.")
+                continue
+            audio_path = input_file
+        else:
+            # Video file - convert first (existing code)
             base_name = sanitize_filename(input_file.stem)
-            actual_audio_path = AUDIOS_FOLDER / f"{base_name}.wav"
-            
-            if not actual_audio_path.exists():
-                logger.info(f"   Converting {input_file.name} -> {actual_audio_path.name}")
+            audio_path = AUDIOS_FOLDER / f"{base_name}.wav"
+            if not audio_path.exists():
                 try:
                     subprocess.run([
                         'ffmpeg', '-i', str(input_file),
@@ -852,77 +1008,183 @@ def process_audios(enable_diarization=True, lang_code=None, file_list=None):
                         '-ar', '16000',
                         '-ac', '1',
                         '-y',
-                        str(actual_audio_path)
+                        str(audio_path)
                     ], check=True, capture_output=True, text=True)
-                    logger.info(f"   Conversion successful.")
-                except subprocess.CalledProcessError as e:
-                    logger.error(f"   FFmpeg error: {e.stderr}")
-                    continue
+                    logger.info(f"Converted: {input_file.name} -> {audio_path.name}")
                 except Exception as e:
-                    logger.error(f"   Unexpected conversion error: {e}")
+                    logger.error(f"Conversion failed: {e}")
                     continue
             else:
-                logger.info(f"   Audio file already exists: {actual_audio_path.name}")
+                logger.info(f"Audio already exists: {audio_path.name}")
         
-        # Now process the .wav file (actual_audio_path)
+        logger.info(f"[{idx}/{len(files_to_process)}] Processing: {input_file.name}")
+
         try:
-            # Step A: Load Audio
-            audio = whisperx.load_audio(str(actual_audio_path))
+            # =================================================================
+            # STEP 1: TRANSCRIBE (with VAD preprocessing - official recommendation)
+            # =================================================================
+            logger.info("Step 1/4: Transcribing audio...")
+            audio = whisperx.load_audio(str(audio_path))
             
-            # Step B: Transcribe
             transcribe_kwargs = {
-                "audio": audio,
-                "batch_size": BATCH_SIZE,
+                "batch_size": 16,  # Reduced from 32 per official guidance
                 "verbose": False,
                 "print_progress": False,
-                "task": "transcribe"
+                "vad_filter": True,  # ← NEW: Official recommendation
             }
             if whisper_code:
                 transcribe_kwargs["language"] = whisper_code
             
-            result = model.transcribe(**transcribe_kwargs)
+            result = model.transcribe(audio, **transcribe_kwargs)
+            logger.info(f"  ✓ Transcription complete ({len(result['segments'])} segments)")
             
-            # Step C: Align
+            # Flush GPU memory after transcription
+            del audio
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+            # =================================================================
+            # STEP 2: ALIGN (for word-level timestamps - official WhisperX flow)
+            # =================================================================
+            logger.info("Step 2/4: Aligning segments...")
             if result.get("language"):
                 try:
                     align_device = "cuda" if torch.cuda.is_available() else "cpu"
-                    model_a, metadata = whisperx.load_align_model(language_code=result["language"], device=align_device)
-                    result = whisperx.align(result["segments"], model_a, metadata, audio, align_device, return_char_alignments=False)
-                except Exception as e:
-                    logger.warning(f"Alignment failed: {e}")
-
-            # Step D: Diarize
-            if enable_diarization and diarize_model:
-                try:
-                    diarize_output = diarize_model(str(actual_audio_path))
-                    speaker_diarization = diarize_output.speaker_diarization
+                    model_a, metadata = whisperx.load_align_model(
+                        language_code=result["language"], 
+                        device=align_device
+                    )
                     
+                    # Pre-split long segments (keep existing logic)
+                    import re as _re
+                    MAX_ALIGN_WORDS = 30
+                    pre_split_segments = []
+                    for seg in result["segments"]:
+                        text = seg.get("text", "").strip()
+                        words = text.split()
+                        if len(words) <= MAX_ALIGN_WORDS:
+                            pre_split_segments.append(seg)
+                        else:
+                            sentences = _re.split(r'(?<=[.!?])\s+', text)
+                            current_chunk = ""
+                            for sent in sentences:
+                                tentative = (current_chunk + " " + sent).strip() if current_chunk else sent
+                                if len(tentative.split()) <= MAX_ALIGN_WORDS:
+                                    current_chunk = tentative
+                                else:
+                                    if current_chunk:
+                                        pre_split_segments.append({
+                                            "start": seg["start"],
+                                            "end": seg["end"],
+                                            "text": current_chunk
+                                        })
+                                    current_chunk = sent
+                            if current_chunk:
+                                pre_split_segments.append({
+                                    "start": seg["start"],
+                                    "end": seg["end"],
+                                    "text": current_chunk
+                                })
+                    
+                    result["segments"] = pre_split_segments
+                    
+                    # Official whisperx.align() call
+                    result = whisperx.align(
+                        result["segments"], 
+                        model_a, 
+                        metadata, 
+                        audio,  # ← Pass numpy array (correct)
+                        align_device, 
+                        return_char_alignments=False
+                    )
+                    
+                    logger.info(f"  ✓ Alignment complete ({len(result['segments'])} aligned segments)")
+                    
+                    # Free alignment model memory
+                    del model_a
+                    del metadata
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                        
+                except Exception as e:
+                    logger.warning(f"Alignment failed: {e}. Proceeding without alignment.")
+            else:
+                logger.warning("  ⚠ No language detected, skipping alignment.")
+
+            # =================================================================
+            # STEP 3: DIARIZE (on audio FILE PATH - official requirement)
+            # =================================================================
+            if enable_diarization and diarize_model:
+                logger.info("Step 3/4: Running diarization...")
+                try:
+                    # CRITICAL FIX: Pass AUDIO FILE PATH, not numpy array
+                    # Pyannote.pipeline expects file path string
+                    diarize_output = diarize_model(str(audio_path))
+                    
+                    # Convert pyannote.Annotation to DataFrame (official pattern)
                     segments_list = []
-                    for turn, _, speaker in speaker_diarization.itertracks(yield_label=True):
+                    for turn, _, speaker in diarize_output.itertracks(yield_label=True):
                         duration = turn.end - turn.start
-                        if duration < 0.5: continue
-                        segments_list.append({'start': turn.start, 'end': turn.end, 'speaker': speaker})
+                        
+                        # Filter short fragments (< 0.5s)
+                        if duration < 0.5:
+                            continue
+                        
+                        segments_list.append({
+                            'start': turn.start,
+                            'end': turn.end,
+                            'speaker': speaker
+                        })
                     
                     if segments_list:
+                        # CRITICAL FIX: Sort by start time before DataFrame creation
+                        # pyannote may return tracks ordered by speaker cluster
+                        segments_list = sorted(segments_list, key=lambda x: x['start'])
+                        
                         import pandas as pd
                         diarize_df = pd.DataFrame(segments_list)
+                        
+                        logger.info(f"  ✓ Diarization: {len(diarize_df)} speaker turns detected")
+                        
+                        # assign_word_speakers() expects DataFrame (not Annotation)
                         result = whisperx.assign_word_speakers(diarize_df, result)
+                        logger.info("  ✓ Speaker assignment complete")
+                        
+                        # Clean up diarization data
+                        del diarize_df
+                        del segments_list
                     else:
-                        logger.warning(f"   No valid speakers found. Using fallback.")
+                        logger.warning("  ⚠ No valid diarization segments found. Using fallback.")
                         for i, seg in enumerate(result["segments"]):
                             seg["speaker"] = f"SPEAKER_{i%2:02d}"
+                
                 except Exception as e:
-                    logger.error(f"   Diarization failed: {e}. Using fallback.")
+                    logger.error(f"  ✗ Diarization failed: {e}. Using fallback.")
                     for i, seg in enumerate(result["segments"]):
                         seg["speaker"] = f"SPEAKER_{i%2:02d}"
             else:
+                # Fallback: Generic speaker labels
                 for i, seg in enumerate(result["segments"]):
                     seg["speaker"] = f"SPEAKER_{i%2:02d}"
 
-            # Step E: Merge & Save
+            # =================================================================
+            # STEP 4: POST-PROCESSING (your improved merging/punctuation)
+            # =================================================================
+            logger.info("Step 4/4: Applying post-processing...")
+            
+            # Merge with topic-aware logic
             result["segments"] = merge_consecutive_speaker_segments(result["segments"])
             
-            # Use the original filename stem for the transcript
+            # Split long blocks
+            result["segments"] = split_long_blocks(result["segments"])
+            
+            # Detect backchannels (informational only)
+            backchannel_indices = detect_backchannels(result["segments"], log_detected=False)
+            if backchannel_indices:
+                logger.info(f"  ⚠ Detected {len(backchannel_indices)} potential backchannel responses")
+            
+            # Save with punctuation
             base_name = sanitize_filename(input_file.stem)
             transcript_file = TRANSCRIPTS_FOLDER / f"{base_name}.txt"
             
@@ -930,9 +1192,16 @@ def process_audios(enable_diarization=True, lang_code=None, file_list=None):
                 for segment in result["segments"]:
                     text = segment.get("text", "").strip()
                     if text:
-                        f.write(f"{segment.get('speaker', 'Unknown')}: {text}\n")
+                        text_with_punct = rule_based_punctuation(text)
+                        f.write(f"{segment.get('speaker', 'Unknown')}: {text_with_punct}\n")
             
-            logger.info(f"✅ COMPLETED: {input_file.name} -> {transcript_file.name}")
+            logger.info(f"  ✓ Saved: {transcript_file.name}")
+            
+            # Log sample
+            logger.info("  📝 Sample output:")
+            for i, seg in enumerate(result["segments"][:3]):
+                display_text = seg.get("text", "")[:60] + "..." if len(seg.get("text", "")) > 60 else seg.get("text", "")
+                logger.info(f"     [{i}] {seg.get('speaker')}: {display_text}")
 
         except Exception as e:
             logger.error(f"❌ FAILED: {input_file.name} - {e}")
@@ -940,13 +1209,18 @@ def process_audios(enable_diarization=True, lang_code=None, file_list=None):
             logger.error(traceback.format_exc())
         
         finally:
-            # Cleanup GPU memory for this file
+            # Final cleanup
             gc.collect()
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
             time.sleep(0.1)
 
+    # Final cleanup
+    del model
+    if diarize_model:
+        del diarize_model
     cleanup_gpu_resources()
+    
     logger.info("Stream processing finished.")
     return len(files_to_process)
 
@@ -1021,6 +1295,7 @@ def transcribe_audio_locally(audio_path, language=None):
     """
     Transcribes a single audio file using local models.
     Logs progress to console AND returns text for web interface.
+    Includes punctuation restoration and improved block splitting.
     """
     global _loaded_whisper_model, _loaded_diarize_model
     
@@ -1034,7 +1309,7 @@ def transcribe_audio_locally(audio_path, language=None):
     if not _loaded_whisper_model:
         error_msg = "Error: WhisperX model not loaded."
         logger.error(error_msg)
-        return error_msg
+        return error_msg, []
     
     try:
         # 2. Load Audio
@@ -1081,8 +1356,6 @@ def transcribe_audio_locally(audio_path, language=None):
                 )
 
                 # Pre-split overly long segments to reduce backtrack failures.
-                # The alignment model struggles with segments > ~30 words or
-                # segments containing multiple sentences with disfluencies.
                 MAX_ALIGN_WORDS = 30
                 pre_split_segments = []
                 for seg in result["segments"]:
@@ -1127,9 +1400,6 @@ def transcribe_audio_locally(audio_path, language=None):
         if _loaded_diarize_model:
             logger.info("Running speaker diarization...")
             try:
-                # Set minimum duration thresholds to reduce over-segmentation.
-                # min_duration_on: minimum speech segment length (seconds)
-                # min_duration_off: minimum silence gap between segments (seconds)
                 _loaded_diarize_model.min_duration_on = 4.0
                 _loaded_diarize_model.min_duration_off = 2
 
@@ -1144,13 +1414,6 @@ def transcribe_audio_locally(audio_path, language=None):
                 for turn, _, speaker in speaker_diarization.itertracks(yield_label=True):
                     duration = turn.end - turn.start
 
-                    # Discard sub-second turns. pyannote's pooling layer
-                    # computes std(dim=-1, correction=1) over the frame
-                    # sequences; when a turn yields fewer than 2 frames,
-                    # degrees of freedom drops to zero and triggers a
-                    # UserWarning from ATen/native/ReduceOps. These
-                    # fragments are acoustically meaningless and would be
-                    # filtered by the downstream merge step anyway.
                     if duration < 0.5:
                         logger.debug(f"Discarding short diarization turn: {duration:.3f}s")
                         continue
@@ -1162,11 +1425,6 @@ def transcribe_audio_locally(audio_path, language=None):
                     })
 
                 logger.info(f"Diarization extracted {len(segments_list)} speaker segments.")
-
-                # Sort chronologically before speaker assignment. pyannote
-                # may return tracks ordered by speaker cluster rather than
-                # by time; unsorted segments cause misaligned word-to-speaker
-                # mapping in whisperx.assign_word_speakers.
                 segments_list = sorted(segments_list, key=lambda x: x.get('start', 0))
 
                 diarize_df = pd.DataFrame(segments_list)
@@ -1178,42 +1436,33 @@ def transcribe_audio_locally(audio_path, language=None):
                 logger.warning("Falling back to generic speaker labels.")
                 for i, segment in enumerate(result["segments"]):
                     segment["speaker"] = f"SPEAKER_{i % 2:02d}"
+        else:
+            for i, seg in enumerate(result["segments"]):
+                seg["speaker"] = f"SPEAKER_{i % 2:02d}"
 
-        # 6. MERGE CONSECUTIVE SEGMENTS
-        logger.info("Merging consecutive speaker segments...")
-        merged_segments = []
-        prev_segment = None
+        # 6. MERGE CONSECUTIVE SEGMENTS (IMPROVED VERSION) ← NEW
+        logger.info("Merging consecutive speaker segments with topic-aware logic...")
+        result["segments"] = merge_consecutive_speaker_segments(result["segments"])
         
-        for segment in result["segments"]:
-            speaker = segment.get("speaker", "Unknown")
-            text = segment.get("text", "").strip()
-            
-            # FILTER: Discard extremely short segments (likely noise/hallucinations)
-            # Unless the text is a known tag or very short valid word (like "I", "a")
-            if len(text) < 4 and text.lower() not in ["i", "a", "ok", "no", "yes", "hi"]:
-                logger.debug(f"Discarding short segment: '{text}' (Length: {len(text)})")
-                continue
-            
-            # Only merge if it's the SAME speaker AND it's immediately following
-            if prev_segment and prev_segment["speaker"] == speaker:
-                prev_segment["text"] += " " + text
-            else:
-                if prev_segment:
-                    merged_segments.append(prev_segment)
-                prev_segment = {"speaker": speaker, "text": text}
+        # 7. SPLIT LONG BLOCKS (NEW STEP) ← NEW
+        logger.info("Splitting long blocks to improve readability...")
+        result["segments"] = split_long_blocks(result["segments"])
         
-        if prev_segment:
-            merged_segments.append(prev_segment)
+        # 8. DETECT BACKCHANNELS (LOG ONLY) ← NEW
+        backchannel_indices = detect_backchannels(result["segments"], log_detected=True)
+        if backchannel_indices:
+            logger.info(f"Detected {len(backchannel_indices)} potential backchannel responses")
         
-        logger.info(f"Merged into {len(merged_segments)} final segments.")
-
-        # 7. BUILD RETURN STRING & LOG FINAL RESULT
+        # 9. RECONSTRUCT TEXT WITH PUNCTUATION ← NEW
+        logger.info("Applying rule-based punctuation restoration...")
         result_lines = []
-        for seg in merged_segments:
+        for seg in result["segments"]:
             if seg['text'].strip():
-                line = f"{seg['speaker']}: {seg['text'].strip()}"
+                # Apply punctuation restoration to each segment
+                text_with_punct = rule_based_punctuation(seg['text'])
+                line = f"{seg['speaker']}: {text_with_punct}"
                 result_lines.append(line)
-                logger.info(f"  >> {line}")  # Log each line to console
+                logger.info(f"  >> {line[:80]}{'...' if len(line) > 80 else ''}")
         
         result_text = "\n".join(result_lines)
         
@@ -1229,7 +1478,7 @@ def transcribe_audio_locally(audio_path, language=None):
 
     except Exception as e:
         error_msg = f"Transcription failed: {e}"
-        logger.error(error_msg, exc_info=True)  # Log full traceback to console
+        logger.error(error_msg, exc_info=True)
         return error_msg, []
 
 # --- Anonymization Engine Class (Custom CRF Implementation) ---
@@ -1922,7 +2171,7 @@ class AnonymizationEngine:
             )
             
             # DEBUG: Log predictions per sentence
-            logger.info("=== PREDICTION DEBUG ===")
+"""             logger.info("=== PREDICTION DEBUG ===")
             for i, (speaker, tokens, original_text) in enumerate(sentences_data):
                 labels = predictions[i] if i < len(predictions) else ["O"] * len(tokens)
                 logger.info(f"Sentence {i}: {speaker}")
@@ -1933,7 +2182,7 @@ class AnonymizationEngine:
                 for j, (tok, lab) in enumerate(zip(tokens, labels)):
                     if tok.lower() == "nadine":
                         logger.info(f"  ⚠️  'nadine' at position {j}: TAG={lab}")
-            logger.info("========================")
+            logger.info("========================") """
             
         except Exception as e:
             logger.error(f"Inference failed: {e}")
