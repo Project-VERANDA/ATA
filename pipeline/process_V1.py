@@ -14,7 +14,7 @@ import numpy as np
 from datetime import datetime
 from collections import defaultdict
 from pathlib import Path
-from pydub import AudioSegment
+#from pydub import AudioSegment
 from openai import OpenAI
 from dotenv import load_dotenv
 load_dotenv()
