@@ -1204,7 +1204,7 @@ def reconstruct_text_from_predictions(original_sentences, predictions, speaker_m
         
     return "\n".join(reconstructed_blocks)
 
-def predict_sentences_simple(sentences_tokens, model, tokenizer, id_to_tag_map, device="cpu"):
+def predict_sentences_simple(sentences_tokens, model, tokenizer, id_to_tag_map, device=device):
     """
     Simple sentence-level NER prediction without FLERT context windowing.
     Matches the model card's single-sentence inference example.
