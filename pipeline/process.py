@@ -192,11 +192,11 @@ VIDEOS_FOLDER = pipeline_dir / "videos"
 AUDIOS_FOLDER = pipeline_dir / "audios"
 TRANSCRIPTS_FOLDER = pipeline_dir / "transcripts"
 MODEL_FOLDER = pipeline_dir / "model"
-ANNONYM_FOLDER = pipeline_dir / "anonym"
+ANONYM_FOLDER = pipeline_dir / "anonym"
 LLM_ANONYM_FOLDER = pipeline_dir / "LLM-Anon"
 
 # Create directories if they don't exist
-for folder in [TRANSCRIPTS_FOLDER, ANNONYM_FOLDER, MODEL_FOLDER, LLM_ANONYM_FOLDER]:
+for folder in [TRANSCRIPTS_FOLDER, ANONYM_FOLDER, MODEL_FOLDER, LLM_ANONYM_FOLDER]:
     if not folder.exists():
         folder.mkdir(parents=True, exist_ok=True)
         logger.info(f"Created directory: {folder}")
@@ -1575,7 +1575,7 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
     llm_processed_count = 0
     llm_failed_count = 0 
 
-    source_folder = TRANSCRIPTS_FOLDER if not skip_bert else ANNONYM_FOLDER
+    source_folder = TRANSCRIPTS_FOLDER if not skip_bert else ANONYM_FOLDER
     source_suffix = ".txt"
     
     files_to_process = []
@@ -1658,9 +1658,9 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
                     continue
 
                 output_filename = f"{base_name}_anon.txt"
-                output_path = ANNONYM_FOLDER / output_filename
+                output_path = ANONYM_FOLDER / output_filename
                 
-                if not validate_path(output_path, ANNONYM_FOLDER):
+                if not validate_path(output_path, ANONYM_FOLDER):
                     logger.error(f"Security Alert: Output path traversal detected for {output_filename}. Skipping save.")
                     failed_count += 1
                     continue
@@ -1961,7 +1961,7 @@ __all__ = [
     'BASE_PATH',
     'pipeline_dir',
     'MODEL_FOLDER',
-    'ANNONYM_FOLDER',
+    'ANONYM_FOLDER',
     'LLM_ANONYM_FOLDER',       # Fixed spelling (single N)
     'LLM_ANONNYM_FOLDER',      # Legacy alias (double N)
     'TRANSCRIPTS_FOLDER',
