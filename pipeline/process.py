@@ -1765,10 +1765,6 @@ class AnonymizationEngine:
             self.method = None
 
     def split_dialogue_into_sentences(self, text, nlp_pipeline=None):
-        """
-        Splits dialogue text into sentences following HuggingFace pattern.
-        Returns list of (speaker, tokens) tuples.
-        """
         sentences_with_speakers = []
         lines = text.strip().split('\n')
 
@@ -1782,16 +1778,14 @@ class AnonymizationEngine:
                 continue
 
             speaker = match.group(1)
-            content = match.group(2)
+            content = match.group(2)  # ← Save original text!
 
             if not content:
                 continue
 
-            # Simple tokenization (split by whitespace)
-            # For better results, use spaCy sentencizer
             tokens = content.split()
             if tokens:
-                sentences_with_speakers.append((speaker, tokens))
+                sentences_with_speakers.append((speaker, tokens, content))  # ← Include original_text
 
         return sentences_with_speakers
 
@@ -1875,14 +1869,15 @@ class AnonymizationEngine:
         return all_predictions
 
     def reconstruct_text_from_predictions(self, original_sentences, predictions):
-        """Reconstructs text preserving speaker structure and original spacing."""
         reconstructed_blocks = []
 
-        for i, (speaker, tokens) in enumerate(original_sentences):
+        for i, (speaker, tokens, original_text) in enumerate(original_sentences):
             labels = predictions[i] if i < len(predictions) else ["O"] * len(tokens)
-
-            # Work backwards to avoid index shifts when replacing
-            reconstructed_text = " ".join(tokens)
+            
+            # Use ORIGINAL TEXT to preserve formatting
+            reconstructed_text = original_text  
+            
+            # Work backwards to avoid index shifts
             for w_idx in reversed(range(len(tokens))):
                 if w_idx < len(labels) and labels[w_idx] not in ["O", "", None]:
                     tag = labels[w_idx]
