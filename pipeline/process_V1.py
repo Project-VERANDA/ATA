@@ -185,7 +185,7 @@ VIDEOS_FOLDER = pipeline_dir / "videos"
 AUDIOS_FOLDER = pipeline_dir / "audios"
 TRANSCRIPTS_FOLDER = pipeline_dir / "transcripts"
 MODEL_FOLDER = pipeline_dir / "model"
-ANNONYM_FOLDER = pipeline_dir / "annonym"
+ANNONYM_FOLDER = pipeline_dir / "anonym"
 LLM_ANONNYM_FOLDER = pipeline_dir / "LLM-Anon"
 
 # Create directories if they don't exist
@@ -203,7 +203,7 @@ MIN_SPEAKERS = 2
 MAX_SPEAKERS = 4
 
 # Local Model Paths
-WHISPERX_MODEL_PATH = MODEL_FOLDER / "models--Systran--faster-whisper-large-v3"
+WHISPERX_MODEL_PATH = MODEL_FOLDER / "Systran--faster-whisper-large-v3"
 
 
 # System prompts per language
