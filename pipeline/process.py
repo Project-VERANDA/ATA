@@ -18,6 +18,16 @@ from pathlib import Path
 from openai import OpenAI
 from dotenv import load_dotenv
 
+from pipeline.tts.tts_engine import (
+    generate_speech,
+    generate_beep,
+    synthesize_segment,
+    get_available_tts_voices,
+    get_tts_status,
+    TTS_BACKEND,
+    TTS_ENABLED,
+)
+
 load_dotenv()
 
 # GPU Detection Check
@@ -183,10 +193,10 @@ AUDIOS_FOLDER = pipeline_dir / "audios"
 TRANSCRIPTS_FOLDER = pipeline_dir / "transcripts"
 MODEL_FOLDER = pipeline_dir / "model"
 ANNONYM_FOLDER = pipeline_dir / "anonym"
-LLM_ANONNYM_FOLDER = pipeline_dir / "LLM-Anon"
+LLM_ANONYM_FOLDER = pipeline_dir / "LLM-Anon"
 
 # Create directories if they don't exist
-for folder in [TRANSCRIPTS_FOLDER, ANNONYM_FOLDER, MODEL_FOLDER, LLM_ANONNYM_FOLDER]:
+for folder in [TRANSCRIPTS_FOLDER, ANNONYM_FOLDER, MODEL_FOLDER, LLM_ANONYM_FOLDER]:
     if not folder.exists():
         folder.mkdir(parents=True, exist_ok=True)
         logger.info(f"Created directory: {folder}")
@@ -1678,9 +1688,9 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
                     if final_text:
                         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                         llm_filename = f"{base_name}_adversarial_{timestamp}.txt"
-                        llm_path = LLM_ANONNYM_FOLDER / llm_filename
+                        llm_path = LLM_ANONYM_FOLDER / llm_filename
                         
-                        if not validate_path(llm_path, LLM_ANONNYM_FOLDER):
+                        if not validate_path(llm_path, LLM_ANONYM_FOLDER):
                             logger.error(f"Security Alert: LLM output path traversal detected for {llm_filename}. Skipping.")
                             llm_failed_count += 1
                             continue
@@ -1689,7 +1699,7 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
                             f.write(final_text)
                         
                         log_filename = f"{base_name}_adversarial_{timestamp}_log.json"
-                        log_path = LLM_ANONNYM_FOLDER / log_filename
+                        log_path = LLM_ANONYM_FOLDER / log_filename
                         with open(log_path, "w", encoding="utf-8") as f:
                             json.dump(iteration_log, f, indent=2, ensure_ascii=False)
                             
@@ -1707,9 +1717,9 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
                     if llm_result:
                         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                         llm_filename = f"{base_name}_llm_{timestamp}.txt"
-                        llm_path = LLM_ANONNYM_FOLDER / llm_filename
+                        llm_path = LLM_ANONYM_FOLDER / llm_filename
                         
-                        if not validate_path(llm_path, LLM_ANONNYM_FOLDER):
+                        if not validate_path(llm_path, LLM_ANONYM_FOLDER):
                             logger.error(f"Security Alert: LLM output path traversal detected for {llm_filename}. Skipping.")
                             llm_failed_count += 1
                             continue
@@ -1908,3 +1918,57 @@ Examples:
     
     logger.info("Pipeline finished.")
     session_logger.finish()
+
+
+# ============================================================================
+# MODULE EXPORTS - For interoperability with app.py and external modules
+# ============================================================================
+__all__ = [
+    # Core functions
+    'check_gpu_resources',
+    'SessionLogger',
+    'process_videos',
+    'process_audios',
+    'load_models',
+    'transcribe_audio_locally',
+    'AnonymizationEngine',
+    'anonymize_text_locally',
+    'process_anonymization',
+    
+    # LLM functions
+    'call_llm_rewriter',
+    'generate_paraphrase',
+    'run_adversarial_anonymization',
+    
+    # TTS functions (from tts_engine)
+    'generate_speech',
+    'generate_beep',
+    'synthesize_segment',
+    'get_available_tts_voices',
+    'get_tts_status',
+    
+    # Configuration variables
+    'TTS_BACKEND',
+    'TTS_ENABLED',
+    'CHAT_AI_API_KEY',
+    'CHAT_AI_ENDPOINT',
+    'DEFAULT_CHAT_AI_MODEL',
+    'LLM_REWRITE_ENABLED',
+    'AVAILABLE_LLM_MODELS',
+    'AVAILABLE_TAGS',
+    
+    # Path constants
+    'BASE_PATH',
+    'pipeline_dir',
+    'MODEL_FOLDER',
+    'ANNONYM_FOLDER',
+    'LLM_ANONYM_FOLDER',       # Fixed spelling (single N)
+    'LLM_ANONNYM_FOLDER',      # Legacy alias (double N)
+    'TRANSCRIPTS_FOLDER',
+    'VIDEOS_FOLDER',
+    'AUDIOS_FOLDER',
+    
+    # Language support
+    'WHISPER_LANG_MAP',
+    'SUPPORTED_LANGUAGES',
+]
