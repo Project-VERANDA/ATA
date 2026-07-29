@@ -68,3 +68,4 @@ __pycache__/
 # Temporary files
 *.tmp
 .tmp/
+requirements-lock.txt
