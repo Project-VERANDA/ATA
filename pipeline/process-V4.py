@@ -378,6 +378,18 @@ LLM_REWRITE_SYSTEM_PROMPT = (
 )
 
 
+AVAILABLE_LLM_MODELS = {
+    'medgemma': 'medgemma',            # Try this first (matches 'medgemma' working hint)
+    'medgemma27b': 'medgemma27b',      # Try 'medgemma27b' instead of 'medgemma-27b-it'
+    'gpt-oss-120b': 'gpt-oss-120b',    # This one definitely works
+    'Qwen3.6-27B': 'Qwen3.6-27B',      # Match the table name exactly, no prefix
+    'Qwen3.5-27B': 'Qwen3.5-27B',      
+    'qwen3-asr-1.7b': 'qwen3-asr-1.7b',
+    'cle-Kimi-K2.6': 'cle-Kimi-K2.6',  
+    'cle-Qwen3-Coder-Next-FP8': 'cle-Qwen3-Coder-Next-FP8',
+    'cle-Qwen3.5-397B-A17B-FP8': 'cle-Qwen3.5-397B-A17B-FP8'
+}
+
 # --- Helper Functions ---
 
 def sanitize_filename(filename):
