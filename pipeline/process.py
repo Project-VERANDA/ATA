@@ -1496,48 +1496,53 @@ def catch_missed_names(text, fallback_names=None):
     return text
 
 class AnonymizationEngine:
-    """Anonymization Engine using ModernBERT + CRF with OFFICIAL FLERT implementation."""
+    """
+    Updated AnonymizationEngine using sentence-level splitting as per model card.
+    """
     
-    def __init__(self, method="local_mmbert", level="standard", model_path=None,
+    def __init__(self, method="local_mmbert", level="standard", model_path=None, 
                  include_tags=None, exclude_tags=None):
         self.method = method
         self.level = level
-        
-        # REMOVED fallback to old model name - using OFFICIAL DFKI-SLT model only
-        self.model_path = model_path or (MODEL_FOLDER / "multilingual_DialogPII_NER")
-        
+        self.model_path = model_path or (MODEL_FOLDER / "mmbert_multilingual_pii_ner")
         self.include_tags = include_tags
         self.exclude_tags = exclude_tags
         self.model = None
         self.tokenizer = None
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.config = None
-        self.crf_config = None
-        self.flert_config = None
-        self.label_mapping = {}
-        self.original_id2label = {}
-        self.original_label2id = {}
-
+        self.label_mapping = {} 
+        
         if ANONYMIZATION_ENABLED:
-            logger.info(f"AnonymizationEngine initialized: Method={self.method}, Level={self.level}, Model={self.model_path.name}")
-            
-            # Verify model exists before proceeding
-            if not self.model_path.exists():
-                logger.error(f"Model not found at {self.model_path}. Please ensure 'multilingual_DialogPII_NER' is downloaded.")
-                self.method = None
-            else:
-                self._load_model()
-    
+            logger.info(f"AnonymizationEngine initialized: Method={self.method}, Level={self.level}")
+            self._load_model()
+
     def _build_safe_label_mapping(self):
-        """Constructs mapping from model labels to anonymization tags."""
+        """
+        Constructs a dynamic mapping from model labels to anonymization tags.
+        FIXED: Ensures robust fallback for unknown IDs.
+        """
         all_target_tags = {
-            'PERSON': '[PERSON]', 'PERSON_EMAIL': '[EMAIL]', 'PERSON_SOCIAL_RELATION': '[NAME_RELATIVE]',
-            'ORG': '[ORGANISATION]', 'LOC_CITY': '[CITY]', 'LOC_COUNTRY': '[COUNTRY]',
-            'LOC_STREET': '[STREET]', 'LOC_ZIP': '[ZIP]', 'LOC_HOUSENUMBER': '[HOUSENUMBER]',
-            'LOC_OTHER': '[LOCATION]', 'DATETIME': '[DATETIME]', 'DATETIME_AGE': '[AGE]',
-            'CODE': '[CODE]', 'CODE_PHONE': '[PHONE]', 'CODE_URL': '[URL]',
-            'PROFESSION': '[PROFESSION]', 'PRODUCT': '[PRODUCT]', 'QUANTITY': '[QUANTITY]',
-            'MISC': '[MISC]', 'O': ''
+            'PERSON': '[PERSON]',
+            'PERSON_EMAIL': '[EMAIL]',
+            'PERSON_SOCIAL_RELATION': '[NAME_RELATIVE]',
+            'ORG': '[ORGANISATION]',
+            'LOC_CITY': '[CITY]',
+            'LOC_COUNTRY': '[COUNTRY]',
+            'LOC_STREET': '[STREET]',
+            'LOC_ZIP': '[ZIP]',
+            'LOC_HOUSENUMBER': '[HOUSENUMBER]',
+            'LOC_OTHER': '[LOCATION]',
+            'DATETIME': '[DATETIME]',
+            'DATETIME_AGE': '[AGE]',
+            'CODE': '[CODE]',
+            'CODE_PHONE': '[PHONE]',
+            'CODE_URL': '[URL]',
+            'PROFESSION': '[PROFESSION]',
+            'PRODUCT': '[PRODUCT]',
+            'QUANTITY': '[QUANTITY]',
+            'MISC': '[MISC]',
+            'O': '' # "O" means keep original word
         }
 
         active_tags = set(all_target_tags.keys())
@@ -1545,69 +1550,32 @@ class AnonymizationEngine:
         if self.include_tags:
             include_set = set(t.upper() for t in self.include_tags)
             active_tags = active_tags.intersection(include_set)
-            logger.info(f"Restricting to tags: {active_tags}")
-
+            logger.info(f"Restricting anonymization to specific tags: {active_tags}")
+        
         if self.exclude_tags:
             exclude_set = set(t.upper() for t in self.exclude_tags)
             active_tags = active_tags.difference(exclude_set)
             logger.info(f"Excluding tags: {exclude_set}")
 
         mapping = {}
+        # Ensure we map EVERY possible label ID from the model config
         for label_id, label_name in self.original_id2label.items():
             clean_label = label_name.replace("B-", "").replace("I-", "").replace("S-", "").replace("E-", "")
+            
+            # Normalize label name for comparison
             clean_label_upper = clean_label.upper()
-
+            
             if clean_label_upper in active_tags:
                 mapping[str(label_id)] = all_target_tags[clean_label_upper]
             else:
+                # If not active, map to empty string (keep original word)
                 mapping[str(label_id)] = ""
-
+                
         logger.info(f"Built label mapping with {len(mapping)} entries.")
         return mapping
-    
-    def _verify_label_mapping(self):
-        """Fixed - checks for TARGET tags like [PERSON], [CITY], etc."""
-        logger.info("=== LABEL MAPPING VERIFICATION ===")
-        
-        # Check what ACTUAL tags exist in the mapping values
-        found_tags = set()
-        for label_id, anon_tag in self.label_mapping.items():
-            if anon_tag:  # Non-empty tags
-                # Extract tag name from format like "[PERSON]"
-                if anon_tag.startswith('[') and anon_tag.endswith(']'):
-                    tag_name = anon_tag[1:-1]
-                    found_tags.add(tag_name)
-        
-        logger.info(f"Found {len(found_tags)} active tags: {sorted(found_tags)}")
-        
-        critical_tags = ['PERSON', 'ORGANISATION', 'CITY', 'COUNTRY', 
-                        'DATETIME', 'PHONE', 'URL']
-        
-        missing = []
-        for tag in critical_tags:
-            # Map to expected output format
-            tag_mapping = {
-                'PERSON': '[PERSON]',
-                'ORGANISATION': '[ORGANISATION]',
-                'CITY': '[CITY]',
-                'COUNTRY': '[COUNTRY]',
-                'DATETIME': '[DATETIME]',
-                'PHONE': '[PHONE]',
-                'URL': '[URL]',
-            }
-            if tag_mapping[tag] not in self.label_mapping.values():
-                missing.append(tag)
-        
-        if missing:
-            logger.warning(f"⚠️ Missing critical tags: {missing}")
-            logger.warning("Anonymization may be incomplete for these entity types.")
-        else:
-            logger.info("✅ All critical tags present in mapping")
-        
-        return len(missing) == 0
 
     def _load_model(self):
-        """Loads the mmbert model following DFKI-SLT official pattern."""
+        """Loads the mmbert model with strict config validation."""
         if not self.model_path.exists():
             logger.error(f"Model path not found: {self.model_path}")
             self.method = None
@@ -1615,79 +1583,89 @@ class AnonymizationEngine:
 
         try:
             from transformers import AutoModel, AutoTokenizer
+            from torchcrf import CRF
             import torch.nn as nn
             import json
-
-            # 1. Load CRF config (MUST USE crf_config.json)
+            
+            # 1. Load Config
             crf_config_path = self.model_path / "crf_config.json"
             if not crf_config_path.exists():
                 logger.error(f"crf_config.json not found at {crf_config_path}")
                 self.method = None
                 return
-
+            
             with open(crf_config_path, "r") as f:
-                self.crf_config = json.load(f)
-
+                self.config = json.load(f)
+            
+            # Validate required keys
             required_keys = ["base_model_name", "num_labels", "id2label", "label2id"]
-            if not all(k in self.crf_config for k in required_keys):
+            if not all(k in self.config for k in required_keys):
                 logger.error(f"Missing required keys in crf_config.json: {required_keys}")
                 self.method = None
                 return
 
-            self.original_id2label = self.crf_config.get("id2label", {})
-            self.original_label2id = self.crf_config.get("label2id", {})
-            logger.info(f"Loaded {len(self.original_id2label)} original model labels from crf_config.json")
+            self.original_id2label = self.config.get("id2label", {})
+            self.original_label2id = self.config.get("label2id", {})
+            
+            logger.info(f"Loaded {len(self.original_id2label)} original model labels.")
 
-            # 2. Load FLERT config (MUST USE flert_config.json)
-            flert_config_path = self.model_path / "flert_config.json"
-            if flert_config_path.exists():
-                with open(flert_config_path, "r") as f:
-                    self.flert_config = json.load(f)
-                logger.info(f"Loaded FLERT config: context_window={self.flert_config.get('context_window')}, sep_marker={self.flert_config.get('context_sep_marker')}")
-            else:
-                logger.warning("flert_config.json not found, using defaults: context_window=2, sep_marker=True")
-                self.flert_config = {"context_window": 2, "context_sep_marker": True}
+            # 2. Define Model Architecture (Same as before)
+            class ModernBertCRF(nn.Module):
+                def __init__(self, base_model_name, num_labels, id2label, label2id):
+                    super().__init__()
+                    self.num_labels = num_labels
+                    self.id2label = id2label
+                    self.label2id = label2id
+                    # Load base model from local path or HF name
+                    self.transformer = AutoModel.from_pretrained(base_model_name, local_files_only=True)
+                    hidden_size = self.transformer.config.hidden_size
+                    self.classifier = nn.Linear(hidden_size, num_labels)
+                    self.dropout = nn.Dropout(0.1)
+                    self.crf = CRF(num_labels, batch_first=True)
 
-            # 3. Instantiate ModernBertCRF
-            local_base_model_path = MODEL_FOLDER / self.crf_config["base_model_name"]
+                def forward(self, input_ids, attention_mask, labels=None, **kwargs):
+                    kwargs.pop("token_type_ids", None)
+                    outputs = self.transformer(input_ids=input_ids, attention_mask=attention_mask)
+                    sequence_output = self.dropout(outputs.last_hidden_state)
+                    emissions = self.classifier(sequence_output)
+                    if labels is not None:
+                        mask = attention_mask.bool()
+                        labels_for_crf = labels.clone()
+                        labels_for_crf[labels_for_crf == -100] = 0
+                        loss = -self.crf(emissions, labels_for_crf, mask=mask, reduction='mean')
+                        return {"loss": loss, "logits": emissions}
+                    else:
+                        return {"logits": emissions}
+
+                def decode(self, emissions, mask):
+                    return self.crf.decode(emissions, mask=mask)
+
+            # 3. Instantiate Model
+            # Use the base_model_name from config
+            local_base_model_path = MODEL_FOLDER / self.config["base_model_name"]
             if not local_base_model_path.exists():
-                logger.warning(f"Local base model not found at {local_base_model_path}. Trying HF name: {self.crf_config['base_model_name']}")
-                local_base_model_path = self.crf_config["base_model_name"]
-
+                # Fallback: try to load from HF name if local path fails
+                logger.warning(f"Local base model not found at {local_base_model_path}. Trying HF name: {self.config['base_model_name']}")
+                local_base_model_path = self.config["base_model_name"] # Pass name to AutoModel
+            
             self.model = ModernBertCRF(
                 base_model_name=local_base_model_path,
-                num_labels=self.crf_config["num_labels"],
+                num_labels=self.config["num_labels"],
                 id2label=self.original_id2label,
                 label2id=self.original_label2id
             )
-
-            # 4. Load weights
+            
             model_weights_path = self.model_path / "pytorch_model.bin"
             state_dict = torch.load(model_weights_path, map_location=self.device, weights_only=True)
             self.model.load_state_dict(state_dict)
             self.model.to(self.device)
             self.model.eval()
-            logger.info("Model loaded and set to evaluation mode")
-
-            # 5. Load tokenizer
-            self.tokenizer = AutoTokenizer.from_pretrained(
-                str(self.model_path),
-                local_files_only=True,
-                fix_mistral_regex=True
-            )
-            logger.info("✅ Tokenizer loaded with fix_mistral_regex=True")
-
-            # 6. Build label mapping
-            self.label_mapping = self._build_safe_label_mapping()
-            logger.info("✅ Anonymization model loaded successfully with OFFICIAL FLERT support")
             
-            # 7. VERIFY CRITICAL TAGS ARE PRESENT (NEW)
-            if not self._verify_label_mapping():
-                logger.error("CRITICAL: Label mapping verification failed!")
-                logger.error("Anonymization may miss PERSON and other critical entities.")
-                # Optionally disable anonymization if mapping is broken
-                # Uncomment the next line if you want to fail fast:
-                # self.method = None
+            self.tokenizer = AutoTokenizer.from_pretrained(str(self.model_path), local_files_only=True)
+            
+            # 4. Build Dynamic Mapping
+            self.label_mapping = self._build_safe_label_mapping()
+            logger.info("Model loaded and safe label mapping initialized.")
 
         except Exception as e:
             import traceback
@@ -1697,83 +1675,44 @@ class AnonymizationEngine:
 
     def anonymize(self, text):
         """
-        Anonymizes text using FLERT-style context windowing.
+        Anonymizes text using sentence-level splitting as per model card.
         """
         if not self.method or not self.model or not self.tokenizer:
-            return None, False, "Anonymization model not loaded"
+            return None, False, "Anonymization model not loaded."
+
+        logger.info("Running anonymization with sentence-level splitting (SpaCy)...")
+
+        # 1. Split into Sentences
+        # Returns list of (speaker, tokens)
+        sentences_data = split_dialogue_into_sentences(text)
         
-        # FIRST-RUN DIAGNOSTIC CHECK (NEW)
-        if not hasattr(self, '_verified_mapping'):
-            self._verified_mapping = True  # Prevent repeated calls
-            logger.info("Running first-time label mapping verification...")
-            if not self._verify_label_mapping():
-                logger.warning("Proceeding despite mapping issues - results may be incomplete")
-        
-        logger.info("Running anonymization with OFFICIAL FLERT + HYBRID detection...")
-
-        # ========== NEW: Step 1.1 Pre-process text ==========
-        preprocessed_text = normalize_transcript_for_pii(text)
-        if preprocessed_text != text:
-            logger.debug(f"Applied text normalization for PII detection")
-
-        # Step 1: Split into sentences (with spaCy)
-        sentences_data = split_dialogue_into_sentences(preprocessed_text)
-
         if not sentences_data:
             return text, False, "No sentences detected."
 
-        # Step 2: Extract token lists for prediction
+        # Extract just the token lists for prediction
         sentences_tokens = [tokens for _, tokens in sentences_data]
-
-        # Step 3: Run FLERT prediction WITH CONTEXT WINDOWING
-        if self.flert_config and self.flert_config.get("context_window"):
-            logger.warning(f"⚠️  FLERT config suggests context_window={self.flert_config['context_window']}")
-        context_window = 2
-        use_sep_marker = self.flert_config.get("context_sep_marker", True) if self.flert_config else True
         
-        logger.info(f"FLERT parameters: context_window={context_window}, sep_marker={use_sep_marker}")
-
+        # 2. Run Inference
         try:
-            predictions = predict_dialogue_flert(
+            predictions = predict_sentences(
                 sentences_tokens=sentences_tokens,
                 model=self.model,
                 tokenizer=self.tokenizer,
                 id_to_tag_map=self.label_mapping,
-                device=self.device,
-                context_window=context_window,
-                use_sep_marker=use_sep_marker
+                device=self.device
             )
         except Exception as e:
-            logger.error(f"FLERT prediction failed: {e}")
+            logger.error(f"Inference failed: {e}")
             import traceback
             logger.error(traceback.format_exc())
             return text, False, str(e)
-        
-        logger.info(f"Prediction debug: {len(predictions)} sentences predicted")
-        for i, (preds, (_, tokens)) in enumerate(zip(predictions, sentences_data)):
-            logger.info(f"  Sentence {i}: {len(tokens)} tokens → {preds[:5]}...")  # Show first 5 labels
-            
-            # Check for any PERSON tags
-            if '[PERSON]' in preds:
-                logger.info(f"  ✓ Found [PERSON] in sentence {i}")
-            else:
-                # Check if there are obvious names in this sentence
-                for name in ['Nadine', 'Hannes', 'Vera']:
-                    if name in ''.join(tokens):
-                        logger.error(f"  ✗ MISSING [PERSON] for '{name}' in sentence {i}")
-                        logger.error(f"    Tokens: {tokens}")
 
-        # Step 4: Reconstruct text (merge same-speaker sentences)
+        # 3. Reconstruct Text
+        # We need to pass the original (speaker, tokens) and the predictions
         reconstructed_text = reconstruct_text_from_predictions(sentences_data, predictions, {})
         reconstructed_text = normalize_punctuation(reconstructed_text)
-        reconstructed_text = merge_adjacent_tags(reconstructed_text)
-
-        # ========== SECONDARY CATCH (TEMPORARY) ==========
-        reconstructed_text = catch_missed_names(reconstructed_text)
-
-        entity_count = sum(1 for tag in ['[PERSON]', '[ORGANISATION]', '[CITY]', '[DATE]', '[TIME]'] 
-                          if tag in reconstructed_text)
-        logger.info(f"Anonymization complete: {entity_count} entities detected (HYBRID detection)")
+        # merges the tags -> not optimal, as this shold be solved actually via IOB tags
+        reconstructed_text=merge_adjacent_tags(reconstructed_text)
 
         return reconstructed_text, True, "Success"
 

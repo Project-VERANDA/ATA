@@ -11,6 +11,7 @@ import time
 import argparse
 import json
 import numpy as np
+import spacy
 from datetime import datetime
 from collections import defaultdict
 from pathlib import Path
@@ -24,7 +25,6 @@ load_dotenv()
 def check_gpu_resources():
     """
     Checks for GPU availability and logs the status.
-    This is called only when processing starts, not during --help.
     """
     logger.info("="*40)
     logger.info("GPU DETECTION CHECK")
@@ -43,7 +43,6 @@ def check_gpu_resources():
         logger.warning("   This will cause significantly slower processing speeds.")
         logger.warning("   Check if NVIDIA drivers are installed or if a GPU instance is attached.")
     logger.info("="*40)
-
 
 # --- Session Logger ---
 
@@ -71,6 +70,7 @@ class SessionLogger:
             "anonymizations_failed": 0,
             "llm_rewrites_success": 0,
             "llm_rewrites_failed": 0,
+            "adversarial_iterations": 0,
             "errors": []
         }
         
@@ -131,6 +131,7 @@ class SessionLogger:
             f.write(f"  Anonymizations Failed: {self.stats['anonymizations_failed']}\n")
             f.write(f"  LLM Rewrites Success: {self.stats['llm_rewrites_success']}\n")
             f.write(f"  LLM Rewrites Failed: {self.stats['llm_rewrites_failed']}\n")
+            f.write(f"  Adversarial Iterations: {self.stats['adversarial_iterations']}\n")
             
             if self.stats["errors"]:
                 f.write("\nERRORS ENCOUNTERED:\n")
@@ -143,7 +144,6 @@ class SessionLogger:
 
         logger.info(f"Session log saved to: {self.log_file_path}")
         return self.log_file_path
-
 
 # --- Configuration & Security ---
 
@@ -201,6 +201,7 @@ MAX_SPEAKERS = 4
 
 # Local Model Paths - CORRECTED
 WHISPERX_MODEL_PATH = MODEL_FOLDER / "Systran--faster-whisper-large-v3"
+DIARIZATION_MODEL_PATH = MODEL_FOLDER / "models--pyannote--speaker-diarization-community-1"
 
 # System prompts per language
 PARAPHRASE_PROMPTS = {
@@ -237,11 +238,10 @@ USER_PROMPTS = {
     'EN': "Please anonymize the following conversation:",
 }
 
-# CRITICAL FALLBACK LOGIC
+# Fallback logic for Whisper Model
 if not WHISPERX_MODEL_PATH.exists():
     logger.warning("❌ large-v3 model NOT found. Searching for alternatives...")
     
-    # List of preferred fallback models in order of quality
     fallback_candidates = [
         "models--Systran--faster-whisper-tiny",
         "models--Systran--faster-whisper-base",
@@ -259,7 +259,6 @@ if not WHISPERX_MODEL_PATH.exists():
             break
     
     if not found_fallback:
-        # Last resort: Any folder starting with the prefix
         whisper_folders = [f for f in MODEL_FOLDER.iterdir() if f.is_dir() and f.name.startswith("models--Systran--faster-whisper-")]
         if whisper_folders:
             WHISPERX_MODEL_PATH = whisper_folders[0]
@@ -270,18 +269,10 @@ if not WHISPERX_MODEL_PATH.exists():
             sys.exit(1)
 else:
     logger.info(f"✅ Using default model: large-v3")
-
-# Verify the final path
-if not WHISPERX_MODEL_PATH.exists():
-    logger.critical(f"CRITICAL: Final model path {WHISPERX_MODEL_PATH} does not exist.")
-    sys.exit(1)
-
 logger.info(f"✅ WhisperX Model Path Set: {WHISPERX_MODEL_PATH.name}")
-DIARIZATION_MODEL_PATH = MODEL_FOLDER / "models--pyannote--speaker-diarization-community-1"
 
 if not MODEL_FOLDER.exists():
     logger.critical(f"CRITICAL: Model folder not found at {MODEL_FOLDER}.")
-    logger.critical(f"Current script location: {SCRIPT_DIR}")
     sys.exit(1)
 
 if not DIARIZATION_MODEL_PATH.exists():
@@ -296,27 +287,16 @@ logger.info(f"   WhisperX Model: {WHISPERX_MODEL_PATH.name}")
 logger.info(f"   Diarization Model: {DIARIZATION_MODEL_PATH.name if DIARIZATION_MODEL_PATH.exists() else 'MISSING'}")
 
 # Supported Languages
-
 SUPPORTED_LANGUAGES = {
-    'AR': 'Arabic',
-    'DE': 'German',
-    'EN': 'English',
-    'FI': 'Finnish',
-    'FR': 'French',
-    'HI': 'Hindi',
-    'IT': 'Italian',
-    'PL': 'Polish',
-    'PT': 'Portuguese',
-    'SP': 'Spanish',
-    'ES': 'Spanish',
-    'TR': 'Turkish'
+    'AR': 'Arabic', 'DE': 'German', 'EN': 'English', 'FI': 'Finnish',
+    'FR': 'French', 'HI': 'Hindi', 'IT': 'Italian', 'PL': 'Polish',
+    'PT': 'Portuguese', 'SP': 'Spanish', 'ES': 'Spanish', 'TR': 'Turkish'
 }
 
 WHISPER_LANG_MAP = {
     'AR': 'ar', 'DE': 'de', 'EN': 'en', 'FI': 'fi', 'FR': 'fr',
     'HI': 'hi', 'IT': 'it', 'PL': 'pl', 'PT': 'pt', 
-    'SP': 'es', 'ES': 'es',
-    'TR': 'tr'
+    'SP': 'es', 'ES': 'es', 'TR': 'tr'
 }
 
 # Anonymization Configuration
@@ -324,7 +304,6 @@ ANONYMIZATION_ENABLED = True
 ANONYMIZATION_LEVEL = "standard"
 ANONYMIZATION_METHOD = "local_mmbert"
 
-# Available Tags for Selection/Deselection
 AVAILABLE_TAGS = [
     "PERSON", "PERSON_EMAIL", "PERSON_SOCIAL_RELATION",
     "ORG", 
@@ -341,51 +320,32 @@ DEFAULT_CHAT_AI_MODEL = os.getenv('CHAT_AI_MODEL', 'gpt-oss-120b')
 LLM_REWRITE_ENABLED = True
 
 LLM_REWRITE_SYSTEM_PROMPT = (
-    "You are an expert anonymizer. Your goal is to protect privacy by removing or generalizing identifiers.\n"
-    "\n"
+    "You are an expert anonymizer. Your goal is to protect privacy by removing or generalizing identifiers.\n\n"
     "TWO STRATEGIES:\n"
     "1. **REPLACE** specific values with placeholders (e.g., 'John Smith' → '[NAME_OTHER]', '123 Main St' → '[ADDRESS]').\n"
-    "2. **GENERALIZE** descriptions when the combination of details could identify someone (e.g., 'senior neurosurgeon at St. Mary's Hospital' → 'doctor at a hospital').\n"
-    "\n"
+    "2. **GENERALIZE** descriptions when the combination of details could identify someone.\n\n"
     "GUIDELINES FOR GENERALIZATION:\n"
-    "- If a job title is highly specific (e.g., 'Chief of Cardiology at City Hospital'), generalize to 'medical professional at a hospital'.\n"
-    "- If a location is rare or unique (e.g., 'the small village of X with population 500'), generalize to 'a small rural community'.\n"
-    "- If a combination of demographics is unique (e.g., '55-year-old female engineer from Berlin'), generalize to 'an older professional from a major city'.\n"
-    "- If the detail is already generic (e.g., 'I work in healthcare'), DO NOT change it.\n"
-    "\n"
+    "- If a job title is highly specific, generalize to a broader category.\n"
+    "- If a location is rare or unique, generalize to a broader geographic area.\n"
+    "- If a combination of demographics is unique, generalize accordingly.\n"
+    "- If the detail is already generic, DO NOT change it.\n\n"
     "CRITICAL CONSTRAINTS:\n"
     "1. PRESERVE SPEAKER TAGS: Lines starting with 'SPEAKER_XX:' are structural metadata. NEVER modify them.\n"
-    "2. PRESERVE EXISTING TAGS: Do not touch [NAME_OTHER], [DATE], [ID], [LOCATION_CITY], etc. They are already safe.\n"
-    "3. MINIMAL CHANGE: Only generalize when necessary for privacy. If a detail is already generic, leave it alone.\n"
+    "2. PRESERVE EXISTING TAGS: Do not touch [NAME_OTHER], [DATE], [ID], [LOCATION_CITY], etc.\n"
+    "3. MINIMAL CHANGE: Only generalize when necessary for privacy.\n"
     "4. PRESERVE STRUCTURE: Keep all newlines, line breaks, and grammar exactly as they are.\n"
-    "5. LANGUAGE: Do not translate. Keep the original language.\n"
-    "\n"
-    "EXAMPLES:\n"
-    "\n"
-    "Example 1 (Replace):\n"
-    "Input:  'SPEAKER_00: My name is Anna Schmidt and I live at 123 Hauptstraße.'\n"
-    "Output: 'SPEAKER_00: My name is [NAME_OTHER] and I live at [ADDRESS].'\n"
-    "\n"
-    "Example 2 (Generalize):\n"
-    "Input:  'SPEAKER_01: I am the head of the rare disease research unit at University Hospital Zurich.'\n"
-    "Output: 'SPEAKER_01: I am a researcher at a university hospital.'\n"
-    "\n"
-    "Example 3 (Preserve Existing Tags):\n"
-    "Input:  'SPEAKER_00: I was born in [LOCATION_CITY] and I work as a [PROFESSION].'\n"
-    "Output: 'SPEAKER_00: I was born in [LOCATION_CITY] and I work as a [PROFESSION].'\n"
-    "\n"
+    "5. LANGUAGE: Do not translate. Keep the original language.\n\n"
     "Return ONLY the anonymized text. No explanations, no reasoning, no commentary."
 )
 
-
 AVAILABLE_LLM_MODELS = {
-    'medgemma': 'medgemma',            # Try this first (matches 'medgemma' working hint)
-    'medgemma27b': 'medgemma27b',      # Try 'medgemma27b' instead of 'medgemma-27b-it'
-    'gpt-oss-120b': 'gpt-oss-120b',    # This one definitely works
-    'Qwen3.6-27B': 'Qwen3.6-27B',      # Match the table name exactly, no prefix
-    'Qwen3.5-27B': 'Qwen3.5-27B',      
+    'medgemma': 'medgemma',
+    'medgemma27b': 'medgemma27b',
+    'gpt-oss-120b': 'gpt-oss-120b',
+    'Qwen3.6-27B': 'Qwen3.6-27B',
+    'Qwen3.5-27B': 'Qwen3.5-27B',
     'qwen3-asr-1.7b': 'qwen3-asr-1.7b',
-    'cle-Kimi-K2.6': 'cle-Kimi-K2.6',  
+    'cle-Kimi-K2.6': 'cle-Kimi-K2.6',
     'cle-Qwen3-Coder-Next-FP8': 'cle-Qwen3-Coder-Next-FP8',
     'cle-Qwen3.5-397B-A17B-FP8': 'cle-Qwen3.5-397B-A17B-FP8'
 }
@@ -410,9 +370,7 @@ def validate_path(path, base):
         return False
 
 def merge_consecutive_speaker_segments(segments, max_gap_seconds=2.0):
-    """
-    Merges consecutive segments spoken by the same speaker.
-    """
+    """Merges consecutive segments spoken by the same speaker."""
     if not segments:
         return []
 
@@ -426,12 +384,7 @@ def merge_consecutive_speaker_segments(segments, max_gap_seconds=2.0):
         end = segment.get("end", 0)
 
         if current_segment is None:
-            current_segment = {
-                "speaker": speaker,
-                "text": text,
-                "start": start,
-                "end": end
-            }
+            current_segment = {"speaker": speaker, "text": text, "start": start, "end": end}
         else:
             if current_segment["speaker"] == speaker:
                 gap = start - current_segment["end"]
@@ -440,20 +393,10 @@ def merge_consecutive_speaker_segments(segments, max_gap_seconds=2.0):
                     current_segment["end"] = end
                 else:
                     merged_segments.append(current_segment)
-                    current_segment = {
-                        "speaker": speaker,
-                        "text": text,
-                        "start": start,
-                        "end": end
-                    }
+                    current_segment = {"speaker": speaker, "text": text, "start": start, "end": end}
             else:
                 merged_segments.append(current_segment)
-                current_segment = {
-                    "speaker": speaker,
-                    "text": text,
-                    "start": start,
-                    "end": end
-                }
+                current_segment = {"speaker": speaker, "text": text, "start": start, "end": end}
 
     if current_segment:
         merged_segments.append(current_segment)
@@ -461,20 +404,15 @@ def merge_consecutive_speaker_segments(segments, max_gap_seconds=2.0):
     return merged_segments
 
 def cleanup_gpu_resources(*objects_to_delete):
-    """
-    Aggressively clears GPU memory, runs garbage collection.
-    """
+    """Aggressively clears GPU memory and runs garbage collection."""
     for obj in objects_to_delete:
         try:
             del obj
         except NameError:
             pass
-            
     gc.collect()
-    
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
-        
     logger.debug("GPU and System RAM resources cleaned up.")
 
 def verify_whisperx_model(model_path):
@@ -509,21 +447,20 @@ def verify_diarization_model(model_path):
     config_files = list(path.glob("config.*"))
     pyannote_yaml = path / "pyannote.yaml"
     if not config_files:
-        logger.error(f"Diarization model missing config files (config.* or pyannote.yaml)")
+        logger.error(f"Diarization model missing config files")
         return False
     
     required_subdirs = ['embedding', 'plda', 'segmentation']
     missing_subdirs = [d for d in required_subdirs if not (path / d).exists()]
     
     if missing_subdirs:
-        logger.warning(f"Diarization model missing subdirectories: {missing_subdirs}"
-            f"This might cause loading failures if the model structure is non-standard.")
+        logger.warning(f"Diarization model missing subdirectories: {missing_subdirs}")
     
     logger.info(f"Diarization model verified at: {model_path}")
     return True
 
-
 def convert_numpy(obj):
+    """Converts numpy types to native Python types for JSON serialization."""
     if isinstance(obj, dict):
         return {k: convert_numpy(v) for k, v in obj.items()}
     elif isinstance(obj, list):
@@ -534,14 +471,11 @@ def convert_numpy(obj):
         return int(obj)
     else:
         return obj
-        
-        
+
 # --- Extract Audio ---
 
 def process_videos(file_list=None):
-    """
-    Extracts audio from video files in VIDEOS_FOLDER.
-    """
+    """Extracts audio from video files in VIDEOS_FOLDER."""
     if not VIDEOS_FOLDER.exists():
         logger.warning(f"No 'videos' folder found at {VIDEOS_FOLDER}. Skipping audio extraction.")
         return 0
@@ -626,13 +560,10 @@ def process_videos(file_list=None):
     return processed_count
 
 def process_audios(enable_diarization=True, lang_code=None, file_list=None):
-    """
-    Process audio files. Handles both raw .wav files AND video files (.mp4, .m4a, etc).
-    """
-    global args
+    """Process audio files: transcribe and optionally diarize."""
     check_gpu_resources() 
 
-    force_language = lang_code if lang_code is not None else getattr(args, 'lang', None)
+    force_language = lang_code
     
     whisper_code = None
     if force_language:
@@ -658,7 +589,7 @@ def process_audios(enable_diarization=True, lang_code=None, file_list=None):
             compute_type=compute_type, 
             local_files_only=True
         )
-        logger.info("WhisperX model loaded successfully (Direct Path).")
+        logger.info("WhisperX model loaded successfully.")
     except Exception as e:
         logger.critical(f"Failed to load WhisperX model: {e}")
         return
@@ -666,9 +597,8 @@ def process_audios(enable_diarization=True, lang_code=None, file_list=None):
     if enable_diarization:
         try:
             from pyannote.audio import Pipeline
-            diarize_pipeline = Pipeline.from_pretrained(str(DIARIZATION_MODEL_PATH))
-            diarize_model = diarize_pipeline
-            logger.info("Diarization Pipeline loaded successfully (Direct Path).")
+            diarize_model = Pipeline.from_pretrained(str(DIARIZATION_MODEL_PATH))
+            logger.info("Diarization Pipeline loaded successfully.")
         except Exception as e:
             logger.critical(f"Failed to load Diarization Pipeline: {e}. Disabling diarization.")
             diarize_model = None
@@ -695,6 +625,7 @@ def process_audios(enable_diarization=True, lang_code=None, file_list=None):
         if not input_file.exists():
             logger.error(f"Requested file '{input_file.name}' not found at {input_file}. Skipping.")
             continue
+        
         if input_file.suffix.lower() in SUPPORTED_EXTENSIONS and input_file.suffix.lower() != '.wav':
             if not validate_path(input_file, VIDEOS_FOLDER):
                 logger.error(f"Security Alert: Skipping {input_file.name} (path traversal in videos folder).")
@@ -816,12 +747,12 @@ def process_audios(enable_diarization=True, lang_code=None, file_list=None):
     logger.info("Stream processing finished.")
     return len(files_to_process)
 
-# Global variables to hold loaded models
+# Global variables for model caching
 _loaded_whisper_model = None
 _loaded_diarize_model = None
     
 def load_models():
-    """Loads models locally on GPU if available."""
+    """Loads models locally on GPU if available for reuse."""
     global _loaded_whisper_model, _loaded_diarize_model
     
     check_gpu_resources()
@@ -834,9 +765,7 @@ def load_models():
 
     try:
         logger.info(f"Loading WhisperX model directly from: {WHISPERX_MODEL_PATH}")
-        
         from faster_whisper import WhisperModel
-        
         compute_type = "float16" if device_str == "cuda" else "float32"
         
         _loaded_whisper_model = WhisperModel(
@@ -845,19 +774,15 @@ def load_models():
             compute_type=compute_type,
             local_files_only=True
         )
-        
-        logger.info("✅ WhisperX model loaded successfully (direct path).")
+        logger.info("✅ WhisperX model loaded successfully.")
     except Exception as e:
         logger.critical(f"Failed to load WhisperX model: {e}")
-        logger.critical("Hint: Ensure the folder contains 'model.bin', 'config.json', and 'tokenizer.json'.")
-        logger.critical(f"Folder contents: {list(WHISPERX_MODEL_PATH.iterdir()) if WHISPERX_MODEL_PATH.exists() else 'Folder missing'}")
         return None, None
     
     if DIARIZATION_MODEL_PATH and DIARIZATION_MODEL_PATH.exists():
         try:
             logger.info(f"Loading Diarization Pipeline from: {DIARIZATION_MODEL_PATH}")
             from pyannote.audio import Pipeline
-            
             _loaded_diarize_model = Pipeline.from_pretrained(str(DIARIZATION_MODEL_PATH))
             
             if device_str == "cuda":
@@ -865,12 +790,10 @@ def load_models():
                 logger.info("✅ Diarization Pipeline moved to GPU.")
             else:
                 logger.warning("⚠️ Diarization Pipeline loaded on CPU.")
-                
         except Exception as e:
             logger.error(f"Failed to load Diarization Pipeline: {e}")
             _loaded_diarize_model = None
     else:
-        logger.warning("Diarization model path not found or invalid. Skipping.")
         _loaded_diarize_model = None
 
     logger.info("Models loaded successfully.")
@@ -878,101 +801,72 @@ def load_models():
 
 def transcribe_audio_locally(audio_path, language='de'):
     """
-    Transcribes a single audio file using local models.
+    Transcribes a single audio file using cached local models.
+    Wrapper for API-like access to transcription.
     """
     global _loaded_whisper_model, _loaded_diarize_model
     
     logger.info(f"--- Starting transcription for: {os.path.basename(audio_path)} ---")
     
     if not _loaded_whisper_model or not _loaded_diarize_model:
-        logger.info("Loading models (if not already loaded)...")
         _loaded_whisper_model, _loaded_diarize_model = load_models()
     
     if not _loaded_whisper_model:
-        error_msg = "Error: WhisperX model not loaded."
-        logger.error(error_msg)
-        return error_msg
-    
+        return "Error: WhisperX model not loaded."
+
     try:
-        logger.info(f"Loading audio file: {audio_path}")
         audio = whisperx.load_audio(audio_path)
-        logger.info(f"Audio loaded. Duration: {len(audio)/16000:.2f} seconds.")
         
-        logger.info("Running WhisperX transcription...")
         segments, info = _loaded_whisper_model.transcribe(
-            audio, 
-            beam_size=BATCH_SIZE, 
-            language=language,
-            vad_filter=True
+            audio, beam_size=BATCH_SIZE, language=language, vad_filter=True
         )
         
         raw_segments = list(segments)
-        
         segments_list = []
         for seg in raw_segments:
-            seg_dict = {
-                "start": seg.start,
-                "end": seg.end,
-                "text": seg.text,
+            segments_list.append({
+                "start": seg.start, "end": seg.end, "text": seg.text,
                 "words": getattr(seg, 'words', None)
-            }
-            segments_list.append(seg_dict)
+            })
         
         detected_language = info.language if info else language
-        logger.info(f"Transcription completed. Detected language: {detected_language}")
-        
         result = {"segments": segments_list, "language": detected_language}
         
         if result.get("language"):
             try:
-                logger.info("Aligning transcription segments...")
                 device = "cuda" if torch.cuda.is_available() else "cpu"
                 align_model, metadata = whisperx.load_align_model(
                     language_code=result["language"], device=device
                 )
                 result = whisperx.align(result["segments"], align_model, metadata, audio, device, return_char_alignments=False)
-                logger.info("Alignment completed.")
             except Exception as e:
-                logger.warning(f"Alignment failed: {e}. Proceeding without alignment.")
+                logger.warning(f"Alignment failed: {e}")
 
         if _loaded_diarize_model:
-            logger.info("Running speaker diarization...")
             try:
                 _loaded_diarize_model.min_duration_on = 4.0
                 _loaded_diarize_model.min_duration_off = 2
-                
                 diarize_output = _loaded_diarize_model(audio_path, min_speakers=2, max_speakers=10)
                 speaker_diarization = diarize_output.speaker_diarization
                 
                 import pandas as pd
                 segments_list = []
                 for turn, _, speaker in speaker_diarization.itertracks(yield_label=True):
-                    segments_list.append({
-                        'start': turn.start,
-                        'end': turn.end,
-                        'speaker': speaker
-                    })
-                
-                logger.info(f"Diarization extracted {len(segments_list)} speaker segments.")
+                    segments_list.append({'start': turn.start, 'end': turn.end, 'speaker': speaker})
                 
                 segments_list = sorted(segments_list, key=lambda x: x.get('start', 0))
-                
                 diarize_df = pd.DataFrame(segments_list)
                 result = whisperx.assign_word_speakers(diarize_df, result)
-                logger.info("Speakers assigned to segments.")
             except Exception as e:
                 logger.error(f"Diarization failed: {e}")
-                logger.warning("Falling back to generic speaker labels.")
                 for i, segment in enumerate(result["segments"]):
                     segment["speaker"] = f"SPEAKER_{i%2:02d}"
         else:
-            logger.warning("No diarization model loaded. Using generic speaker labels.")
             for i, segment in enumerate(result["segments"]):
                 segment["speaker"] = f"SPEAKER_{i%2:02d}"
 
         if 'segments' in result:
             result["segments"] = sorted(result["segments"], key=lambda x: x.get('start', 0))
-            logger.info(f"Segments sorted by time. Count: {len(result['segments'])}")
 
         merged_segments = []
         prev_segment = None
@@ -982,7 +876,6 @@ def transcribe_audio_locally(audio_path, language='de'):
             text = segment.get("text", "").strip()
             
             if len(text) < 4 and text.lower() not in ["i", "a", "ok", "no", "yes", "hi"]:
-                logger.debug(f"Discarding short segment: '{text}' (Length: {len(text)})")
                 continue
             
             if prev_segment and prev_segment["speaker"] == speaker:
@@ -994,100 +887,37 @@ def transcribe_audio_locally(audio_path, language='de'):
         
         if prev_segment:
             merged_segments.append(prev_segment)
-        
-        logger.info(f"Merged into {len(merged_segments)} final segments.")
 
-        result_lines = []
-        for seg in merged_segments:
-            if seg['text'].strip():
-                line = f"{seg['speaker']}: {seg['text'].strip()}"
-                result_lines.append(line)
-                logger.info(f"  >> {line}")
-        
-        result_text = "\n".join(result_lines)
-        
-        if not result_text:
-            result_text = "No speech detected."
-            logger.warning("No speech detected in audio.")
-        else:
-            logger.info(f"--- Transcription Complete. Total lines: {len(result_lines)} ---")
-
+        result_lines = [f"{seg['speaker']}: {seg['text'].strip()}" for seg in merged_segments if seg['text'].strip()]
+        result_text = "\n".join(result_lines) or "No speech detected."
         resultOffset = convert_numpy(result["segments"])
         
         return result_text, resultOffset
 
     except Exception as e:
-        error_msg = f"Transcription failed: {e}"
-        logger.error(error_msg, exc_info=True)
-        return error_msg
+        logger.error(f"Transcription failed: {e}", exc_info=True)
+        return f"Transcription failed: {e}"
 
-# --- Anonymization Engine (V2-style, simplified) ===
+# --- Anonymization Engine (V2-style, simplified with DFKI-SLT model) ---
 
-def parse_transcript_into_blocks(transcript_text):
-    """
-    Parses a transcript string into a list of (speaker, text_block) tuples.
-    """
-    lines = transcript_text.strip().split('\n')
-    blocks = []
-    current_speaker = None
-    current_text = []
-
-    for line in lines:
-        match = re.match(r'^(SPEAKER_\d+):\s*(.*)$', line)
-        if match:
-            speaker = match.group(1)
-            text = match.group(2)
-            
-            if speaker == current_speaker:
-                current_text.append(text)
-            else:
-                if current_speaker and current_text:
-                    blocks.append((current_speaker, " ".join(current_text)))
-                
-                current_speaker = speaker
-                current_text = [text]
-        else:
-            if current_speaker:
-                current_text.append(line)
-
-    if current_speaker and current_text:
-        blocks.append((current_speaker, " ".join(current_text)))
-
-    return blocks
-
-# FLERT removed - we use simple sentence-level prediction instead
-
-import spacy
-
-# --- Global SpaCy NLP Objects (Lazy Loaded) ---
 _nlp_multilingual = None
 
 def get_nlp_pipeline(lang_code=None):
-    """
-    Loads or retrieves the SpaCy pipeline for sentence splitting.
-    """
+    """Loads or retrieves the SpaCy pipeline for sentence splitting."""
     global _nlp_multilingual
     
-    spacy_lang = 'xx'
-    
-    if spacy_lang == 'xx':
-        if _nlp_multilingual is None:
-            try:
-                _nlp_multilingual = spacy.blank("xx")
-                _nlp_multilingual.add_pipe("sentencizer")
-                logger.info("Loaded SpaCy multilingual sentencizer.")
-            except Exception as e:
-                logger.error(f"Failed to load SpaCy 'xx' model: {e}. Falling back to regex splitting.")
-                return None
-        return _nlp_multilingual
-    else:
-        return None
+    if _nlp_multilingual is None:
+        try:
+            _nlp_multilingual = spacy.blank("xx")
+            _nlp_multilingual.add_pipe("sentencizer")
+            logger.info("Loaded SpaCy multilingual sentencizer.")
+        except Exception as e:
+            logger.error(f"Failed to load SpaCy 'xx' model: {e}. Falling back to regex splitting.")
+            return None
+    return _nlp_multilingual
 
 def split_dialogue_into_sentences(text, nlp_pipeline=None):
-    """
-    Splits dialogue text into a list of sentences (each a list of tokens).
-    FIXED: Simple sentence-level splitting without FLERT context windowing.
-    """
+    """Splits dialogue text into sentences (each a list of tokens)."""
     if nlp_pipeline is None:
         nlp_pipeline = get_nlp_pipeline()
     
@@ -1113,19 +943,16 @@ def split_dialogue_into_sentences(text, nlp_pipeline=None):
         line = line.strip()
         if not line:
             continue
-            
         match = re.match(r"^(SPEAKER_\d+)\s*:\s*(.*)", line)
         if not match:
             continue
-            
+        
         speaker = match.group(1)
         content = match.group(2)
-        
         if not content:
             continue
-            
-        doc = nlp_pipeline(content)
         
+        doc = nlp_pipeline(content)
         for sent in doc.sents:
             tokens = [tok.text for tok in sent if not tok.is_space]
             if tokens:
@@ -1134,8 +961,8 @@ def split_dialogue_into_sentences(text, nlp_pipeline=None):
     return sentences_with_speakers
 
 def merge_adjacent_tags(text):
+    """Merges adjacent duplicate tags to prevent double-replacement."""
     parts = re.split(r"(\s+|\[[A-Z_]+\])", text)
-
     merged = []
     last_tag = None
     only_whitespace_since_tag = False
@@ -1143,18 +970,14 @@ def merge_adjacent_tags(text):
     for part in parts:
         if not part:
             continue
-
         if re.fullmatch(r"\[[A-Z_]+\]", part):
             if part == last_tag and only_whitespace_since_tag:
                 continue
-
             merged.append(part)
             last_tag = part
             only_whitespace_since_tag = True
-
         elif part.isspace():
             merged.append(part)
-
         else:
             merged.append(part)
             last_tag = None
@@ -1165,22 +988,17 @@ def merge_adjacent_tags(text):
     return out_str
     
 def reconstruct_text_from_predictions(original_sentences, predictions, speaker_map):
-    """
-    Reconstructs the text from predictions.
-    """
+    """Reconstructs the text from predictions, merging consecutive same-speaker sentences."""
     reconstructed_blocks = []
-    
     current_speaker = None
     current_text_parts = []
 
     for i, (speaker, tokens) in enumerate(original_sentences):
         labels = predictions[i] if i < len(predictions) else []
-        
         reconstructed_words = []
         
         for w_idx, word in enumerate(tokens):
             tag = labels[w_idx] if w_idx < len(labels) else "O"
-            
             if not tag or tag == "O":
                 reconstructed_words.append(word)
             else:
@@ -1194,7 +1012,6 @@ def reconstruct_text_from_predictions(original_sentences, predictions, speaker_m
             if current_speaker and current_text_parts:
                 full_text = " ".join(current_text_parts)
                 reconstructed_blocks.append(f"{current_speaker}: {full_text}")
-            
             current_speaker = speaker
             current_text_parts = [sentence_text]
 
@@ -1204,11 +1021,8 @@ def reconstruct_text_from_predictions(original_sentences, predictions, speaker_m
         
     return "\n".join(reconstructed_blocks)
 
-def predict_sentences_simple(sentences_tokens, model, tokenizer, id_to_tag_map, device=device):
-    """
-    Simple sentence-level NER prediction without FLERT context windowing.
-    Matches the model card's single-sentence inference example.
-    """
+def predict_sentences_simple(sentences_tokens, model, tokenizer, id_to_tag_map, device="cpu"):
+    """Simple sentence-level NER prediction without FLERT context windowing."""
     all_predictions = []
     
     for tokens in sentences_tokens:
@@ -1217,11 +1031,8 @@ def predict_sentences_simple(sentences_tokens, model, tokenizer, id_to_tag_map, 
             continue
             
         enc = tokenizer(
-            tokens, 
-            is_split_into_words=True,
-            return_tensors="pt", 
-            truncation=True, 
-            max_length=512
+            tokens, is_split_into_words=True,
+            return_tensors="pt", truncation=True, max_length=512
         ).to(device)
         
         word_ids = enc.word_ids(batch_index=0)
@@ -1243,7 +1054,6 @@ def predict_sentences_simple(sentences_tokens, model, tokenizer, id_to_tag_map, 
             pred_id = preds[idx]
             key = str(pred_id)
             tag = id_to_tag_map.get(key, "O")
-            
             word_labels[wid] = tag
         
         all_predictions.append(word_labels)
@@ -1251,16 +1061,12 @@ def predict_sentences_simple(sentences_tokens, model, tokenizer, id_to_tag_map, 
     return all_predictions
 
 class AnonymizationEngine:
-    """
-    Streamlined AnonymizationEngine using V2's simpler sentence-level approach.
-    Compatible with DFKI-SLT/multilingual_DialogPII_NER model.
-    """
+    """Streamlined AnonymizationEngine compatible with DFKI-SLT/multilingual_DialogPII_NER."""
     
     def __init__(self, method="local_mmbert", level="standard", model_path=None, 
                  include_tags=None, exclude_tags=None):
         self.method = method
         self.level = level
-        # CORRECTED: Use the actual model folder name
         self.model_path = model_path or (MODEL_FOLDER / "multilingual_DialogPII_NER")
         self.include_tags = include_tags
         self.exclude_tags = exclude_tags
@@ -1277,30 +1083,17 @@ class AnonymizationEngine:
             self._load_model()
 
     def _build_safe_label_mapping(self):
-        """
-        Constructs a dynamic mapping from model labels to anonymization tags.
-        """
+        """Constructs a dynamic mapping from model labels to anonymization tags."""
         all_target_tags = {
-            'PERSON': '[PERSON]',
-            'PERSON_EMAIL': '[EMAIL]',
-            'PERSON_SOCIAL_RELATION': '[NAME_RELATIVE]',
-            'ORG': '[ORGANISATION]',
-            'LOC_CITY': '[CITY]',
-            'LOC_COUNTRY': '[COUNTRY]',
-            'LOC_STREET': '[STREET]',
-            'LOC_ZIP': '[ZIP]',
-            'LOC_HOUSENUMBER': '[HOUSENUMBER]',
-            'LOC_OTHER': '[LOCATION]',
-            'DATETIME': '[DATETIME]',
-            'DATETIME_AGE': '[AGE]',
-            'CODE': '[CODE]',
-            'CODE_PHONE': '[PHONE]',
-            'CODE_URL': '[URL]',
-            'PROFESSION': '[PROFESSION]',
-            'PRODUCT': '[PRODUCT]',
-            'QUANTITY': '[QUANTITY]',
-            'MISC': '[MISC]',
-            'O': ''
+            'PERSON': '[PERSON]', 'PERSON_EMAIL': '[EMAIL]',
+            'PERSON_SOCIAL_RELATION': '[NAME_RELATIVE]', 'ORG': '[ORGANISATION]',
+            'LOC_CITY': '[CITY]', 'LOC_COUNTRY': '[COUNTRY]',
+            'LOC_STREET': '[STREET]', 'LOC_ZIP': '[ZIP]',
+            'LOC_HOUSENUMBER': '[HOUSENUMBER]', 'LOC_OTHER': '[LOCATION]',
+            'DATETIME': '[DATETIME]', 'DATETIME_AGE': '[AGE]',
+            'CODE': '[CODE]', 'CODE_PHONE': '[PHONE]', 'CODE_URL': '[URL]',
+            'PROFESSION': '[PROFESSION]', 'PRODUCT': '[PRODUCT]',
+            'QUANTITY': '[QUANTITY]', 'MISC': '[MISC]', 'O': ''
         }
 
         active_tags = set(all_target_tags.keys())
@@ -1316,15 +1109,10 @@ class AnonymizationEngine:
             logger.info(f"Excluding tags: {exclude_set}")
 
         mapping = {}
-        
         for label_id, label_name in self.original_id2label.items():
             clean_label = label_name.replace("B-", "").replace("I-", "").replace("S-", "").replace("E-", "")
             clean_label_upper = clean_label.upper()
-            
-            if clean_label_upper in active_tags:
-                mapping[str(label_id)] = all_target_tags[clean_label_upper]
-            else:
-                mapping[str(label_id)] = ""
+            mapping[str(label_id)] = all_target_tags.get(clean_label_upper, "")
                 
         logger.info(f"Built label mapping with {len(mapping)} entries.")
         return mapping
@@ -1361,7 +1149,6 @@ class AnonymizationEngine:
 
             self.original_id2label = self.config.get("id2label", {})
             self.original_label2id = self.config.get("label2id", {})
-            
             logger.info(f"Loaded {len(self.original_id2label)} original model labels.")
 
             class ModernBertCRF(nn.Module):
@@ -1391,7 +1178,7 @@ class AnonymizationEngine:
 
             local_base_model_path = MODEL_FOLDER / self.config["base_model_name"]
             if not local_base_model_path.exists():
-                logger.warning(f"Local base model not found. Trying to load from HF name: {self.config['base_model_name']}")
+                logger.warning(f"Local base model not found. Trying HF name: {self.config['base_model_name']}")
                 local_base_model_path = self.config["base_model_name"]
             
             self.model = ModernBertCRF(
@@ -1423,14 +1210,11 @@ class AnonymizationEngine:
             self.method = None
 
     def anonymize(self, text):
-        """
-        Anonymizes text using simple sentence-level splitting (no FLERT context).
-        """
+        """Anonymizes text using simple sentence-level splitting (no FLERT context)."""
         if not self.method or not self.model or not self.tokenizer:
             return None, False, "Anonymization model not loaded."
 
         sentences_data = split_dialogue_into_sentences(text)
-        
         if not sentences_data:
             return text, False, "No sentences detected."
 
@@ -1454,12 +1238,10 @@ class AnonymizationEngine:
 
         return reconstructed_text, True, "Success"
 
+# --- LLM Rewrite Features ---
 
 def generate_paraphrase(raw_dialogue, lang='DE', model="gpt-oss-120b", temperature=0.3):
-    """
-    Rephrase/anonymize a dialogue using a local LM Studio model.
-    """
-    
+    """Rephrase/anonymize a dialogue using a local LM Studio model."""
     lang = lang.upper()
     if lang not in PARAPHRASE_PROMPTS:
         logger.warning(f"Language '{lang}' not supported, falling back to 'EN'.")
@@ -1470,12 +1252,11 @@ def generate_paraphrase(raw_dialogue, lang='DE', model="gpt-oss-120b", temperatu
 
     try:
         client = OpenAI(api_key=CHAT_AI_API_KEY, base_url=CHAT_AI_ENDPOINT)
-        
         response = client.chat.completions.create(
             model=model,
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user",   "content": user_prompt},
+                {"role": "user", "content": user_prompt},
             ],
             temperature=temperature,
         )
@@ -1488,9 +1269,7 @@ def generate_paraphrase(raw_dialogue, lang='DE', model="gpt-oss-120b", temperatu
         return None
 
 def call_llm_rewriter(text, model_id, system_prompt=None):
-    """
-    Calls the external LLM API to rewrite text.
-    """
+    """Calls the external LLM API to rewrite text with robust output parsing."""
     import re
 
     if not CHAT_AI_API_KEY:
@@ -1517,11 +1296,8 @@ def call_llm_rewriter(text, model_id, system_prompt=None):
         logger.info(f"Calling LLM model: {final_model} with max_tokens=16384")
         
         chat_completion = client.chat.completions.create(
-            messages=messages,
-            model=final_model,
-            stream=False,
-            temperature=0.3,
-            max_tokens=16384
+            messages=messages, model=final_model,
+            stream=False, temperature=0.3, max_tokens=16384
         )
 
         rewritten_text = None
@@ -1557,7 +1333,6 @@ def call_llm_rewriter(text, model_id, system_prompt=None):
 
             else:
                 transcript_start_pattern = r'(?:^|\n)(?!\s*[0-9]+\.\s|\s*[-*]\s|\s*\*\*)(\s*SPEAKER_\d+:.*)'
-                
                 match = re.search(transcript_start_pattern, raw_content, re.MULTILINE | re.IGNORECASE)
                 
                 if match:
@@ -1566,21 +1341,15 @@ def call_llm_rewriter(text, model_id, system_prompt=None):
                     paragraphs = re.split(r'\n\s*\n', raw_content)
                     if paragraphs:
                         last_para = paragraphs[-1]
-                        if 'SPEAKER_' in last_para:
-                            rewritten_text = last_para.strip()
-                        else:
-                            rewritten_text = last_para.strip()
+                        rewritten_text = last_para.strip() if 'SPEAKER_' in last_para else last_para.strip()
                     else:
                         rewritten_text = raw_content.strip()
 
         if rewritten_text:
             rewritten_text = re.sub(r'^```\w*\s*|\s*```$', '', rewritten_text, flags=re.MULTILINE)
             rewritten_text = re.sub(r'```[\s\S]*?```', '', rewritten_text)
-            
             rewritten_text = re.sub(r'<[^>]+>', '', rewritten_text)
-            
             rewritten_text = re.sub(r'[^\S\n]+', ' ', rewritten_text)
-            
             rewritten_text = rewritten_text.strip()
 
             if rewritten_text.lower() in ["language none", "none", ""]:
@@ -1598,10 +1367,122 @@ def call_llm_rewriter(text, model_id, system_prompt=None):
         logger.error(f"LLM Rewriter failed for model {final_model}: {e}")
         return None, str(e)
 
+# --- ADVERSARIAL ANONYMIZATION (Restored Feature) ---
+
+def run_adversarial_anonymization(text, model_id, iterations=3):
+    """
+    Runs a dual-agent adversarial loop:
+    1. Defender (Anonymizer): Removes PII.
+    2. Attacker (Re-identifier): Attempts to find PII or infer attributes.
+    3. Defender iterates based on Attacker's critique.
+    
+    Args:
+        text: The input transcript (already BERT-anonymized or raw).
+        model_id: The LLM model to use for both agents.
+        iterations: Number of red/blue team cycles (default 3).
+        
+    Returns:
+        tuple: (final_text, iteration_log)
+    """
+    if not CHAT_AI_API_KEY:
+        logger.error("Adversarial loop requires CHAT_AI_API_KEY.")
+        return text, []
+
+    client = OpenAI(api_key=CHAT_AI_API_KEY, base_url=CHAT_AI_ENDPOINT)
+    final_model = AVAILABLE_LLM_MODELS.get(model_id, model_id)
+
+    DEFENDER_SYSTEM_PROMPT = (
+        "You are a Privacy Defender AI. Your goal is to anonymize the provided text to prevent re-identification.\n"
+        "Rules:\n"
+        "1. Remove or generalize ALL direct identifiers (names, emails, phones, IDs, specific addresses).\n"
+        "2. Remove or generalize INDIRECT identifiers (specific job titles, unique combinations of demographics, rare locations, specific dates, unique medical conditions).\n"
+        "3. Replace removed info with generic placeholders like [NAME], [LOCATION], [DATE], [JOB_TITLE].\n"
+        "4. CRITICAL: Do NOT change the general meaning, tone, or flow of the conversation.\n"
+        "5. CRITICAL: Preserve speaker tags (SPEAKER_XX, etc.) and original line breaks exactly.\n"
+        "6. Do NOT translate the text. Keep the original language.\n"
+        "7. If the text is already well-anonymized, make minimal adjustments only where the Attacker pointed out flaws.\n"
+        "Return ONLY the anonymized text."
+    )
+
+    ATTACKER_SYSTEM_PROMPT = (
+        "You are a Privacy Red Team AI. Your goal is to re-identify individuals or infer sensitive attributes from the provided text.\n"
+        "Task:\n"
+        "1. Analyze the text for any remaining Direct Identifiers (names, emails, phones).\n"
+        "2. Analyze for Indirect Identifiers (combinations of age, location, job, specific events that could uniquely identify someone).\n"
+        "3. Attempt to infer attributes not explicitly stated but implied (e.g., 'I live near the Eiffel Tower' -> inferred City: Paris).\n"
+        "4. Output a structured critique:\n"
+        "   - 'Risks Found': List specific phrases or patterns that allow re-identification.\n"
+        "   - 'Inferred Attributes': List any attributes you can guess about the speakers.\n"
+        "   - 'Recommendation': Specific instructions on how to fix these leaks.\n"
+        "5. If the text is perfectly anonymous, state 'No risks found.'\n"
+        "Return ONLY the critique in the format described."
+    )
+
+    iteration_log = []
+    current_text = text
+
+    logger.info(f"Starting Adversarial Loop: {iterations} iterations with model {final_model}")
+
+    for i in range(1, iterations + 1):
+        logger.info(f"--- Iteration {i}/{iterations} ---")
+        
+        defender_messages = [
+            {"role": "system", "content": DEFENDER_SYSTEM_PROMPT},
+            {"role": "user", "content": f"Please anonymize the following text:\n\n{text if i == 1 else current_text}"}
+        ]
+        
+        if i > 1:
+            last_critique = iteration_log[-1]["attacker_output"]
+            defender_messages[1]["content"] += f"\n\nCRITICAL FEEDBACK FROM PREVIOUS ROUND:\n{last_critique}\n\nAddress these specific points."
+
+        try:
+            defender_response = client.chat.completions.create(
+                model=final_model, messages=defender_messages,
+                temperature=0.3, max_tokens=16384
+            )
+            anonymized_text = defender_response.choices[0].message.content.strip()
+            anonymized_text = re.sub(r'<[^>]+>', '', anonymized_text)
+            anonymized_text = re.sub(r'[^\S\n]+', ' ', anonymized_text)
+            logger.info(f"Defender completed iteration {i}. Length: {len(anonymized_text)}")
+
+        except Exception as e:
+            logger.error(f"Defender failed in iteration {i}: {e}")
+            break
+
+        attacker_messages = [
+            {"role": "system", "content": ATTACKER_SYSTEM_PROMPT},
+            {"role": "user", "content": f"Analyze this text for re-identification risks:\n\n{anonymized_text}"}
+        ]
+
+        try:
+            attacker_response = client.chat.completions.create(
+                model=final_model, messages=attacker_messages,
+                temperature=0.5, max_tokens=4096
+            )
+            critique = attacker_response.choices[0].message.content.strip()
+            critique = re.sub(r'<[^>]+>', '', critique)
+            logger.info(f"Attacker completed iteration {i}. Risks found: {'Yes' if 'Risk' in critique or 'Found' in critique else 'None'}")
+
+        except Exception as e:
+            logger.error(f"Attacker failed in iteration {i}: {e}")
+            critique = "Error generating critique."
+
+        iteration_log.append({
+            "iteration": i,
+            "defender_output": anonymized_text,
+            "attacker_output": critique
+        })
+
+        current_text = anonymized_text
+
+        if "No risks found" in critique.lower() and i < iterations:
+            logger.info("Attacker found no risks. Stopping early.")
+            break
+
+    return current_text, iteration_log
+
 def normalize_punctuation(text):
-    """
-    Fixes punctuation spacing issues.
-    """
+    """Fixes punctuation spacing issues."""
     if not text:
         return text
 
@@ -1618,11 +1499,8 @@ def normalize_punctuation(text):
         content = match.group(2)
 
         content = re.sub(r"\s+'(\w)", r"'\1", content)
-        
         content = re.sub(r'\s+-\s+', '-', content)
-        
         content = re.sub(r'\s+([,.!?;:])', r'\1', content)
-        
         content = re.sub(r'([.!?;:])([A-Za-z])', r'\1 \2', content)
         
         if content:
@@ -1649,10 +1527,10 @@ def normalize_punctuation(text):
     return "\n".join(normalized_lines)
 
 def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert=False, 
-                          include_tags=None, exclude_tags=None, file_list=None):
+                          adversarial_mode=False, include_tags=None, exclude_tags=None, file_list=None):
     """
     Reads raw transcripts, anonymizes them with BERT, and optionally rewrites with LLM.
-    Simplified version without adversarial mode.
+    Supports adversarial_mode which runs a 3-iteration Red Team vs. Blue Team loop.
     """
     if not TRANSCRIPTS_FOLDER.exists() and not skip_bert:
         logger.warning(f"No 'transcripts' folder found at {TRANSCRIPTS_FOLDER}. Skipping anonymization.")
@@ -1666,6 +1544,7 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
     if use_llm and not CHAT_AI_API_KEY:
         logger.warning("LLM rewrite requested but no API key found. Disabling LLM step.")
         use_llm = False
+        adversarial_mode = False
 
     anonymizer = None
     if not skip_bert:
@@ -1705,6 +1584,11 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
                 logger.error(f"Security Alert: Path traversal detected for {target_name}. Skipping.")
                 continue
             
+            if skip_bert:
+                if "_llm" in target_name or "_adversarial_" in target_name:
+                    logger.info(f"Skipping {target_name} as it appears already processed by LLM.")
+                    continue
+            
             files_to_process.append(fpath)
         
         if not files_to_process:
@@ -1732,6 +1616,9 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
             return {"success": 0, "failed": 0, "llm_success": 0, "llm_failed": 0}
             
         logger.info(f"Found {len(files_to_process)} files to process.")
+
+    if adversarial_mode:
+        logger.info("⚠️  ADVERSARIAL MODE ENABLED: Running 3-iteration Red/Blue team loop.")
 
     for file in files_to_process:
         if not validate_path(file, source_folder):
@@ -1779,26 +1666,61 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
                 logger.info(f"Using existing anonymized content from {file.name} for LLM step.")
 
             if use_llm:
-                logger.info(f"Running standard LLM rewrite on {base_name} with model {target_llm_model}...")
-                llm_result, status = call_llm_rewriter(text_for_llm, target_llm_model)
-                
-                if llm_result:
-                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    llm_filename = f"{base_name}_llm_{timestamp}.txt"
-                    llm_path = LLM_ANONNYM_FOLDER / llm_filename
+                if adversarial_mode:
+                    logger.info(f"Running ADVERSARIAL LOOP (3 iterations) on {base_name} with model {target_llm_model}...")
                     
-                    if not validate_path(llm_path, LLM_ANONNYM_FOLDER):
-                        logger.error(f"Security Alert: LLM output path traversal detected for {llLM_FILENAME}. Skipping.")
-                        llm_failed_count += 1
-                        continue
+                    final_text, iteration_log = run_adversarial_anonymization(
+                        text_for_llm, 
+                        target_llm_model, 
+                        iterations=3
+                    )
+                    
+                    if final_text:
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        llm_filename = f"{base_name}_adversarial_{timestamp}.txt"
+                        llm_path = LLM_ANONNYM_FOLDER / llm_filename
                         
-                    with open(llm_path, "w", encoding="utf-8") as f:
-                        f.write(llm_result)
-                    logger.info(f"LLM Rewritten transcript saved to: {llm_path}")
-                    llm_processed_count += 1
+                        if not validate_path(llm_path, LLM_ANONNYM_FOLDER):
+                            logger.error(f"Security Alert: LLM output path traversal detected for {llm_filename}. Skipping.")
+                            llm_failed_count += 1
+                            continue
+                            
+                        with open(llm_path, "w", encoding="utf-8") as f:
+                            f.write(final_text)
+                        
+                        log_filename = f"{base_name}_adversarial_{timestamp}_log.json"
+                        log_path = LLM_ANONNYM_FOLDER / log_filename
+                        with open(log_path, "w", encoding="utf-8") as f:
+                            json.dump(iteration_log, f, indent=2, ensure_ascii=False)
+                            
+                        logger.info(f"Adversarial anonymization saved to: {llm_path}")
+                        logger.info(f"Audit log saved to: {log_path}")
+                        llm_processed_count += 1
+                    else:
+                        logger.warning(f"Adversarial loop failed for {base_name}")
+                        llm_failed_count += 1
+
                 else:
-                    logger.warning(f"LLM rewrite failed for {base_name}: {status}")
-                    llm_failed_count += 1
+                    logger.info(f"Running standard LLM rewrite on {base_name} with model {target_llm_model}...")
+                    llm_result, status = call_llm_rewriter(text_for_llm, target_llm_model)
+                    
+                    if llm_result:
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        llm_filename = f"{base_name}_llm_{timestamp}.txt"
+                        llm_path = LLM_ANONNYM_FOLDER / llm_filename
+                        
+                        if not validate_path(llm_path, LLM_ANONNYM_FOLDER):
+                            logger.error(f"Security Alert: LLM output path traversal detected for {llm_filename}. Skipping.")
+                            llm_failed_count += 1
+                            continue
+                            
+                        with open(llm_path, "w", encoding="utf-8") as f:
+                            f.write(llm_result)
+                        logger.info(f"LLM Rewritten transcript saved to: {llm_path}")
+                        llm_processed_count += 1
+                    else:
+                        logger.warning(f"LLM rewrite failed for {base_name}: {status}")
+                        llm_failed_count += 1
 
         except Exception as e:
             logger.error(f"Error processing file {file.name}: {e}")
@@ -1810,7 +1732,9 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
     if not skip_bert:
         logger.info(f"  BERT Processed: {processed_count}, Failed: {failed_count}")
     if use_llm:
-        logger.info(f"  LLM Rewritten: {llm_processed_count}, Failed: {llm_failed_count}")
+        logger.info(f"  LLM Rewritten (Standard): {llm_processed_count if not adversarial_mode else 'N/A'}, Failed: {llm_failed_count if not adversarial_mode else 'N/A'}")
+        if adversarial_mode:
+            logger.info(f"  LLM Adversarial Processed: {llm_processed_count}, Failed: {llm_failed_count}")
 
     return {
         "success": processed_count,
@@ -1820,10 +1744,7 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
     }
 
 def anonymize_text_locally(text):
-    """
-    Wrapper function to anonymize text using the local BERT model.
-    Returns (anonymized_text, success_status, error_message)
-    """
+    """Wrapper function to anonymize text using the local BERT model."""
     try:
         engine = AnonymizationEngine(
             method="local_mmbert", 
@@ -1848,8 +1769,6 @@ def anonymize_text_locally(text):
 # --- Main Execution ---
 
 if __name__ == "__main__":
-    import argparse
-
     parser = argparse.ArgumentParser(
         description="Audio Anonymization Pipeline with Granular Step Control",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -1859,9 +1778,12 @@ Examples:
   python process.py --disable-transcription  # Skip audio extraction
   python process.py --disable-diarization    # Skip speaker identification
   python process.py --disable-anonymization  # Skip anonymization
-  python process.py --disable-llm            # Disable the LLM element of the anonymization process
-  python process.py --llm-only               # Skip BERT and process existing anonymized files with LLM rewrite only
+  python process.py --disable-llm            # Disable LLM-based indirect identifier removal
+  python process.py --llm-only               # Skip BERT and process existing anonymized files with LLM only
+  python process.py --adversarial            # Enable dual-agent adversarial anonymization (3 iterations)
   python process.py --lang DE                # Force German language
+  python process.py --include-tags PERSON ORG LOC_CITY   # Select specific tags to anonymize
+  python process.py --exclude-tags PROFESSION QUANTITY   # Exclude specific tags from anonymization
         """
     )
     
@@ -1873,32 +1795,27 @@ Examples:
                         help='Disable BERT-based anonymization')
     parser.add_argument('--disable-llm', action='store_true',
                         help='Disable LLM-based indirect identifier removal (Run BERT anonymization only)')
-    
     parser.add_argument('--llm-only', action='store_true',
                         help='Skip BERT anonymization and process existing files in "anonym" folder with LLM rewrite only.')
-    
     parser.add_argument('--lang', type=str, default=None, 
                         choices=list(SUPPORTED_LANGUAGES.keys()),
                         help=f"Force language (e.g., DE, EN, SP, ES). Default: Auto-detect.")
-    
     parser.add_argument('--llm-model', type=str, default=None, 
                         choices=list(AVAILABLE_LLM_MODELS.keys()),
                         help=f"Specific LLM model to use for rewriting.")
-    
     parser.add_argument('--verbose', action='store_true',
                         help='Enable debug-level logging')
-    
+    parser.add_argument('--adversarial', action='store_true',
+                        help='Enable dual-agent adversarial anonymization (3 iterations: Anonymize -> Attack -> Refine)')
     parser.add_argument('--include-tags', type=str, nargs='+', default=None,
                         help=f"Select specific tags to anonymize. "
                              f"Available tags: {', '.join(AVAILABLE_TAGS)}. "
                              f"If omitted, all tags are enabled. "
                              f"Example: --include-tags PERSON ORG LOC_CITY")
-    
     parser.add_argument('--exclude-tags', type=str, nargs='+', default=None,
                         help=f"Select specific tags to IGNORE (do not anonymize). "
                              f"Available tags: {', '.join(AVAILABLE_TAGS)}. "
                              f"Example: --exclude-tags PROFESSION QUANTITY")
-    
     parser.add_argument('--file', type=str, help='Process a single file')
     parser.add_argument('--files', nargs='+', help='Process multiple files')
     
@@ -1907,13 +1824,27 @@ Examples:
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
-    check_gpu_resources() 
+    session_logger = SessionLogger(BASE_PATH)
+    session_logger.log_settings({
+        "script_version": "V4",
+        "whisper_model": WHISPERX_MODEL_PATH.name,
+        "diarization_model": DIARIZATION_MODEL_PATH.name if DIARIZATION_MODEL_PATH.exists() else "MISSING",
+        "anonymization_method": ANONYMIZATION_METHOD,
+        "llm_rewrite_enabled": LLM_REWRITE_ENABLED,
+        "adversarial_mode": args.adversarial,
+        "language": args.lang if args.lang else "auto-detect",
+        "include_tags": args.include_tags,
+        "exclude_tags": args.exclude_tags,
+    })
+    
+    check_gpu_resources()
     
     run_transcription = not args.disable_transcription
     run_diarization = not args.disable_diarization
     run_anonymization = not args.disable_anonymization
     run_llm = not args.disable_llm
-    
+    is_adversarial = args.adversarial
+
     skip_bert_for_llm = args.llm_only
     
     if args.llm_only:
@@ -1930,6 +1861,8 @@ Examples:
     logger.info(f"  LLM Indirect Identifier Removal:   {'✅ ENABLED' if run_llm else '❌ DISABLED'}")
     if skip_bert_for_llm:
         logger.info(f"    └─ Mode: LLM-only (processing existing 'anonym' folder)")
+    if is_adversarial:
+        logger.info(f"    └─ Adversarial Mode:           ✅ ENABLED (3 iterations)")
     logger.info("="*60)
     
     logger.info("Starting Audio Anonymizer full pipeline...")
@@ -1963,6 +1896,7 @@ Examples:
             llm_rewrite_enabled=run_llm,
             llm_model_id=args.llm_model,
             skip_bert=skip_bert_for_llm,
+            adversarial_mode=is_adversarial,
             include_tags=include_tags,
             exclude_tags=exclude_tags,
             file_list=input_file_list if input_file_list else None
@@ -1973,3 +1907,4 @@ Examples:
             logger.warning("⚠️  LLM rewrite requested but BERT anonymization is disabled...")
     
     logger.info("Pipeline finished.")
+    session_logger.finish()
