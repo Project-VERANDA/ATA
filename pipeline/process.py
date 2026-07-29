@@ -213,10 +213,10 @@ AUDIOS_FOLDER = pipeline_dir / "audios"
 TRANSCRIPTS_FOLDER = pipeline_dir / "transcripts"
 MODEL_FOLDER = pipeline_dir / "model"
 ANONYM_FOLDER = pipeline_dir / "anonym"
-LLM_ANONNYM_FOLDER = pipeline_dir / "LLM-Anonymized"
+LLM_ANONYM_FOLDER = pipeline_dir / "LLM-Anonymized"
 
 # Create directories if they don't exist
-for folder in [TRANSCRIPTS_FOLDER, ANONYM_FOLDER, MODEL_FOLDER, LLM_ANONNYM_FOLDER]:
+for folder in [TRANSCRIPTS_FOLDER, ANONYM_FOLDER, MODEL_FOLDER, LLM_ANONYM_FOLDER]:
     if not folder.exists():
         folder.mkdir(parents=True, exist_ok=True)
         logger.info(f"Created directory: {folder}")
@@ -1934,9 +1934,9 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
                     if final_text:
                         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                         llm_filename = f"{base_name}_adversarial_{timestamp}.txt"
-                        llm_path = LLM_ANONNYM_FOLDER / llm_filename
+                        llm_path = LLM_ANONYM_FOLDER / llm_filename
 
-                        if not validate_path(llm_path, LLM_ANONNYM_FOLDER):
+                        if not validate_path(llm_path, LLM_ANONYM_FOLDER):
                             logger.error(f"Security Alert: LLM output path traversal detected for {llm_filename}. Skipping.")
                             llm_failed_count += 1
                             continue
@@ -1945,7 +1945,7 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
                             f.write(final_text)
 
                         log_filename = f"{base_name}_adversarial_{timestamp}_log.json"
-                        log_path = LLM_ANONNYM_FOLDER / log_filename
+                        log_path = LLM_ANONYM_FOLDER / log_filename
                         with open(log_path, "w", encoding="utf-8") as f:
                             json.dump(iteration_log, f, indent=2, ensure_ascii=False)
 
@@ -1962,9 +1962,9 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
                     if llm_result:
                         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                         llm_filename = f"{base_name}_llm_{timestamp}.txt"
-                        llm_path = LLM_ANONNYM_FOLDER / llm_filename
+                        llm_path = LLM_ANONYM_FOLDER / llm_filename
 
-                        if not validate_path(llm_path, LLM_ANONNYM_FOLDER):
+                        if not validate_path(llm_path, LLM_ANONYM_FOLDER):
                             logger.error(f"Security Alert: LLM output path traversal detected for {llm_filename}. Skipping.")
                             llm_failed_count += 1
                             continue
@@ -2053,7 +2053,7 @@ __all__ = [
     'BASE_PATH',
     'pipeline_dir',
     'ANONYM_FOLDER',
-    'LLM_ANONNYM_FOLDER',
+    'LLM_ANONYM_FOLDER',
     'MODEL_FOLDER',
     'TRANSCRIPTS_FOLDER',
     'AVAILABLE_LLM_MODELS',
