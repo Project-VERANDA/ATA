@@ -752,6 +752,9 @@ if [[ "$INSTALL_WEB" =~ ^[Yy]$ ]]; then
     
     # CORRECTED PATHS - TTS voices in pipeline/tts/voices, NOT model/
     TTS_DIR="$CURRENT_DIR/pipeline/tts"
+    TTS_CONFIG="none"
+    TTS_VOICE_PATH=""
+    TTS_CONFIG_PATH=""
     PIPER_VOICE_DIR="$TTS_DIR/voices"
     
     log_info "Installing TTS Backend: $TTS_BACKEND_CHOICE..."
@@ -875,8 +878,7 @@ VOICEMAP
         TTS_CONFIG_PATH="$PIPER_VOICE_DIR/$DEFAULT_VOICE.onnx.json"
         
     elif [ "$TTS_BACKEND_CHOICE" = "coqui_xtts" ]; then
-        # ... (Coqui section unchanged)
-        # NOTE: Coqui doesn't support multi-voice speaker mapping
+        TTS_CONFIG="coqui_xtts"
     fi
 else
     log_info "Skipping TTS installation"
