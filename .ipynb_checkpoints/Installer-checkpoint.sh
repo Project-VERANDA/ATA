@@ -718,7 +718,7 @@ else
 fi
 
 # ============================================================================
-# 9. WEB INTERFACE & TTS BACKENDS - CORRECTED FOR MULTI-SPEAKER SUPPORT
+# 9. WEB INTERFACE & TTS BACKENDS - MULTI-SPEAKER SUPPORT
 # ============================================================================
 
 log_section "Web Interface & TTS Backend Installation"
@@ -757,22 +757,26 @@ if [[ "$INSTALL_WEB" =~ ^[Yy]$ ]]; then
     TTS_CONFIG_PATH=""
     PIPER_VOICE_DIR="$TTS_DIR/voices"
     
+    mkdir -p "$TTS_DIR/bin"
+    mkdir -p "$PIPER_VOICE_DIR"
+    
     log_info "Installing TTS Backend: $TTS_BACKEND_CHOICE..."
     
     if [ "$TTS_BACKEND_CHOICE" = "piper" ]; then
-        # PIPER TTS
+        # ====================================================================
+        # PIPER TTS INSTALLATION
+        # ====================================================================
+        
+        # Install piper-tts Python package
         pip install "piper-tts>=1.4.2" --no-cache-dir
         
-        # Download Piper executable
         # Download Piper executable
         log_info "Downloading Piper executable..."
         
         PIPER_URL="https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_linux_x86_64.tar.gz"
         FALLBACK_URL="https://sourceforge.net/projects/piper-tts.mirror/files/2023.11.14-2/piper_linux_x86_64.tar.gz/download"
         
-        mkdir -p "$TTS_DIR/bin"
-        
-        # Download
+        # Download archive
         if curl -#L "$PIPER_URL" --connect-timeout 30 -o /tmp/piper_archive.tar.gz 2>/dev/null; then
             log_success "Downloaded, extracting..."
             
@@ -789,7 +793,7 @@ if [[ "$INSTALL_WEB" =~ ^[Yy]$ ]]; then
                         cp "$PIPER_FOUND" "$TTS_DIR/bin/piper"
                         chmod +x "$TTS_DIR/bin/piper"
                     else
-                        log_error "Could not find piper binary"
+                        log_error "Could not find piper binary in archive"
                         ls -la /tmp/piper_extract/
                         exit 1
                     fi
@@ -804,7 +808,6 @@ if [[ "$INSTALL_WEB" =~ ^[Yy]$ ]]; then
             # Try fallback
             log_info "GitHub failed, trying SourceForge..."
             if curl -#L "$FALLBACK_URL" -o /tmp/piper_archive.tar.gz 2>/dev/null; then
-                # Same extraction logic
                 mkdir -p /tmp/piper_extract
                 if tar xzf /tmp/piper_archive.tar.gz -C /tmp/piper_extract; then
                     if [ -f "/tmp/piper_extract/piper/piper" ]; then
@@ -826,18 +829,27 @@ if [[ "$INSTALL_WEB" =~ ^[Yy]$ ]]; then
             fi
         fi
         
-        # Verify
+        # Verify executable
         if [ ! -s "$TTS_DIR/bin/piper" ]; then
             log_error "Piper executable verification failed"
             exit 1
         fi
         
-        log_success "Piper binary installed"
+        # Test it runs
+        if "$TTS_DIR/bin/piper" --help &>/dev/null; then
+            log_success "Piper binary functional"
+        else
+            log_warn "Piper binary exists but --help test failed (may require shared libs)"
+        fi
         
-        # MULTIPLE VOICES FOR SPEAKER MAPPING
+        # ====================================================================
+        # PIPER VOICE MODEL DOWNLOAD (MULTI-SPEAKER SUPPORT)
+        # ====================================================================
+        
         log_info "Downloading multiple Piper voice models for speaker differentiation..."
         log_info "These allow assigning unique voices to different speakers"
         
+        # Speaker-to-Voice mapping
         declare -A SPEAKER_VOICES
         SPEAKER_VOICES["SPEAKER_00"]="en_US-amy-medium"
         SPEAKER_VOICES["SPEAKER_01"]="en_US-lessac-medium"
@@ -846,57 +858,67 @@ if [[ "$INSTALL_WEB" =~ ^[Yy]$ ]]; then
         SPEAKER_VOICES["SPEAKER_04"]="en_US-joe-medium"
         SPEAKER_VOICES["SPEAKER_05"]="en_US-libritts-high"
         DEFAULT_VOICE="${SPEAKER_VOICES[SPEAKER_00]}"
-
-        # ============================================================================
-        # PIPER VOICE DOWNLOAD FUNCTION
-        # ============================================================================
         
+        # Working HuggingFace URL pattern
+        VOICE_BASE_URL="https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US"
+        
+        # Voice download function
         download_piper_voice() {
             local voice_id=$1
-            local base_url="https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US"
-            # Extract: en_US-amy-medium → amy/medium/en_US-amy-medium
-            local parts=(${voice_id//_/ })
-            local lang_code="${parts[0]}_${parts[1]}"  # en_US
-            local name_part="${parts[1]}-${parts[2]}"  # amy-medium
-            local subdir="${parts[1]}/${parts[2]}"     # amy/medium
-            local url="$base_url/$subdir/${voice_id}.onnx"
             local target="$PIPER_VOICE_DIR/${voice_id}.onnx"
-            local max_attempts=3
-            local attempt=1
+            local config_target="$PIPER_VOICE_DIR/${voice_id}.onnx.json"
             
-            if [ -s "$target" ]; then
-                log_success "Voice $voice_id already exists"
+            # Skip if already exists and is valid (>40MB = real ONNX file)
+            if [ -f "$target" ] && [ $(stat -c%s "$target" 2>/dev/null || echo 0) -gt 40000000 ]; then
+                log_success "Voice ${voice_id} already exists ($(du -h "$target" | awk '{print $1}'))"
                 return 0
             fi
             
-            while [ $attempt -le $max_attempts ]; do
-                echo "  Attempt ${attempt}/${max_attempts}: ${voice_id}..."
-                if curl -#L "$url" -o "$target" 2>/dev/null && [ -s "$target" ]; then
-                    # Download config
-                    curl -#L "${url%.onnx}.json" -o "${target%.onnx}.json" 2>/dev/null || true
-                    
-                    local size_bytes=$(stat -c%s "$target" 2>/dev/null || stat -f%z "$target" 2>/dev/null)
-                    if [ "$size_bytes" -gt 40000000 ]; then  # >40MB
-                        log_success "✓ ${voice_id} ($(du -h "$target" | awk '{print $1}'))"
-                        return 0
-                    fi
-                    log_warn "Incomplete, retrying..."
-                    rm -f "$target"
-                fi
-                ((attempt++))
-                [ $attempt -le $max_attempts ] && sleep 3
-            done
+            # Extract subdir: en_US-lessac-medium → lessac/medium
+            local parts=(${voice_id//_/ })
+            local name="${parts[1]}"
+            local quality="${parts[2]}"
+            local subdir="$name/$quality"
+            local url="$VOICE_BASE_URL/$subdir/${voice_id}.onnx"
             
-            log_error "Failed: ${voice_id}"
-            return 1
+            echo "  Downloading: ${voice_id}..."
+            
+            if curl -#L --connect-timeout 30 "$url" -o "$target" 2>/dev/null; then
+                local size=$(stat -c%s "$target" 2>/dev/null || echo 0)
+                
+                if [ "$size" -gt 40000000 ]; then
+                    log_success "✓ ${voice_id} ($(du -h "$target" | awk '{print $1}'))"
+                    
+                    # Download config file (.json)
+                    if curl -#L --connect-timeout 10 "${url%.onnx}.json" -o "$config_target" 2>/dev/null; then
+                        if [ -s "$config_target" ]; then
+                            echo "    Config saved"
+                        fi
+                    fi
+                    
+                    return 0
+                else
+                    echo "    Incomplete (${size} bytes), retrying..."
+                    rm -f "$target"
+                    return 1
+                fi
+            else
+                echo "    Failed: ${voice_id}"
+                rm -f "$target"
+                return 1
+            fi
         }
         
         # Download all mapped voices
         downloaded=0
+        failed=0
+        
         for speaker in SPEAKER_00 SPEAKER_01 SPEAKER_02 SPEAKER_03 SPEAKER_04 SPEAKER_05; do
             voice_id="${SPEAKER_VOICES[$speaker]}"
             if download_piper_voice "$voice_id"; then
                 ((downloaded++))
+            else
+                ((failed++))
             fi
         done
         
@@ -932,11 +954,13 @@ VOICEMAP
         
     elif [ "$TTS_BACKEND_CHOICE" = "coqui_xtts" ]; then
         TTS_CONFIG="coqui_xtts"
-    fi
+        log_info "Coqui XTTS selected (note: single voice only, no speaker mapping)"
+        # Add Coqui installation logic here if needed
+    fi    # ← Close the piper/coqui elif
 else
     log_info "Skipping TTS installation"
     TTS_CONFIG="none"
-fi
+fi    # ← Close the INSTALL_WEB if/else
 
 # ============================================================================
 # 10. MODEL DOWNLOADS
