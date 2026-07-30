@@ -674,13 +674,13 @@ log_info "  spacy:    $SPACY_VER"
 log_info "  pyannote: ${PYANNOTE_VER:-installed}"
 log_info "  torchcodec: ${TORCHCODEC_VER:-installed}"
 
-if [[ ! "$NUMPY_VER" =~ ^2\.0 ]]; then  # ✅ Changed from ^1.26
-    log_warn "NumPy $NUMPY_VER (expected 2.0.2)"
+if [[ ! "$NUMPY_VER" =~ ^2\.5 ]]; then
+    log_warn "NumPy $NUMPY_VER (expected 2.5)"
 else
-    log_success "NumPy $NUMPY_VER confirmed (2.0.2 series)"
+    log_success "NumPy $NUMPY_VER confirmed (2.5. series)"
 fi
 
-if [[ ! "$TORCH_VER" =~ ^2\.[789] ]] && [[ ! "$TORCH_VER" =~ ^3\. ]]; then  # ✅ Changed from ^2.8
+if [[ ! "$TORCH_VER" =~ ^2\.[789] ]] && [[ ! "$TORCH_VER" =~ ^3\. ]];
     log_warn "PyTorch $TORCH_VER (2.7-2.9 recommended)"
 else
     log_success "PyTorch $TORCH_VER confirmed (2.7+ series)"
@@ -766,59 +766,107 @@ if [[ "$INSTALL_WEB" =~ ^[Yy]$ ]]; then
         # Download Piper executable
         log_info "Downloading Piper executable..."
         
-        # Use latest stable release (2023.11.14-2 has most downloads)
-        PIPER_URL="https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_linux_x86_64.tar.gz"
+        # Try GitHub first, fall back to SourceForge
+        PIPER_BIN_URL="https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_linux_x86_64.tar.gz"
+        FALLBACK_URL="https://sourceforge.net/projects/piper-tts.mirror/files/2023.11.14-2/piper_linux_x86_64.tar.gz/download"
         
-        # Verify URL before downloading
-        if ! curl -sLI "$PIPER_URL" | grep -q "HTTP/2 200"; then
-            log_error "Download URL not accessible: $PIPER_URL"
-            log_info "Try alternative SourceForge mirror..."
-            PIPER_URL="https://sourceforge.net/projects/piper-tts.mirror/files/2023.11.14-2/piper_linux_x86_64.tar.gz/download"
-        fi
+        mkdir -p "$TTS_DIR/bin"
         
-        log_info "Downloading from: $(basename "$PIPER_URL")"
-        
-        if curl -#L "$PIPER_URL" -o /tmp/piper_download.tar.gz 2>/dev/null; then
-            # Validate it's a gzip file
-            if file /tmp/piper_download.tar.gz | grep -qi "gzip"; then
-                mkdir -p "$TTS_DIR/bin"
+        # Download and extract in one step with better error handling
+        if curl -#L "$PIPER_BIN_URL" --connect-timeout 30 -o /tmp/piper_archive.tar.gz 2>/dev/null; then
+            # Verify it's actually a gzip file
+            if file /tmp/piper_archive.tar.gz | grep -qi "gzip"; then
+                log_info "Validating archive contents..."
                 
-                # Extract
-                if tar xzf /tmp/piper_download.tar.gz -C /tmp/piper_extract 2>/dev/null; then
-                    mv /tmp/piper_extract/*/piper "$TTS_DIR/bin/" 2>/dev/null
+                # Try to list contents
+                if tar tzf /tmp/piper_archive.tar.gz 2>/dev/null | grep -q "piper"; then
+                    log_success "Archive validated, extracting..."
                     
-                    if [ -s "$TTS_DIR/bin/piper" ]; then
-                        chmod +x "$TTS_DIR/bin/piper"
-                        log_success "Piper executable installed"
+                    # Extract to temp directory
+                    mkdir -p /tmp/piper_extract
+                    if tar xzf /tmp/piper_archive.tar.gz -C /tmp/piper_extract 2>/dev/null; then
+                        # Find the piper binary (could be in subdirectory)
+                        PIPER_FOUND=$(find /tmp/piper_extract -name "piper" -type f -executable 2>/dev/null | head -1)
+                        
+                        if [ -n "$PIPER_FOUND" ] && [ -s "$PIPER_FOUND" ]; then
+                            cp "$PIPER_FOUND" "$TTS_DIR/bin/piper"
+                            chmod +x "$TTS_DIR/bin/piper"
+                            log_success "Piper executable installed at $TTS_DIR/bin/piper"
+                        else
+                            log_error "No executable 'piper' found in archive"
+                            tar tzf /tmp/piper_archive.tar.gz
+                            exit 1
+                        fi
+                        
+                        rm -rf /tmp/piper_extract
                     else
-                        log_error "Piper binary not found in archive"
-                        rm -f /tmp/piper_download.tar.gz
+                        log_error "Failed to extract archive"
                         exit 1
                     fi
                 else
-                    log_error "Failed to extract archive"
-                    rm -f /tmp/piper_download.tar.gz
+                    log_error "Archive contains unexpected structure"
+                    log_info "Contents:"
+                    tar tzf /tmp/piper_archive.tar.gz 2>&1 | head -20
                     exit 1
                 fi
-                
-                rm -rf /tmp/piper_extract
             else
                 log_error "Downloaded file is not a valid gzip archive"
-                log_info "File type: $(file /tmp/piper_download.tar.gz)"
-                rm -f /tmp/piper_download.tar.gz
+                log_info "File type detected:"
+                file /tmp/piper_archive.tar.gz
+                log_info "First 200 bytes:"
+                head -c 200 /tmp/piper_archive.tar.gz
                 exit 1
             fi
         else
-            log_error "Failed to download Piper from GitHub"
-            log_info "Manual download:"
-            log_info "  wget -O piper.tar.gz https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_linux_x86_64.tar.gz"
-            log_info "  tar xzf piper.tar.gz"
-            log_info "  cp piper/piper $TTS_DIR/bin/"
-            rm -f /tmp/piper_download.tar.gz
+            log_error "Failed to download from GitHub"
+            log_info "Trying SourceForge mirror..."
+            
+            if curl -#L "$FALLBACK_URL" -o /tmp/piper_archive.tar.gz 2>/dev/null; then
+                if file /tmp/piper_archive.tar.gz | grep -qi "gzip"; then
+                    mkdir -p /tmp/piper_extract
+                    if tar xzf /tmp/piper_archive.tar.gz -C /tmp/piper_extract 2>/dev/null; then
+                        PIPER_FOUND=$(find /tmp/piper_extract -name "piper" -type f -executable 2>/dev/null | head -1)
+                        if [ -n "$PIPER_FOUND" ] && [ -s "$PIPER_FOUND" ]; then
+                            cp "$PIPER_FOUND" "$TTS_DIR/bin/piper"
+                            chmod +x "$TTS_DIR/bin/piper"
+                            log_success "Piper executable installed (via SourceForge)"
+                        else
+                            log_error "No executable 'piper' found in SourceForge archive"
+                            exit 1
+                        fi
+                        rm -rf /tmp/piper_extract
+                    else
+                        log_error "Failed to extract SourceForge archive"
+                        exit 1
+                    fi
+                else
+                    log_error "SourceForge download also failed validation"
+                    exit 1
+                fi
+            else
+                log_error "All download sources failed!"
+                log_info ""
+                log_info "Manual installation required:"
+                log_info "  1. Download: wget https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_linux_x86_64.tar.gz"
+                log_info "  2. Extract:  tar xzf piper_linux_x86_64.tar.gz"
+                log_info "  3. Copy:     cp piper/piper $TTS_DIR/bin/"
+                log_info "  4. Make executable: chmod +x $TTS_DIR/bin/piper"
+                exit 1
+            fi
+        fi
+        
+        # Verify final executable
+        if [ ! -s "$TTS_DIR/bin/piper" ]; then
+            log_error "Piper executable verification failed"
             exit 1
         fi
         
-        rm -f /tmp/piper_download.tar.gz
+        # Test it runs
+        if "$TTS_DIR/bin/piper" --help &>/dev/null; then
+            log_success "Piper binary functional"
+        else
+            log_warn "Piper binary exists but --help test failed (may require shared libs)"
+        fi
         
         # MULTIPLE VOICES FOR SPEAKER MAPPING
         log_info "Downloading multiple Piper voice models for speaker differentiation..."
@@ -832,6 +880,10 @@ if [[ "$INSTALL_WEB" =~ ^[Yy]$ ]]; then
         SPEAKER_VOICES["SPEAKER_04"]="en_US-joe-medium"
         SPEAKER_VOICES["SPEAKER_05"]="en_US-libritts-high"
         DEFAULT_VOICE="${SPEAKER_VOICES[SPEAKER_00]}"
+
+        # ============================================================================
+        # PIPER VOICE DOWNLOAD FUNCTION
+        # ============================================================================
         
         download_piper_voice() {
             local voice_id=$1
