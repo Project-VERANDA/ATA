@@ -680,7 +680,7 @@ else
     log_success "NumPy $NUMPY_VER confirmed (2.5. series)"
 fi
 
-if [[ ! "$TORCH_VER" =~ ^2\.[789] ]] && [[ ! "$TORCH_VER" =~ ^3\. ]];
+if [[ ! "$TORCH_VER" =~ ^2\.[789] ]] && [[ ! "$TORCH_VER" =~ ^3\. ]]; then
     log_warn "PyTorch $TORCH_VER (2.7-2.9 recommended)"
 else
     log_success "PyTorch $TORCH_VER confirmed (2.7+ series)"
