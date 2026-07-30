@@ -1,185 +1,153 @@
 """
-TTS Engine Module - Unified Text-to-Speech functionality
-Compatible with Piper backend
-Location: ATA/pipeline/tts/tts_engine.py
+TTS Engine Module - Multi-Speaker Support
 """
 
 import os
 import subprocess
 from pathlib import Path
-from io import BytesIO
-import logging
 
-logger = logging.getLogger(__name__)
+# Project root: go up 3 levels from tts_engine.py
+# tts_engine.py -> tts/ -> pipeline/ -> ATA/ (project root)
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
-# Get project root (ATA directory) - go up 2 levels from tts_engine.py
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-logger.info(f"TTS Engine: Project root = {PROJECT_ROOT}")
-
-# Load .env
-from dotenv import load_dotenv
-env_path = PROJECT_ROOT / ".env"
-load_dotenv(env_path)
-logger.info(f"TTS Engine: .env loaded from {env_path}, exists={env_path.exists()}")
-
-# Configuration from .env
-TTS_BACKEND = os.getenv('TTS_BACKEND', 'piper')
-TTS_ENABLED = os.getenv('TTS_ENABLED', 'false').lower() == 'true'
-
-# Paths relative to PROJECT_ROOT (ATA directory)
+# Configuration
+TTS_BACKEND = "piper"
+TTS_ENABLED = True
 TTS_DIR = PROJECT_ROOT / "pipeline" / "tts"
-TTS_BIN_DIR = TTS_DIR / "bin"
-TTS_VOICE_DIR = TTS_DIR / "voices"
-PIPER_EXECUTABLE = TTS_BIN_DIR / "piper"
+PIPER_VOICE_DIR = TTS_DIR / "voices"
+PIPER_EXECUTABLE = TTS_DIR / "bin" / "piper"
 
-logger.info(f"TTS Enabled: {TTS_ENABLED}")
-logger.info(f"TTS Backend: {TTS_BACKEND}")
-logger.info(f"Piper path: {PIPER_EXECUTABLE}")
-logger.info(f"Piper exists: {PIPER_EXECUTABLE.exists()}")
-logger.info(f"Voices dir: {TTS_VOICE_DIR}")
-logger.info(f"Voices dir exists: {TTS_VOICE_DIR.exists()}")
+# Speaker-to-Voice Mapping
+SPEAKER_VOICE_MAP = {
+    'SPEAKER_00': 'en_US-amy-medium',
+    'SPEAKER_01': 'en_US-lessac-medium',
+    'SPEAKER_02': 'en_US-kusal-medium',
+    'SPEAKER_03': 'en_US-ryan-medium',
+    'SPEAKER_04': 'en_US-joe-medium',
+    'SPEAKER_05': 'en_US-libritts-high',
+    'DEFAULT': 'en_US-amy-medium'
+}
 
-def get_tts_status():
-    """Return current TTS configuration and status."""
-    return {
-        'enabled': TTS_ENABLED,
-        'backend': TTS_BACKEND,
-        'piper_exists': PIPER_EXECUTABLE.exists(),
-        'voices_dir_exists': TTS_VOICE_DIR.exists(),
-        'voices_count': len(list(TTS_VOICE_DIR.glob("*.onnx"))) if TTS_VOICE_DIR.exists() else 0
-    }
-
-def get_available_tts_voices(language='en'):
-    """Return list of available voices for given language."""
+def _load_available_voices():
+    """Load list of available voice files."""
     voices = []
-    if TTS_BACKEND == 'piper' and TTS_VOICE_DIR.exists():
-        for voice_file in TTS_VOICE_DIR.glob(f"*{language}*.onnx"):
+    if PIPER_VOICE_DIR.exists():
+        for voice_file in PIPER_VOICE_DIR.glob("*.onnx"):
             voice_name = voice_file.stem
-            quality = 'high' if 'high' in voice_name.lower() else 'medium' if 'medium' in voice_name.lower() else 'low'
-            voices.append({
-                'id': voice_name,
-                'name': voice_name.replace('_', ' ').title(),
-                'language': language,
-                'quality': quality,
-                'offline': True
-            })
+            if voice_name != 'VOICE_MAPPING':
+                voices.append(voice_name)
     return voices
 
-def generate_beep(duration_ms=400, freq=1000, return_bytes=False):
-    """Generate a beep sound using ffmpeg."""
-    try:
-        buffer = BytesIO()
-        proc = subprocess.run([
-            'ffmpeg', '-y', '-f', 'lavfi', '-i',
-            f'sine=frequency={freq}:duration={duration_ms/1000}',
-            '-c:a', 'pcm_s16le', '-'
-        ], capture_output=True, check=True)
-        buffer.write(proc.stdout)
-        buffer.seek(0)
-        return buffer
-    except Exception as e:
-        logger.error(f"Beep generation failed: {e}")
-        return None
-
-def generate_speech(text, language='en', voice_id=None, return_bytes=False):
-    """
-    Generate speech using configured TTS backend.
-    Returns: BytesIO buffer (if return_bytes=True) or None on error
-    """
-    if not TTS_ENABLED:
-        logger.warning("TTS disabled in .env (TTS_ENABLED=false)")
-        return None
+def get_speaker_voice(speaker_id: str) -> str:
+    """Get voice assignment for a specific speaker."""
+    if speaker_id in SPEAKER_VOICE_MAP:
+        voice_name = SPEAKER_VOICE_MAP[speaker_id]
+        if (PIPER_VOICE_DIR / f"{voice_name}.onnx").exists():
+            return voice_name
     
-    try:
-        if TTS_BACKEND == 'piper':
-            return _generate_speech_piper(text, language, voice_id, return_bytes)
-        else:
-            logger.error(f"Unsupported TTS backend: {TTS_BACKEND}")
-            return None
-    except Exception as e:
-        logger.error(f"Speech generation failed: {e}", exc_info=True)
-        return None
-
-def _generate_speech_piper(text, language, voice_id, return_bytes):
-    """Generate speech using Piper TTS."""
-    # Verify Piper exists
-    if not PIPER_EXECUTABLE.exists():
-        logger.error(f"Piper executable not found: {PIPER_EXECUTABLE}")
-        logger.error(f"Contents of {TTS_BIN_DIR}: {list(TTS_BIN_DIR.iterdir()) if TTS_BIN_DIR.exists() else 'DIR MISSING'}")
-        return None
-    
-    # Determine voice to use
-    if voice_id is None:
-        # Try default voice from .env
-        default_voice_path = os.getenv('TTS_VOICE_PATH')
-        if default_voice_path:
-            voice_path = Path(default_voice_path).expanduser().resolve()
-        else:
-            # Find first available voice
-            voices = get_available_tts_voices(language)
+    if speaker_id.startswith('SPEAKER_'):
+        try:
+            num = int(speaker_id.split('_')[1])
+            voices = _load_available_voices()
             if voices:
-                voice_path = TTS_VOICE_DIR / f"{voices[0]['id']}.onnx"
-            else:
-                logger.error(f"No voices available for language: {language}")
-                logger.error(f"Contents of {TTS_VOICE_DIR}: {list(TTS_VOICE_DIR.iterdir()) if TTS_VOICE_DIR.exists() else 'DIR MISSING'}")
-                return None
-    else:
-        voice_path = TTS_VOICE_DIR / f"{voice_id}.onnx"
+                return voices[num % len(voices)]
+        except (ValueError, IndexError):
+            pass
+    
+    voices = _load_available_voices()
+    return voices[0] if voices else SPEAKER_VOICE_MAP['DEFAULT']
+
+def generate_speech(text: str, language: str = 'en', voice_id: str = None,
+                   speaker: str = None, return_bytes: bool = False):
+    """Generate speech using Piper TTS."""
+    if not TTS_ENABLED:
+        return None
+    
+    if voice_id is None and speaker is not None:
+        voice_id = get_speaker_voice(speaker)
+    elif voice_id is None:
+        voice_id = SPEAKER_VOICE_MAP['DEFAULT']
+    
+    return _generate_speech_piper(text, voice_id, return_bytes)
+
+def _generate_speech_piper(text: str, voice_id: str, return_bytes: bool):
+    """Generate speech using Piper."""
+    if not PIPER_EXECUTABLE.exists():
+        return None
+    
+    voice_path = PIPER_VOICE_DIR / f"{voice_id}.onnx"
     
     if not voice_path.exists():
-        logger.error(f"Voice file not found: {voice_path}")
         return None
     
-    logger.info(f"Using Piper: {PIPER_EXECUTABLE} with voice: {voice_path.name}")
+    import io
+    buffer = io.BytesIO()
     
-    # Run Piper - stdin/stdout mode
-    buffer = BytesIO()
+    # Use stdout mode (-o -), save to temp file then read
+    tmp_wav = Path('/tmp/piper_output.wav')
     cmd = [
         str(PIPER_EXECUTABLE),
         '-m', str(voice_path),
-        '-f', '-',      # Read from stdin
-        '-o', '-'       # Write to stdout
+        '-o', str(tmp_wav)
     ]
     
     try:
-        proc = subprocess.run(
-            cmd,
-            input=text.encode('utf-8'),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=30
-        )
+        env = os.environ.copy()
+        bin_dir = str(TTS_DIR / 'bin')
+        env['LD_LIBRARY_PATH'] = bin_dir + ':' + env.get('LD_LIBRARY_PATH', '')
+        
+        # Write text to temp file and use it as input
+        tmp_txt = Path('/tmp/piper_input.txt')
+        tmp_txt.write_text(text)
+        
+        cmd_with_input = cmd + ['-f', str(tmp_txt)]
+        
+        proc = subprocess.run(cmd_with_input, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            timeout=60, env=env)
         
         if proc.returncode != 0:
-            err_msg = proc.stderr.decode('utf-8')
-            logger.error(f"Piper TTS error (code {proc.returncode}): {err_msg[:200]}")
             return None
         
-        buffer.write(proc.stdout)
-        buffer.seek(0)
-        logger.info(f"Piper generated {len(buffer.getvalue())} bytes of audio")
-        return buffer
+        # Read the wav file
+        if tmp_wav.exists() and tmp_wav.stat().st_size > 0:
+            buffer.write(tmp_wav.read_bytes())
+            buffer.seek(0)
+            tmp_wav.unlink()
+            tmp_txt.unlink()
+            return buffer
         
-    except subprocess.TimeoutExpired:
-        logger.error("Piper TTS timed out")
+        tmp_txt.unlink(missing_ok=True)
         return None
-    except FileNotFoundError as e:
-        logger.error(f"Piper command failed: {e}")
-        return None
+        
     except Exception as e:
-        logger.error(f"Piper TTS error: {e}", exc_info=True)
         return None
 
-def synthesize_segment(text, speaker='SPEAKER_00', emotion=None):
-    """Synthesize a single speaker segment with optional emotion."""
+def synthesize_segment(text: str, speaker: str = 'SPEAKER_00', emotion: str = None):
+    """Synthesize a single speaker segment."""
     import re
     clean_text = re.sub(r'^SPEAKER_\d+:\s*', '', text)
     if not clean_text.strip():
         return None
-    return generate_speech(clean_text, return_bytes=True)
+    return generate_speech(clean_text, speaker=speaker, return_bytes=True)
+
+def get_tts_status():
+    """Return TTS configuration and available voices."""
+    return {
+        'enabled': TTS_ENABLED,
+        'backend': TTS_BACKEND,
+        'piper_exists': PIPER_EXECUTABLE.exists(),
+        'voices_dir_exists': PIPER_VOICE_DIR.exists(),
+        'available_voices': _load_available_voices(),
+        'speaker_mapping': SPEAKER_VOICE_MAP
+    }
+
+def get_available_tts_voices(language: str = 'en'):
+    """List available voices for a language."""
+    voices = _load_available_voices()
+    return [{'id': v, 'language': language} for v in voices if language in v]
 
 __all__ = [
-    'TTS_BACKEND', 'TTS_ENABLED',
+    'TTS_BACKEND', 'TTS_ENABLED', 'SPEAKER_VOICE_MAP',
     'get_tts_status', 'get_available_tts_voices',
-    'generate_beep', 'generate_speech', 'synthesize_segment'
+    'get_speaker_voice', 'generate_speech', 'synthesize_segment'
 ]
