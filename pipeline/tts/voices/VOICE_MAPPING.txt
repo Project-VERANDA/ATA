@@ -1,0 +1,7 @@
+# Speaker-to-Voice Mapping for Dialogue Anonymizer
+SPEAKER_00 -> en_US-amy-medium
+SPEAKER_01 -> en_US-lessac-medium
+SPEAKER_02 -> en_US-kusal-medium
+SPEAKER_03 -> en_US-ryan-medium
+SPEAKER_04 -> en_US-joe-medium
+SPEAKER_05 -> en_US-libritts-high

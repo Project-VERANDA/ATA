@@ -4,7 +4,7 @@
 # Dialogue Anonymizer Installer (v3.4)
 # ============================================================================
 
-set -eo pipefail
+set -o pipefail
 
 SCRIPT_VERSION="3.4"
 ENV_NAME="whisperx"
@@ -886,7 +886,7 @@ if [[ "$INSTALL_WEB" =~ ^[Yy]$ ]]; then
             log_info "  Downloading: ${voice_id}..."
             
             # Download to .tmp first to validate before moving
-            if curl -#L --connect-timeout 30 "$url" -o "$target.tmp" 2>/dev/null; then
+            if curl -#L --connect-timeout 30 --retry 2 "$url" || true -o "$target.tmp" 2>/dev/null; then
                 size=$(stat -c%s "$target.tmp" 2>/dev/null || echo 0)
                 
                 if [ "$size" -gt 40000000 ]; then
