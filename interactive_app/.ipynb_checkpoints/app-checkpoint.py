@@ -57,6 +57,25 @@ try:
         anonymize_text_locally,
         MODEL_FOLDER as PROCESS_MODEL_FOLDER,
         generate_speech,
+        synthesize_segment,
+        LLM_ANONYM_FOLDER,
+        ANONYM_FOLDER,
+        BASE_PATH,
+    )
+
+"""
+try:
+    from process import (
+        transcribe_audio_locally, 
+        load_models, 
+        call_llm_rewriter, 
+        generate_paraphrase,
+        AVAILABLE_LLM_MODELS, 
+        CHAT_AI_API_KEY, 
+        CHAT_AI_ENDPOINT,
+        anonymize_text_locally,
+        MODEL_FOLDER as PROCESS_MODEL_FOLDER,
+        generate_speech,
         #generate_beep,
         synthesize_segment,
         #get_available_tts_voices,
@@ -67,6 +86,7 @@ try:
         ANONYM_FOLDER,
         BASE_PATH,
     )
+    """
 except ImportError as e:
     logging.critical(f"Failed to import from process.py: {e}")
     logging.critical(f"Looking in pipeline: {pipeline_path}")
