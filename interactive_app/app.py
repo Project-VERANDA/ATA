@@ -889,56 +889,46 @@ def generate_org_audio_route():
 
 
 @app.route('/generate_speech', methods=['POST'])
-def generate_speech_route():
-    """
-    Generate speech WITHOUT writing to persistent storage.
-    Sets explicit working directory to avoid '.' permission errors.
-    """
+def generate_speech_api():
+    """Generate speech from text with optional speaker assignment."""
     try:
         data = request.get_json()
         text = data.get('text', '').strip()
         lang = data.get('lang', 'en')
+        speaker = data.get('speaker', 'SPEAKER_00')  # NEW: speaker parameter
         
-        logger.info(f"🎵 Speech generation request ({len(text)} chars, ephemeral mode)")
+        if not text:
+            return jsonify({'error': 'No text provided'}), 400
         
-        from pipeline.process import generate_speech, BASE_PATH, pipeline_dir
-        import os
-        import tempfile
-
-        original_cwd = os.getcwd()
-        temp_dir = tempfile.mkdtemp(prefix='piper_work_')
+        logger.info(f"🎵 Speech request: {len(text)} chars, speaker={speaker}")
         
-        try:
-            # Set working directory to avoid '.' permission issues
-            os.chdir(temp_dir)
-            logger.debug(f"📁 Changed working directory to: {temp_dir}")
-            
-            # Generate in-memory buffer (no persistent disk writes!)
-            audio_buffer = generate_speech(text, language=lang, return_bytes=True)
-            
-            if not audio_buffer:
-                return jsonify({'error': 'Speech generation failed'}), 500
-            
-            # Send file from memory
-            return send_file(
-                audio_buffer,
-                mimetype='audio/wav',
-                as_attachment=False,
-                download_name='synthetic_speech.wav',
-                conditional=True
-            )
-            
-        finally:
-            os.chdir(original_cwd)
-            try:
-                import shutil
-                shutil.rmtree(temp_dir)
-                logger.debug(f"🗑️ Temp work directory deleted: {temp_dir}")
-            except OSError:
-                pass
-                
+        from pipeline.tts.tts_engine import generate_speech as tts_generate
+        
+        audio_buffer = tts_generate(
+            text=text,
+            language=lang,
+            speaker=speaker,  # Pass speaker for voice mapping
+            return_bytes=True
+        )
+        
+        if audio_buffer is None:
+            logger.error("Speech generation failed")
+            return jsonify({'error': 'Speech generation failed'}), 500
+        
+        # Create temporary file
+        temp_file = tempfile.NamedTemporaryFile(suffix='.wav', delete=False)
+        temp_file.write(audio_buffer.getvalue())
+        temp_file.close()
+        
+        return send_file(
+            temp_file.name,
+            mimetype='audio/wav',
+            as_attachment=True,
+            download_name=f'speech_{speaker}_{int(time.time())}.wav'
+        )
+        
     except Exception as e:
-        logger.error(f"Error generating speech: {e}", exc_info=True)
+        logger.error(f"Speech generation error: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 @app.route('/available_voices')

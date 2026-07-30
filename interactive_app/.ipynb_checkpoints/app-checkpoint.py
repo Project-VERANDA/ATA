@@ -19,6 +19,8 @@ from collections import OrderedDict
 from audio_utils import AudioBeepReplacer
 from io import BytesIO
 from dotenv import load_dotenv
+import json
+import requests
 CHAT_AI_API_KEY = os.getenv('CHAT_AI_API_KEY')
 CHAT_AI_ENDPOINT = os.getenv('CHAT_AI_ENDPOINT', 'https://llm.cloud.cci.charite.de/v1')
 
@@ -42,7 +44,7 @@ if str(pipeline_path) not in sys.path:
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-# Import from process.py
+# --- UPDATED IMPORTS from process.py ---
 try:
     from process import (
         transcribe_audio_locally, 
@@ -61,14 +63,25 @@ try:
         get_tts_status,
         TTS_BACKEND,
         TTS_ENABLED,
-        ANNONYM_FOLDER,
-        LLM_ANONNYM_FOLDER,
+        LLM_ANONYM_FOLDER,
+        ANONYM_FOLDER,
         BASE_PATH,
-        )
+    )
 except ImportError as e:
     logging.critical(f"Failed to import from process.py: {e}")
     logging.critical(f"Looking in pipeline: {pipeline_path}")
     sys.exit(1)
+
+# Also import from tts_engine directly as fallback
+try:
+    from pipeline.tts.tts_engine import (
+        get_tts_status,
+        get_available_tts_voices,
+        TTS_BACKEND,
+        TTS_ENABLED,
+    )
+except ImportError:
+    pass  # Already imported from process
 
 # Verify model path consistency
 if MODEL_FOLDER != PROCESS_MODEL_FOLDER:
@@ -106,11 +119,19 @@ BERT_ANONYMIZER_AVAILABLE = True
 DEFAULT_MODEL = 'bert-base-ner'
 TTS_AVAILABLE = TTS_ENABLED
 
+SSL_CERT_DIR = project_root / "ssl_certs"
+SSL_CERT_FILE = SSL_CERT_DIR / "server.crt"
+SSL_KEY_FILE = SSL_CERT_DIR / "server.key"
+SSL_MARKER_FILE = SSL_CERT_DIR / ".generated_by_ata"
+
+# Ensure SSL directory exists
+SSL_CERT_DIR.mkdir(parents=True, exist_ok=True)
+
 import torch
 from flask import Flask, render_template, request, jsonify, send_file
 
 app = Flask(__name__)
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
+app.config['MAX_CONTENT_LENGTH'] = 5 * 1024 * 1024 * 1024
 app.config['UPLOAD_FOLDER'] = 'uploads'
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
@@ -538,7 +559,37 @@ def replace_surrogates(text, lang="EN"):
     
 
 
+# ============================================================================
+# GLOBAL ERROR HANDLERS (Return JSON instead of HTML)
+# ============================================================================
 
+@app.errorhandler(400)
+def bad_request(error):
+    return jsonify({'error': 'Bad request', 'message': str(error.description)}), 400
+
+@app.errorhandler(404)
+def not_found(error):
+    return jsonify({'error': 'Not found', 'message': str(error.description)}), 404
+
+@app.errorhandler(500)
+def internal_error(error):
+    logger.error(f"Internal server error: {error}", exc_info=True)
+    return jsonify({'error': 'Internal server error', 'message': 'An unexpected error occurred'}), 500
+
+@app.errorhandler(Exception)
+def handle_exception(error):
+    """Catch-all for unhandled exceptions."""
+    logger.error(f"Unhandled exception: {error}", exc_info=True)
+    return jsonify({'error': 'Server error', 'message': str(error)}), 500
+@app.errorhandler(413)
+def request_entity_too_large(error):
+    """Handle file upload too large errors with JSON response."""
+    logger.warning(f"File too large: {request.content_length} bytes")
+    return jsonify({
+        'error': 'File too large',
+        'message': 'The uploaded audio file exceeds the 5 GB size limit.',
+        'max_size_gb': 5
+    }), 413
 
 # --- ROUTES ---
 
@@ -578,7 +629,9 @@ def upload_file():
         if file.filename == '':
             return jsonify({'error': 'No file selected'}), 400
         
-        language = request.form.get('language', 'de')
+        language = request.form.get('language', None)
+        if not language or language == 'auto':
+            language = None
         
         if file and allowed_file(file.filename):
             filename = secure_filename(file.filename)
@@ -588,19 +641,43 @@ def upload_file():
             logger.info(f"Transcribing file: {filename} in language: {language}")
             transcription, wordOffS = transcribe_audio_locally(filepath, language=language)
             
-            #os.remove(filepath)
+            # Check if transcription resulted in an error message
+            if not isinstance(transcription, str):
+                logger.error(f"Unexpected transcription type: {type(transcription)}")
+                return jsonify({'error': 'Transcription service returned invalid data'}), 500
+            
+            # Check for error messages
+            if transcription.startswith("Error:") or transcription.startswith("Transcription failed:"):
+                logger.error(f"Transcription returned error: {transcription}")
+                return jsonify({'error': transcription}), 500
+            
+            # Ensure wordOffS is always a list
+            if not isinstance(wordOffS, list):
+                wordOffS = []
             
             return jsonify({
                 'success': True,
-                'transcription': transcription,
+                'transcription': transcription if transcription else "",
                 'offsets': wordOffS,
                 'audio_name': filepath
             })
         
         return jsonify({'error': 'Invalid file format'}), 400
     
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON decode error in upload: {e}", exc_info=True)
+        return jsonify({'error': f'Response parsing failed: {str(e)}'}), 500
+    except requests.exceptions.SSLError as e:
+        logger.error(f"SSL error during transcription: {e}", exc_info=True)
+        return jsonify({'error': 'Transcription service SSL error. Check VPN connection.'}), 503
+    except requests.exceptions.Timeout as e:
+        logger.error(f"Timeout during transcription: {e}", exc_info=True)
+        return jsonify({'error': 'Transcription service timeout. Please try again.'}), 504
+    except requests.exceptions.ConnectionError as e:
+        logger.error(f"Connection error during transcription: {e}", exc_info=True)
+        return jsonify({'error': 'Transcription service unavailable. Check network connection.'}), 503
     except Exception as e:
-        logger.error(f"Error processing upload: {str(e)}")
+        logger.error(f"Error processing upload: {str(e)}", exc_info=True)  # Added exc_info for traceback
         return jsonify({'error': f'Error processing audio: {str(e)}'}), 500
 
 @app.route('/transcribe_recording', methods=['POST'])
@@ -613,7 +690,9 @@ def transcribe_recording():
             return jsonify({'error': 'No audio recording provided'}), 400
         
         audio_blob = request.files['audio']
-        language = request.form.get('language', 'de')
+        language = request.form.get('language', None)
+        if not language or language == 'auto':
+            language = None
         
         logger.info(f"Received audio file: filename='{audio_blob.filename}', language='{language}'")
         
@@ -637,26 +716,39 @@ def transcribe_recording():
                 audio_file_to_transcribe = converted_file_path
             else:
                 audio_file_to_transcribe = temp_file_path
-        except Exception:
+        except Exception as e:
+            logger.warning(f"FFmpeg conversion failed: {e}. Using original file.")
             audio_file_to_transcribe = temp_file_path
         
         logger.info(f"Starting transcription of: {audio_file_to_transcribe}")
         transcription, wordOffS = transcribe_audio_locally(audio_file_to_transcribe, language=language)
-            
-        #if temp_file_path and os.path.exists(temp_file_path):
-        #    os.unlink(temp_file_path)
-        #if converted_file_path and os.path.exists(converted_file_path):
-        #    os.unlink(converted_file_path)
-            
+        
+        # Check if transcription resulted in an error message
+        if isinstance(transcription, str) and ("Error:" in transcription or "failed" in transcription.lower()):
+            logger.error(f"Transcription returned error: {transcription}")
+            return jsonify({'error': transcription}), 500
+        
         return jsonify({
             'success': True,
-            'transcription': transcription,
-            'offsets': wordOffS,
+            'transcription': transcription if transcription else "",
+            'offsets': wordOffS if wordOffS else [],
             'audio_name': audio_file_to_transcribe
         })
     
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON decode error in transcribe_recording: {e}", exc_info=True)
+        return jsonify({'error': f'Response parsing failed: {str(e)}'}), 500
+    except requests.exceptions.SSLError as e:
+        logger.error(f"SSL error during transcription: {e}", exc_info=True)
+        return jsonify({'error': 'Transcription service SSL error. Check VPN connection.'}), 503
+    except requests.exceptions.Timeout as e:
+        logger.error(f"Timeout during transcription: {e}", exc_info=True)
+        return jsonify({'error': 'Transcription service timeout. Please try again.'}), 504
+    except requests.exceptions.ConnectionError as e:
+        logger.error(f"Connection error during transcription: {e}", exc_info=True)
+        return jsonify({'error': 'Transcription service unavailable. Check network connection.'}), 503
     except Exception as e:
-        logger.error(f"Error processing recording: {str(e)}")
+        logger.error(f"Error processing recording: {str(e)}", exc_info=True)  # Added exc_info for traceback
         if temp_file_path and os.path.exists(temp_file_path):
             os.unlink(temp_file_path)
         if converted_file_path and os.path.exists(converted_file_path):
@@ -797,56 +889,46 @@ def generate_org_audio_route():
 
 
 @app.route('/generate_speech', methods=['POST'])
-def generate_speech_route():
-    """
-    Generate speech WITHOUT writing to persistent storage.
-    Sets explicit working directory to avoid '.' permission errors.
-    """
+def generate_speech_api():
+    """Generate speech from text with optional speaker assignment."""
     try:
         data = request.get_json()
         text = data.get('text', '').strip()
         lang = data.get('lang', 'en')
+        speaker = data.get('speaker', 'SPEAKER_00')  # NEW: speaker parameter
         
-        logger.info(f"🎵 Speech generation request ({len(text)} chars, ephemeral mode)")
+        if not text:
+            return jsonify({'error': 'No text provided'}), 400
         
-        from pipeline.process import generate_speech, BASE_PATH, pipeline_dir
-        import os
-        import tempfile
-
-        original_cwd = os.getcwd()
-        temp_dir = tempfile.mkdtemp(prefix='piper_work_')
+        logger.info(f"🎵 Speech request: {len(text)} chars, speaker={speaker}")
         
-        try:
-            # Set working directory to avoid '.' permission issues
-            os.chdir(temp_dir)
-            logger.debug(f"📁 Changed working directory to: {temp_dir}")
-            
-            # Generate in-memory buffer (no persistent disk writes!)
-            audio_buffer = generate_speech(text, language=lang, return_bytes=True)
-            
-            if not audio_buffer:
-                return jsonify({'error': 'Speech generation failed'}), 500
-            
-            # Send file from memory
-            return send_file(
-                audio_buffer,
-                mimetype='audio/wav',
-                as_attachment=False,
-                download_name='synthetic_speech.wav',
-                conditional=True
-            )
-            
-        finally:
-            os.chdir(original_cwd)
-            try:
-                import shutil
-                shutil.rmtree(temp_dir)
-                logger.debug(f"🗑️ Temp work directory deleted: {temp_dir}")
-            except OSError:
-                pass
-                
+        from pipeline.tts.tts_engine import generate_speech as tts_generate
+        
+        audio_buffer = tts_generate(
+            text=text,
+            language=lang,
+            speaker=speaker,  # Pass speaker for voice mapping
+            return_bytes=True
+        )
+        
+        if audio_buffer is None:
+            logger.error("Speech generation failed")
+            return jsonify({'error': 'Speech generation failed'}), 500
+        
+        # Create temporary file
+        temp_file = tempfile.NamedTemporaryFile(suffix='.wav', delete=False)
+        temp_file.write(audio_buffer.getvalue())
+        temp_file.close()
+        
+        return send_file(
+            temp_file.name,
+            mimetype='audio/wav',
+            as_attachment=True,
+            download_name=f'speech_{speaker}_{int(time.time())}.wav'
+        )
+        
     except Exception as e:
-        logger.error(f"Error generating speech: {e}", exc_info=True)
+        logger.error(f"Speech generation error: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 @app.route('/available_voices')
@@ -897,38 +979,83 @@ def health_check():
         }), 500
 
 def create_self_signed_cert():
+    """
+    Creates self-signed certificates in unified location.
+    Respects existing user-provided certificates.
+    """
     try:
         from cryptography import x509
         from cryptography.x509.oid import NameOID
-        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives import hashes, serialization
         from cryptography.hazmat.primitives.asymmetric import rsa
-        from cryptography.hazmat.primitives import serialization
+        from datetime import datetime, timezone, timedelta
+        import os
         
+        # Check if certificates already exist
+        if SSL_CERT_FILE.exists() and SSL_KEY_FILE.exists():
+            # Check if self-generated
+            if SSL_MARKER_FILE.exists():
+                print(f"INFO: Self-generated certs found at {SSL_CERT_DIR}")
+                print(f"      Will not overwrite (unless deleted manually)")
+                # Optionally backup before regenerating
+                if "--force-regen" in sys.argv:
+                    print("WARNING: --force-regen flag detected, backing up...")
+                    backup_dir = SSL_CERT_DIR / ".backups"
+                    backup_dir.mkdir(exist_ok=True)
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    shutil.copy2(SSL_CERT_FILE, backup_dir / f"server_{timestamp}.crt")
+                    shutil.copy2(SSL_KEY_FILE, backup_dir / f"server_{timestamp}.key")
+            else:
+                print(f"INFO: User-provided certs found at {SSL_CERT_DIR}")
+                print(f"      Respecting user certificates (not overwriting)")
+            
+            # Return existing paths
+            return str(SSL_CERT_FILE), str(SSL_KEY_FILE)
+        
+        # Generate new certificate
         private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
         
         subject = issuer = x509.Name([
-            x509.NameAttribute(NameOID.COUNTRY_NAME, "US"),
-            x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, "Local"),
-            x509.NameAttribute(NameOID.LOCALITY_NAME, "Localhost"),
-            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Speech Anonymizer"),
-            x509.NameAttribute(NameOID.COMMON_NAME, "localhost"),
+            x509.NameAttribute(NameOID.COUNTRY_NAME, "DE"),
+            x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, "Berlin"),
+            x509.NameAttribute(NameOID.LOCALITY_NAME, "Berlin"),
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "VERANDA Project"),
+            x509.NameAttribute(NameOID.COMMON_NAME, "transcriber.cloud.cci.charite.de"),
         ])
         
         now = datetime.now(timezone.utc)
         cert = x509.CertificateBuilder().subject_name(subject).issuer_name(issuer).public_key(private_key.public_key()).serial_number(x509.random_serial_number()).not_valid_before(now).not_valid_after(now + timedelta(days=365)).add_extension(
             x509.SubjectAlternativeName([
                 x509.DNSName("localhost"),
-                x509.IPAddress(ipaddress.IPv4Address("127.0.0.1")),
+                x509.DNSName("127.0.0.1"),
+                x509.DNSName("transcriber.cloud.cci.charite.de"),
             ]),
             critical=False,
         ).sign(private_key, hashes.SHA256())
         
-        with open("cert.pem", "wb") as f:
+        # Save certificates
+        with open(SSL_CERT_FILE, "wb") as f:
             f.write(cert.public_bytes(serialization.Encoding.PEM))
-        with open("key.pem", "wb") as f:
-            f.write(private_key.private_bytes(encoding=serialization.Encoding.PEM, format=serialization.PrivateFormat.PKCS8, encryption_algorithm=serialization.NoEncryption()))
+        with open(SSL_KEY_FILE, "wb") as f:
+            f.write(private_key.private_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PrivateFormat.PKCS8,
+                encryption_algorithm=serialization.NoEncryption()
+            ))
         
-        return "cert.pem", "key.pem"
+        # Mark as self-generated
+        with open(SSL_MARKER_FILE, "w") as f:
+            f.write(f"Generated by ATA on {datetime.now().isoformat()}\n")
+        
+        # Set permissions
+        os.chmod(SSL_KEY_FILE, 0o600)
+        os.chmod(SSL_CERT_FILE, 0o644)
+        
+        logger.info(f"Created self-signed certificate at {SSL_CERT_FILE}")
+        logger.info(f"Private key at {SSL_KEY_FILE}")
+        
+        return str(SSL_CERT_FILE), str(SSL_KEY_FILE)
+    
     except ImportError:
         logger.warning("cryptography package not available, using ad-hoc SSL context")
         return None, None
@@ -1067,8 +1194,8 @@ def download_text(file_type, filename):
         # Map file types to folders
         folder_map = {
             'original': app.config['UPLOAD_FOLDER'], # Assuming original is saved here or in a specific folder
-            'bert': ANNONYM_FOLDER,
-            'llm': LLM_ANONNYM_FOLDER
+            'bert': ANONYM_FOLDER,
+            'llm': LLM_ANONYM_FOLDER
         }
         
         if file_type not in folder_map:
@@ -1156,19 +1283,30 @@ def generate_beep_route():
 if __name__ == '__main__':
     use_https = os.getenv('USE_HTTPS', 'true').lower() == 'true'
 
+    # Initialize certificates (handles existing/user-provided detection)
     if use_https:
-        try:
-            cert_file, key_file = create_self_signed_cert()
-            if cert_file and key_file:
-                logger.info("Starting server with HTTPS (self-signed certificate)")
-                app.run(debug=False, host='0.0.0.0', port=5001, ssl_context=(cert_file, key_file))
-            else:
-                logger.info("Starting server with HTTPS (ad-hoc certificate)")
-                app.run(debug=False, host='0.0.0.0', port=5001, ssl_context='adhoc')
-        except Exception as e:
-            logger.error(f"Failed to start HTTPS server: {e}")
-            logger.info("Falling back to HTTP")
-            app.run(debug=False, host='0.0.0.0', port=5001)
+        cert_file, key_file = create_self_signed_cert()
+        if cert_file and key_file and os.path.exists(cert_file):
+            logger.info(f"Using SSL certificate: {cert_file}")
+            logger.info(f"Using SSL key: {key_file}")
+            
+            try:
+                ssl_context = (cert_file, key_file)
+                
+                if cert_file and key_file:
+                    logger.info("Starting server with HTTPS (using ATA certificate)")
+                    app.run(debug=False, host='0.0.0.0', port=5001, ssl_context=ssl_context, threaded=True)
+                else:
+                    logger.info("Starting server with HTTPS (ad-hoc certificate)")
+                    app.run(debug=False, host='0.0.0.0', port=5001, ssl_context='adhoc', threaded=True)
+            except Exception as e:
+                logger.error(f"Failed to start HTTPS server: {e}")
+                logger.info("Falling back to HTTP")
+                app.run(debug=False, host='0.0.0.0', port=5001, threaded=True)
+        else:
+            # Fall back to ad-hoc if cert generation failed
+            logger.info("Starting server with HTTPS (ad-hoc certificate)")
+            app.run(debug=False, host='0.0.0.0', port=5001, ssl_context='adhoc', threaded=True)
     else:
         logger.info("Starting server with HTTP")
-        app.run(debug=False, host='0.0.0.0', port=5001)
+        app.run(debug=False, host='0.0.0.0', port=5001, threaded=True)
