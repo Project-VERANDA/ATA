@@ -73,15 +73,15 @@ except ImportError as e:
     sys.exit(1)
 
 # Also import from tts_engine directly as fallback
-try:
-    from pipeline.tts.tts_engine import (
-        get_tts_status,
-        get_available_tts_voices,
-        TTS_BACKEND,
-        TTS_ENABLED,
-    )
-except ImportError:
-    pass  # Already imported from process
+#try:
+#    from pipeline.tts.tts_engine import (
+#        get_tts_status,
+#        get_available_tts_voices,
+#        TTS_BACKEND,
+#        TTS_ENABLED,
+#    )
+#except ImportError:
+#    pass  # Already imported from process
 
 # Verify model path consistency
 if MODEL_FOLDER != PROCESS_MODEL_FOLDER:
