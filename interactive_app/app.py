@@ -902,14 +902,14 @@ def generate_speech_api():
         
         logger.info(f"🎵 Speech request: {len(text)} chars, speaker={speaker}")
         
-        from pipeline.tts.tts_engine import generate_speech as tts_generate
+        #from pipeline.tts.tts_engine import generate_speech as tts_generate
         
-        audio_buffer = tts_generate(
-            text=text,
-            language=lang,
-            speaker=speaker,  # Pass speaker for voice mapping
-            return_bytes=True
-        )
+        #audio_buffer = tts_generate(
+        #    text=text,
+        #    language=lang,
+        #    speaker=speaker,  # Pass speaker for voice mapping
+        #    return_bytes=True
+        #)
         
         if audio_buffer is None:
             logger.error("Speech generation failed")
@@ -1244,41 +1244,41 @@ def get_tts_status_route():
     return jsonify(status)
 
 
-@app.route('/tts/generate_beep', methods=['POST'])
-def generate_beep_route():
-    """Generate a beep sound using ffmpeg, streaming directly."""
-    try:
-        import io
-        
-        data = request.get_json() or {}
-        duration_ms = data.get('duration_ms', 400)
-        freq = data.get('freq', 1000)
-        
-        # Create in-memory buffer
-        buffer = io.BytesIO()
-        
-        # Generate beep (pipe to stdout instead of file)
-        proc = subprocess.run([
-            'ffmpeg', '-y', '-f', 'lavfi', '-i',
-            f'sine=frequency={freq}:duration={duration_ms/1000}',
-            '-c:a', 'libmp3lame',
-            '-'  # Output to stdout
-        ], capture_output=True, check=True)
-        
-        buffer.write(proc.stdout)
-        buffer.seek(0)
-        
-        return send_file(
-            buffer,
-            mimetype='audio/mpeg',
-            as_attachment=True,
-            download_name='beep.mp3'
-        )
-        
-    except subprocess.CalledProcessError as e:
-        return jsonify({'error': f'Beep generation failed'}), 500
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+#@app.route('/tts/generate_beep', methods=['POST'])
+#def generate_beep_route():
+#    """Generate a beep sound using ffmpeg, streaming directly."""
+#    try:
+#        import io
+#        
+#        data = request.get_json() or {}
+#        duration_ms = data.get('duration_ms', 400)
+#        freq = data.get('freq', 1000)
+#        
+#        # Create in-memory buffer
+#        buffer = io.BytesIO()
+#        
+#        # Generate beep (pipe to stdout instead of file)
+#        proc = subprocess.run([
+#            'ffmpeg', '-y', '-f', 'lavfi', '-i',
+#            f'sine=frequency={freq}:duration={duration_ms/1000}',
+#            '-c:a', 'libmp3lame',
+#            '-'  # Output to stdout
+#        ], capture_output=True, check=True)
+#        
+#        buffer.write(proc.stdout)
+#        buffer.seek(0)
+#        
+#        return send_file(
+#            buffer,
+#            mimetype='audio/mpeg',
+#            as_attachment=True,
+#            download_name='beep.mp3'
+#        )
+#        
+#    except subprocess.CalledProcessError as e:
+#        return jsonify({'error': f'Beep generation failed'}), 500
+#    except Exception as e:
+#        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     use_https = os.getenv('USE_HTTPS', 'true').lower() == 'true'
