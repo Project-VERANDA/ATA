@@ -766,77 +766,59 @@ if [[ "$INSTALL_WEB" =~ ^[Yy]$ ]]; then
         # Download Piper executable
         log_info "Downloading Piper executable..."
         
-        # Try multiple potential release URLs (release structure varies by version)
-        PIPER_URLS=(
-            "https://github.com/rhasspy/piper/releases/download/v1.2.0/piper_linux_x86_64.tar.gz"
-            "https://github.com/rhasspy/piper/releases/download/v1.2.0/piper_linux_x86_64.tar.bz2"
-            "https://github.com/rhasspy/piper/releases/download/v1.2.0/piper_amd64.tar.gz"
-            "https://github.com/rhasspy/piper/releases/download/latest/piper_linux_x86_64.tar.gz"
-        )
+        # Use latest stable release (2023.11.14-2 has most downloads)
+        PIPER_URL="https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_linux_x86_64.tar.gz"
         
-        DOWNLOAD_SUCCESSFUL=false
+        # Verify URL before downloading
+        if ! curl -sLI "$PIPER_URL" | grep -q "HTTP/2 200"; then
+            log_error "Download URL not accessible: $PIPER_URL"
+            log_info "Try alternative SourceForge mirror..."
+            PIPER_URL="https://sourceforge.net/projects/piper-tts.mirror/files/2023.11.14-2/piper_linux_x86_64.tar.gz/download"
+        fi
         
-        for url in "${PIPER_URLS[@]}"; do
-            log_info "Trying: $(basename "$url")..."
-            
-            if curl -#L --head "$url" 2>/dev/null | grep -q "200 OK"; then
-                log_info "URL valid, downloading..."
+        log_info "Downloading from: $(basename "$PIPER_URL")"
+        
+        if curl -#L "$PIPER_URL" -o /tmp/piper_download.tar.gz 2>/dev/null; then
+            # Validate it's a gzip file
+            if file /tmp/piper_download.tar.gz | grep -qi "gzip"; then
+                mkdir -p "$TTS_DIR/bin"
                 
-                if curl -#L "$url" -o /tmp/piper_download.tar 2>/dev/null; then
-                    # Validate it's actually a compressed archive
-                    if file /tmp/piper_download.tar | grep -qi "gzip\|bzip2\|compressed\|archive"; then
-                        log_success "Download validated as archive"
-                        
-                        # Extract based on format
-                        if file /tmp/piper_download.tar | grep -qi "gzip"; then
-                            if tar xzf /tmp/piper_download.tar -C "$TTS_DIR/bin" 2>/dev/null; then
-                                DOWNLOAD_SUCCESSFUL=true
-                                log_success "Extraction successful"
-                                break
-                            fi
-                        elif file /tmp/piper_download.tar | grep -qi "bzip2"; then
-                            if tar xjf /tmp/piper_download.tar -C "$TTS_DIR/bin" 2>/dev/null; then
-                                DOWNLOAD_SUCCESSFUL=true
-                                log_success "Extraction successful"
-                                break
-                            fi
-                        fi
+                # Extract
+                if tar xzf /tmp/piper_download.tar.gz -C /tmp/piper_extract 2>/dev/null; then
+                    mv /tmp/piper_extract/*/piper "$TTS_DIR/bin/" 2>/dev/null
+                    
+                    if [ -s "$TTS_DIR/bin/piper" ]; then
+                        chmod +x "$TTS_DIR/bin/piper"
+                        log_success "Piper executable installed"
                     else
-                        log_warn "Downloaded file is not a valid archive (might be 404 HTML)"
+                        log_error "Piper binary not found in archive"
+                        rm -f /tmp/piper_download.tar.gz
+                        exit 1
                     fi
+                else
+                    log_error "Failed to extract archive"
+                    rm -f /tmp/piper_download.tar.gz
+                    exit 1
                 fi
+                
+                rm -rf /tmp/piper_extract
             else
-                log_info "URL not available, trying next..."
+                log_error "Downloaded file is not a valid gzip archive"
+                log_info "File type: $(file /tmp/piper_download.tar.gz)"
+                rm -f /tmp/piper_download.tar.gz
+                exit 1
             fi
-        done
-        
-        # Cleanup temp file
-        rm -f /tmp/piper_download.tar
-        
-        if [ "$DOWNLOAD_SUCCESSFUL" = false ]; then
-            log_error "All download URLs failed!"
-            log_info ""
-            log_info "Manual download required:"
-            log_info "  1. Visit: https://github.com/rhasspy/piper/releases/tag/v1.2.0"
-            log_info "  2. Download: piper_linux_x86_64.tar.gz (or .tar.bz2)"
-            log_info "  3. Extract to: $TTS_DIR/bin/"
-            log_info "  4. Run: chmod +x $TTS_DIR/bin/piper"
-            log_info ""
-            log_info "Or use pre-built binary:"
-            log_info "  wget -O $TTS_DIR/bin/piper https://github.com/rhasspy/piper/releases/download/v1.2.0/piper_linux_x86_64/piper"
-            log_info "  chmod +x $TTS_DIR/bin/piper"
+        else
+            log_error "Failed to download Piper from GitHub"
+            log_info "Manual download:"
+            log_info "  wget -O piper.tar.gz https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_linux_x86_64.tar.gz"
+            log_info "  tar xzf piper.tar.gz"
+            log_info "  cp piper/piper $TTS_DIR/bin/"
+            rm -f /tmp/piper_download.tar.gz
             exit 1
         fi
         
-        # Make executable
-        chmod +x "$TTS_DIR/bin/piper"
-        
-        if [ ! -s "$TTS_DIR/bin/piper" ]; then
-            log_error "Piper executable download/validation failed"
-            exit 1
-        fi
-        
-        log_success "Piper executable installed"
+        rm -f /tmp/piper_download.tar.gz
         
         # MULTIPLE VOICES FOR SPEAKER MAPPING
         log_info "Downloading multiple Piper voice models for speaker differentiation..."
