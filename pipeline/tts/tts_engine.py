@@ -6,8 +6,9 @@ import os
 import subprocess
 from pathlib import Path
 
-# Project root: go up 2 levels from tts_engine.py (pipeline/tts/tts_engine.py)
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+# Project root: go up 3 levels from tts_engine.py
+# tts_engine.py -> tts/ -> pipeline/ -> ATA/ (project root)
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 # Configuration
 TTS_BACKEND = "piper"
@@ -75,7 +76,6 @@ def _generate_speech_piper(text: str, voice_id: str, return_bytes: bool):
         return None
     
     voice_path = PIPER_VOICE_DIR / f"{voice_id}.onnx"
-    config_path = PIPER_VOICE_DIR / f"{voice_id}.onnx.json"
     
     if not voice_path.exists():
         return None
@@ -83,16 +83,12 @@ def _generate_speech_piper(text: str, voice_id: str, return_bytes: bool):
     import io
     buffer = io.BytesIO()
     
-    # Use stdout mode (-o -)
+    # Use stdout mode (-o -), no config file needed
     cmd = [
         str(PIPER_EXECUTABLE),
         '-m', str(voice_path),
         '-o', '-'
     ]
-    
-    if config_path.exists():
-        cmd.insert(3, '-c')
-        cmd.insert(4, str(config_path))
     
     try:
         env = os.environ.copy()
