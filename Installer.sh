@@ -505,6 +505,13 @@ log_section "Dialogue Anonymizer Installer (v${SCRIPT_VERSION})"
 log_info "Working Directory: $(pwd)"
 echo ""
 
+TTS_DIR="$CURRENT_DIR/pipeline/tts"
+PIPER_VOICE_DIR="$TTS_DIR/voices"
+TTS_CONFIG="none"
+TTS_VOICE_PATH=""
+TTS_CONFIG_PATH=""
+DEFAULT_VOICE="en_US-amy-medium"
+
 # ============================================================================
 # 2. CONDA INSTALLATION & ENVIRONMENT SETUP
 # ============================================================================
@@ -750,16 +757,6 @@ if [[ "$INSTALL_WEB" =~ ^[Yy]$ ]]; then
         [ "$TTS_CHOICE" = "2" ] && TTS_BACKEND_CHOICE="coqui_xtts"
     fi
     
-    # CORRECTED PATHS - TTS voices in pipeline/tts/voices, NOT model/
-    TTS_DIR="$CURRENT_DIR/pipeline/tts"
-    TTS_CONFIG="none"
-    TTS_VOICE_PATH=""
-    TTS_CONFIG_PATH=""
-    PIPER_VOICE_DIR="$TTS_DIR/voices"
-    
-    mkdir -p "$TTS_DIR/bin"
-    mkdir -p "$PIPER_VOICE_DIR"
-    
     log_info "Installing TTS Backend: $TTS_BACKEND_CHOICE..."
     
     if [ "$TTS_BACKEND_CHOICE" = "piper" ]; then
@@ -850,64 +847,63 @@ if [[ "$INSTALL_WEB" =~ ^[Yy]$ ]]; then
         log_info "These allow assigning unique voices to different speakers"
         
         # Speaker-to-Voice mapping
-        declare -A SPEAKER_VOICES
-        SPEAKER_VOICES["SPEAKER_00"]="en_US-amy-medium"
-        SPEAKER_VOICES["SPEAKER_01"]="en_US-lessac-medium"
-        SPEAKER_VOICES["SPEAKER_02"]="en_US-kusal-medium"
-        SPEAKER_VOICES["SPEAKER_03"]="en_US-ryan-medium"
-        SPEAKER_VOICES["SPEAKER_04"]="en_US-joe-medium"
-        SPEAKER_VOICES["SPEAKER_05"]="en_US-libritts-high"
-        DEFAULT_VOICE="${SPEAKER_VOICES[SPEAKER_00]}"
+        PIPE_DIR="pipeline/tts/voices"
         
-        # Working HuggingFace URL pattern
+        # Voice list (excluding amy-medium which you already have)
+        declare -A VOICES
+        VOICES["SPEAKER_01"]="en_US-lessac-medium"
+        VOICES["SPEAKER_02"]="en_US-kusal-medium"
+        VOICES["SPEAKER_03"]="en_US-ryan-medium"
+        VOICES["SPEAKER_04"]="en_US-joe-medium"
+        VOICES["SPEAKER_05"]="en_US-libritts-high"
+        
         VOICE_BASE_URL="https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US"
         
-        # Voice download function
-        download_piper_voice() {
-            local voice_id=$1
-            local target="$PIPER_VOICE_DIR/${voice_id}.onnx"
-            local config_target="$PIPER_VOICE_DIR/${voice_id}.onnx.json"
+        downloaded=0
+        
+        for speaker in SPEAKER_01 SPEAKER_02 SPEAKER_03 SPEAKER_04 SPEAKER_05; do
+            voice_id="${VOICES[$speaker]}"
+            target="$PIPE_DIR/${voice_id}.onnx"
+            config_target="$PIPE_DIR/${voice_id}.onnx.json"
             
-            # Skip if already exists and is valid (>40MB = real ONNX file)
+            # Skip if exists and >40MB
             if [ -f "$target" ] && [ $(stat -c%s "$target" 2>/dev/null || echo 0) -gt 40000000 ]; then
-                log_success "Voice ${voice_id} already exists ($(du -h "$target" | awk '{print $1}'))"
-                return 0
+                echo "✅ Already exists: ${voice_id}"
+                ((downloaded++))
+                continue
             fi
             
             # Extract subdir: en_US-lessac-medium → lessac/medium
-            local parts=(${voice_id//_/ })
-            local name="${parts[1]}"
-            local quality="${parts[2]}"
-            local subdir="$name/$quality"
-            local url="$VOICE_BASE_URL/$subdir/${voice_id}.onnx"
+            parts=(${voice_id//_/ })
+            name="${parts[1]}"
+            quality="${parts[2]}"
+            subdir="$name/$quality"
+            url="$VOICE_BASE_URL/$subdir/${voice_id}.onnx"
             
-            echo "  Downloading: ${voice_id}..."
+            echo "⬇️  ${voice_id}..."
             
             if curl -#L --connect-timeout 30 "$url" -o "$target" 2>/dev/null; then
-                local size=$(stat -c%s "$target" 2>/dev/null || echo 0)
+                size=$(stat -c%s "$target" 2>/dev/null || echo 0)
                 
                 if [ "$size" -gt 40000000 ]; then
-                    log_success "✓ ${voice_id} ($(du -h "$target" | awk '{print $1}'))"
+                    echo "✅ ${voice_id} ($(du -h "$target" | awk '{print $1}'))"
+                    ((downloaded++))
                     
-                    # Download config file (.json)
-                    if curl -#L --connect-timeout 10 "${url%.onnx}.json" -o "$config_target" 2>/dev/null; then
-                        if [ -s "$config_target" ]; then
-                            echo "    Config saved"
-                        fi
-                    fi
-                    
-                    return 0
+                    # Download config
+                    curl -#L --connect-timeout 10 "${url%.onnx}.json" -o "$config_target" 2>/dev/null || true
                 else
-                    echo "    Incomplete (${size} bytes), retrying..."
+                    echo "❌ Too small (${size} bytes)"
                     rm -f "$target"
-                    return 1
                 fi
             else
-                echo "    Failed: ${voice_id}"
+                echo "❌ Failed: ${voice_id}"
                 rm -f "$target"
-                return 1
             fi
-        }
+        done
+        
+        echo ""
+        echo "Total voices: $(ls $PIPE_DIR/*.onnx 2>/dev/null | wc -l) / 6"
+        ls -lh $PIPE_DIR/*.onnx
         
         # Download all mapped voices
         downloaded=0
@@ -1085,18 +1081,25 @@ fi
 # 11. ENV FILE CONFIGURATION
 # ============================================================================
 
+log_section "Configuring .env File"
+
 if [ -f ".env" ]; then
     log_info "Backing up existing .env..."
     cp .env ".env.backup.$(date +%Y%m%d%H%M%S)"
 fi
 
 # Use relative paths ($CURRENT_DIR-based) instead of hardcoded mount paths
-cat > .env <<EOF
+cat > .env << EOF
 # ATA Speech Anonymizer Configuration
+# Generated: $(date +%Y-%m-%d)
+# Version: $SCRIPT_VERSION
+
 CHAT_AI_API_KEY=your_api_key_here
 CHAT_AI_ENDPOINT=https://your-endpoint.com/v1
 
+# ======================================
 # TTS CONFIGURATION
+# ======================================
 TTS_BACKEND=$TTS_CONFIG
 TTS_ENABLED=true
 
@@ -1105,35 +1108,54 @@ TTS_SAMPLE_RATE=22050
 TTS_DEFAULT_LANG=en
 
 # Piper TTS Settings
-TTS_BIN_PATH=./pipeline/tts/bin
+TTS_BIN_PATH=\$CURRENT_DIR/pipeline/tts/bin
 TTS_VOICE_DIR=\$CURRENT_DIR/pipeline/tts/voices
-TTS_VOICE_PATH=\$CURRENT_DIR/pipeline/tts/voices/en_US-amy-medium.onnx
+TTS_VOICE_PATH=\$CURRENT_DIR/pipeline/tts/voices/${DEFAULT_VOICE}.onnx
+
+# Piper Voice Configuration
+Piper_Voice_Path=\$CURRENT_DIR/pipeline/tts/voices/${DEFAULT_VOICE}.onnx
+Piper_Config_Path=\$CURRENT_DIR/pipeline/tts/voices/${DEFAULT_VOICE}.onnx.json
 
 # Coqui XTTS Settings (unused when TTS_BACKEND=piper)
 XTTS_Model_Path=\$CURRENT_DIR/$MODEL_DIR_NAME/coqui-xtts
 XTTS_Reference_Audio_Path=\$CURRENT_DIR/reference_audio.wav
 
+# ======================================
+# SHARED LIBRARY PATHS (for Piper TTS)
+# ======================================
+LD_LIBRARY_PATH=\$CURRENT_DIR/pipeline/tts/bin:\$LD_LIBRARY_PATH
+
+# ======================================
 # COMPLIANCE & LOGGING
+# ======================================
 COMPLIANCE_MODE=standard
 COMPLIANCE_ENCRYPTION=false
 COMPLIANCE_AUDIT_LOG=false
 LOG_LEVEL=INFO
-LOG_FILE=./logs/ata.log
+LOG_FILE=\$CURRENT_DIR/logs/ata.log
 
+# ======================================
 # PII MODEL (DFKI-SLT - 11 languages)
-# FIXED: H,I → HI, SP → ES (standard language codes)
+# Languages: AR, DE, EN, FI, FR, HI, IT, PL, PT, ES, TR
+# ======================================
 PII_Model_Path=\$CURRENT_DIR/$MODEL_DIR_NAME/multilingual_DialogPII_NER
 PII_Languages=AR,DE,EN,FI,FR,HI,IT,PL,PT,ES,TR
 
+# ======================================
 # WHISPERX
+# ======================================
 Whisper_Model_Path=$WHISPER_PRIMARY_PATH
 Whisper_Device=\$([ "$GPU_AVAILABLE" = true ] && echo cuda || echo cpu)
 Whisper_Compute_Type=float16
 
+# ======================================
 # PYANNOTE
+# ======================================
 Pyannote_Model_Path=\$CURRENT_DIR/$MODEL_DIR_NAME/models--pyannote--speaker-diarization-community-1
 
+# ======================================
 # Installation Metadata
+# ======================================
 ATA_INSTALL_VERSION=$SCRIPT_VERSION
 ATA_INSTALL_DATE=$(date +%Y-%m-%d)
 EOF
@@ -1141,26 +1163,36 @@ EOF
 # Add backend-specific paths
 case "$TTS_CONFIG" in
     piper)
-        cat >> .env <<EOF
+        cat >> .env << EOF
 
-# Piper Voice Configuration
-Piper_Voice_Path=$TTS_VOICE_PATH
-Piper_Config_Path=$TTS_CONFIG_PATH
+# ======================================
+# Piper Additional Settings
+# ======================================
+Piper_Voices_Count=$(ls $PIPER_VOICE_DIR/*.onnx 2>/dev/null | wc -l)
+Piper_Speaker_Map=\$CURRENT_DIR/pipeline/tts/voices/VOICE_MAPPING.txt
 EOF
         ;;
     coqui_xtts)
-        cat >> .env <<EOF
+        cat >> .env << EOF
 
+# ======================================
 # Coqui XTTS Configuration
+# ======================================
 XTTS_Model_Path=$TTS_CONFIG_PATH
 XTTS_Reference_Audio_Path=./reference_audio.wav
 EOF
+        ;;
+    *)
+        log_warn "No TTS backend selected"
         ;;
 esac
 
 # Set restrictive permissions on .env
 chmod 600 .env
 log_success ".env configured and secured (chmod 600)"
+log_info "TTS Backend: $TTS_CONFIG"
+log_info "Default Voice: ${DEFAULT_VOICE}"
+log_info "Voice Count: $(ls $PIPER_VOICE_DIR/*.onnx 2>/dev/null | wc -l)"
 
 # ============================================================================
 # 12. OPTIONAL: ADD TO SHELL PROFILE
