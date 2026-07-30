@@ -1,16 +1,15 @@
 """
 TTS Engine Module - Multi-Speaker Support
-Location: ATA/pipeline/tts/tts_engine.py
 """
 
 import os
 import subprocess
 from pathlib import Path
 
-# Get project root (parent of parent of this file)
+# Project root: go up 2 levels from tts_engine.py (pipeline/tts/tts_engine.py)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-# Configuration - Use absolute paths relative to project root
+# Configuration
 TTS_BACKEND = "piper"
 TTS_ENABLED = True
 TTS_DIR = PROJECT_ROOT / "pipeline" / "tts"
@@ -34,7 +33,7 @@ def _load_available_voices():
     if PIPER_VOICE_DIR.exists():
         for voice_file in PIPER_VOICE_DIR.glob("*.onnx"):
             voice_name = voice_file.stem
-            if not voice_name.endswith('.json') and voice_name.endswith('-medium') or voice_name.endswith('-high') or voice_name.endswith('-low'):
+            if voice_name != 'VOICE_MAPPING':
                 voices.append(voice_name)
     return voices
 
@@ -42,12 +41,9 @@ def get_speaker_voice(speaker_id: str) -> str:
     """Get voice assignment for a specific speaker."""
     if speaker_id in SPEAKER_VOICE_MAP:
         voice_name = SPEAKER_VOICE_MAP[speaker_id]
-        # Check if voice file exists
-        voice_path = PIPER_VOICE_DIR / f"{voice_name}.onnx"
-        if voice_path.exists():
+        if (PIPER_VOICE_DIR / f"{voice_name}.onnx").exists():
             return voice_name
     
-    # Cycle through available voices
     if speaker_id.startswith('SPEAKER_'):
         try:
             num = int(speaker_id.split('_')[1])
@@ -62,7 +58,7 @@ def get_speaker_voice(speaker_id: str) -> str:
 
 def generate_speech(text: str, language: str = 'en', voice_id: str = None,
                    speaker: str = None, return_bytes: bool = False):
-    """Generate speech using Piper TTS with speaker-aware voice selection."""
+    """Generate speech using Piper TTS."""
     if not TTS_ENABLED:
         return None
     
@@ -84,25 +80,24 @@ def _generate_speech_piper(text: str, voice_id: str, return_bytes: bool):
     if not voice_path.exists():
         return None
     
-    buffer = None
     import io
     buffer = io.BytesIO()
     
+    # Use stdout mode (-o -)
     cmd = [
         str(PIPER_EXECUTABLE),
         '-m', str(voice_path),
-        '-c', str(config_path) if config_path.exists() else '',
-        '-f', '-',
         '-o', '-'
     ]
+    
+    if config_path.exists():
+        cmd.insert(3, '-c')
+        cmd.insert(4, str(config_path))
     
     try:
         env = os.environ.copy()
         bin_dir = str(TTS_DIR / 'bin')
-        if 'LD_LIBRARY_PATH' in env:
-            env['LD_LIBRARY_PATH'] = bin_dir + ':' + env['LD_LIBRARY_PATH']
-        else:
-            env['LD_LIBRARY_PATH'] = bin_dir
+        env['LD_LIBRARY_PATH'] = bin_dir + ':' + env.get('LD_LIBRARY_PATH', '')
         
         proc = subprocess.run(cmd, input=text.encode('utf-8'),
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -119,7 +114,7 @@ def _generate_speech_piper(text: str, voice_id: str, return_bytes: bool):
         return None
 
 def synthesize_segment(text: str, speaker: str = 'SPEAKER_00', emotion: str = None):
-    """Synthesize a single speaker segment with automatic voice selection."""
+    """Synthesize a single speaker segment."""
     import re
     clean_text = re.sub(r'^SPEAKER_\d+:\s*', '', text)
     if not clean_text.strip():
