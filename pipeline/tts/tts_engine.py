@@ -83,11 +83,12 @@ def _generate_speech_piper(text: str, voice_id: str, return_bytes: bool):
     import io
     buffer = io.BytesIO()
     
-    # Use stdout mode (-o -), no config file needed
+    # Use stdout mode (-o -), save to temp file then read
+    tmp_wav = Path('/tmp/piper_output.wav')
     cmd = [
         str(PIPER_EXECUTABLE),
         '-m', str(voice_path),
-        '-o', '-'
+        '-o', str(tmp_wav)
     ]
     
     try:
@@ -95,16 +96,28 @@ def _generate_speech_piper(text: str, voice_id: str, return_bytes: bool):
         bin_dir = str(TTS_DIR / 'bin')
         env['LD_LIBRARY_PATH'] = bin_dir + ':' + env.get('LD_LIBRARY_PATH', '')
         
-        proc = subprocess.run(cmd, input=text.encode('utf-8'),
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        # Write text to temp file and use it as input
+        tmp_txt = Path('/tmp/piper_input.txt')
+        tmp_txt.write_text(text)
+        
+        cmd_with_input = cmd + ['-f', str(tmp_txt)]
+        
+        proc = subprocess.run(cmd_with_input, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             timeout=60, env=env)
         
         if proc.returncode != 0:
             return None
         
-        buffer.write(proc.stdout)
-        buffer.seek(0)
-        return buffer
+        # Read the wav file
+        if tmp_wav.exists() and tmp_wav.stat().st_size > 0:
+            buffer.write(tmp_wav.read_bytes())
+            buffer.seek(0)
+            tmp_wav.unlink()
+            tmp_txt.unlink()
+            return buffer
+        
+        tmp_txt.unlink(missing_ok=True)
+        return None
         
     except Exception as e:
         return None
