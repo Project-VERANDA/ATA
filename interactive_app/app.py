@@ -44,6 +44,24 @@ if str(pipeline_path) not in sys.path:
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
+# --- TTS Imports (moved from process.py to tts_engine) ---
+try:
+    from pipeline.tts.tts_engine import (
+        generate_speech,
+        synthesize_segment,
+        get_available_tts_voices,
+        get_tts_status,
+        TTS_BACKEND,
+        TTS_ENABLED,
+    )
+except ImportError as e:
+    logging.critical(f"Failed to import TTS from tts_engine: {e}")
+    logging.critical("TTS features will be disabled")
+    # Set defaults for graceful degradation
+    generate_speech = None
+    TTS_ENABLED = False
+    TTS_BACKEND = "none"
+
 # --- UPDATED IMPORTS from process.py ---
 try:
     from process import (
@@ -56,13 +74,6 @@ try:
         CHAT_AI_ENDPOINT,
         anonymize_text_locally,
         MODEL_FOLDER as PROCESS_MODEL_FOLDER,
-        generate_speech,
-        generate_beep,
-        synthesize_segment,
-        get_available_tts_voices,
-        get_tts_status,
-        TTS_BACKEND,
-        TTS_ENABLED,
         LLM_ANONYM_FOLDER,
         ANONYM_FOLDER,
         BASE_PATH,
@@ -71,17 +82,6 @@ except ImportError as e:
     logging.critical(f"Failed to import from process.py: {e}")
     logging.critical(f"Looking in pipeline: {pipeline_path}")
     sys.exit(1)
-
-# Also import from tts_engine directly as fallback
-try:
-    from pipeline.tts.tts_engine import (
-        get_tts_status,
-        get_available_tts_voices,
-        TTS_BACKEND,
-        TTS_ENABLED,
-    )
-except ImportError:
-    pass  # Already imported from process
 
 # Verify model path consistency
 if MODEL_FOLDER != PROCESS_MODEL_FOLDER:
