@@ -18,15 +18,15 @@ from pathlib import Path
 from openai import OpenAI
 from dotenv import load_dotenv
 
-#from pipeline.tts.tts_engine import (
-#    generate_speech,
-#    generate_beep,
-#    synthesize_segment,
-#    get_available_tts_voices,
-#    get_tts_status,
-#    TTS_BACKEND,
-#    TTS_ENABLED,
-#)
+from pipeline.tts.tts_engine import (
+    generate_speech,
+    generate_beep,
+    synthesize_segment,
+    get_available_tts_voices,
+    get_tts_status,
+    TTS_BACKEND,
+    TTS_ENABLED,
+)
 
 load_dotenv()
 
