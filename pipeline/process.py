@@ -1,23 +1,57 @@
+# =============================================================================
+# STANDARD LIBRARY IMPORTS
+# =============================================================================
 import os
 import sys
-import whisperx
-import ffmpeg
-import torch
-import subprocess
-import gc
-import logging
-import re
+import tempfile
 import time
+import re
+import subprocess
+import logging
+import gc
 import argparse
 import json
-import numpy as np
-import spacy
-from datetime import datetime
-from collections import defaultdict
+import random
+import asyncio
 from pathlib import Path
-from openai import OpenAI
-from dotenv import load_dotenv
+from datetime import datetime, timezone, timedelta
+from io import BytesIO
+from collections import OrderedDict, defaultdict
 
+# =============================================================================
+# THIRD-PARTY IMPORTS
+# =============================================================================
+import numpy as np
+import requests
+import ffmpeg
+import spacy
+from dotenv import load_dotenv
+from werkzeug.utils import secure_filename
+from openai import OpenAI
+
+# =============================================================================
+# CRITICAL: cuDNN DISABLE FIX
+# =============================================================================
+# This MUST run BEFORE any whisperx/pyannote imports that trigger cuDNN init
+# =============================================================================
+import torch
+
+# Disable cuDNN to avoid CUDNN_STATUS_NOT_INITIALIZED with WhisperX + Pyannote
+torch.backends.cudnn.enabled = False
+torch.backends.cudnn.benchmark = False
+
+# Re-enable TF-32 for better performance on A40 (Ampere architecture)
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
+
+# =============================================================================
+
+# Now safe to import whisperx and pyannote-dependent modules
+import whisperx
+
+# =============================================================================
+# LOCAL PROJECT IMPORTS
+# =============================================================================
 from pipeline.tts.tts_engine import (
     generate_speech,
     synthesize_segment,
@@ -27,7 +61,35 @@ from pipeline.tts.tts_engine import (
     TTS_ENABLED,
 )
 
+from audio_utils import AudioBeepReplacer
+
+# =============================================================================
+# ENVIRONMENT CONFIGURATION
+# =============================================================================
 load_dotenv()
+
+CHAT_AI_API_KEY = os.getenv('CHAT_AI_API_KEY')
+CHAT_AI_ENDPOINT = os.getenv('CHAT_AI_ENDPOINT', 'https://llm.cloud.cci.charite.de/v1')
+
+# =============================================================================
+# LOGGING SETUP
+# =============================================================================
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# =============================================================================
+# GLOBAL CONSTANTS & PATHS
+# =============================================================================
+BASE_PATH = Path(__file__).parent
+MODEL_FOLDER = BASE_PATH / 'pipeline' / 'model'
+WHISPERX_MODEL_PATH = MODEL_FOLDER / 'Systran--faster-whisper-large-v3'
+
+# =============================================================================
+# END OF IMPORT SECTION
+# =============================================================================
 
 # GPU Detection Check
 
