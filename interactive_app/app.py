@@ -526,7 +526,28 @@ def get_relevant_offsets(conversation, offsets):
     
     return peep_array
 
-
+@app.route('/anonymize', methods=['POST'])
+def anonymize():
+    try:
+        data = request.get_json()
+        transcript_text = data.get('transcript', '')
+        
+        if not transcript_text:
+            return jsonify({'error': 'No transcript provided'}), 400
+        
+        # Call anonymization from process module
+        anonymized = anonymize_text_locally(transcript_text)
+        
+        return jsonify({
+            'status': 'success',
+            'original': transcript_text,
+            'anonymized': anonymized
+        })
+    except Exception as e:
+        logging.error(f"Anonymization error: {e}")
+        import traceback
+        logging.error(traceback.format_exc())
+        return jsonify({'error': str(e)}), 500
 
 def replace_surrogates(text, lang="EN"):
     lang = lang.upper()
