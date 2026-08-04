@@ -867,8 +867,8 @@ def load_models():
                 logger.warning("⚠️  Diarization Pipeline loaded on CPU (will be slower).")
                 
             # Set diarization thresholds (matching process_audios)
-            _loaded_diarize_model.min_duration_on = 4.0
-            _loaded_diarize_model.min_duration_off = 2.0
+            _loaded_diarize_model.min_duration_on = 3.0
+            _loaded_diarize_model.min_duration_off = 3.0
         except Exception as e:
             logger.error(f"Failed to load Diarization Pipeline: {e}")
             logger.error(f"   Diarization model path: {DIARIZATION_MODEL_PATH}")
@@ -936,7 +936,6 @@ def transcribe_audio_locally(audio_path, language=None):
                 # Load audio as numpy, convert to torch tensor for pyannote
                 audio_np = whisperx.load_audio(audio_path)
                 
-                import torch
                 diarization_audio = {
                     'waveform': torch.from_numpy(audio_np).unsqueeze(0),
                     'sample_rate': 16000
@@ -978,7 +977,7 @@ def transcribe_audio_locally(audio_path, language=None):
                 segment["speaker"] = f"SPEAKER_{i%2:02d}"
 
         # === SEGMENT MERGING (same as process_audios) ===
-        result["segments"] = merge_consecutive_speaker_segments(result["segments"])
+        result["segments"] = merge_speaker_consistency(result["segments"], max_gap_seconds=5.0)
 
         # === CONVERT TO TEXT FORMAT ===
         result_lines = [f"{seg['speaker']}: {seg['text'].strip()}" for seg in result["segments"] if seg['text'].strip()]
