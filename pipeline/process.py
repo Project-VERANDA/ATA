@@ -1940,15 +1940,15 @@ __all__ = [
     'run_adversarial_anonymization',
     
     # TTS functions (from tts_engine)
-    #'generate_speech',
-    #'generate_beep',
-    #'synthesize_segment',
-    #'get_available_tts_voices',
-    #'get_tts_status',
+    'generate_speech',
+    'generate_beep',
+    'synthesize_segment',
+    'get_available_tts_voices',
+    'get_tts_status',
     
     # Configuration variables
-    #'TTS_BACKEND',
-    #'TTS_ENABLED',
+    'TTS_BACKEND',
+    'TTS_ENABLED',
     'CHAT_AI_API_KEY',
     'CHAT_AI_ENDPOINT',
     'DEFAULT_CHAT_AI_MODEL',
