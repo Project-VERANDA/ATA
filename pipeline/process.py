@@ -933,16 +933,18 @@ def transcribe_audio_locally(audio_path, language=None):
         # === SPEAKER DIARIZATION (same as process_audios) ===
         if _loaded_diarize_model:
             try:
-                # FIX: Pre-load audio instead of passing file path
-                diarization_audio = whisperx.load_audio(audio_path)
+                # Load audio as numpy, convert to torch tensor for pyannote
+                audio_np = whisperx.load_audio(audio_path)
+                
+                import torch
                 diarization_audio = {
-                    'waveform': diarization_audio.unsqueeze(0),
+                    'waveform': torch.from_numpy(audio_np).unsqueeze(0),
                     'sample_rate': 16000
                 }
                 
                 diarize_output = _loaded_diarize_model(
-                    diarization_audio, 
-                    min_speakers=2, 
+                    diarization_audio,
+                    min_speakers=2,
                     max_speakers=10
                 )
                 
@@ -951,7 +953,7 @@ def transcribe_audio_locally(audio_path, language=None):
                 segments_list = []
                 for turn, _, speaker in speaker_diarization.itertracks(yield_label=True):
                     duration = turn.end - turn.start
-                    if duration < 0.5:  # Filter short segments
+                    if duration < 0.5:
                         continue
                     segments_list.append({'start': turn.start, 'end': turn.end, 'speaker': speaker})
                 
@@ -959,12 +961,15 @@ def transcribe_audio_locally(audio_path, language=None):
                     import pandas as pd
                     diarize_df = pd.DataFrame(segments_list)
                     result = whisperx.assign_word_speakers(diarize_df, result)
+                    logger.info(f"✅ Diarization complete: {len(segments_list)} speaker segments assigned")
                 else:
                     logger.warning("No valid speakers found. Using fallback assignment.")
                     for i, seg in enumerate(result["segments"]):
                         seg["speaker"] = f"SPEAKER_{i%2:02d}"
             except Exception as e:
                 logger.error(f"Diarization failed: {e}. Using fallback assignment.")
+                import traceback
+                logger.error(traceback.format_exc())
                 for i, segment in enumerate(result["segments"]):
                     segment["speaker"] = f"SPEAKER_{i%2:02d}"
         else:
