@@ -760,8 +760,12 @@ def process_audios(enable_diarization=True, lang_code=None, file_list=None):
 _loaded_whisper_model = None
 _loaded_diarize_model = None
     
+d# --- Global model cache ---
+_loaded_whisper_model = None
+_loaded_diarize_model = None
+
 def load_models():
-    """Loads models locally on GPU if available for reuse."""
+    """Loads models globally for reuse across both process_audios() and transcribe_audio_locally()."""
     global _loaded_whisper_model, _loaded_diarize_model
     
     check_gpu_resources()
@@ -770,17 +774,16 @@ def load_models():
     device = torch.device(device_str)
     
     if _loaded_whisper_model and _loaded_diarize_model:
+        logger.info("Models already loaded, skipping reload.")
         return _loaded_whisper_model, _loaded_diarize_model
 
+    # === WHISPERX MODEL (same as process_audios) ===
     try:
-        logger.info(f"Loading WhisperX model directly from: {WHISPERX_MODEL_PATH}")
-        from faster_whisper import WhisperModel
-        compute_type = "float16" if device_str == "cuda" else "float32"
-        
-        _loaded_whisper_model = WhisperModel(
-            str(WHISPERX_MODEL_PATH), 
-            device=device_str, 
-            compute_type=compute_type,
+        logger.info(f"Loading WhisperX model from: {WHISPERX_MODEL_PATH}")
+        _loaded_whisper_model = whisperx.load_model(
+            str(WHISPERX_MODEL_PATH),
+            device_str,
+            compute_type=COMPUTE_TYPE,  # float16 for GPU, float32 for CPU
             local_files_only=True
         )
         logger.info("✅ WhisperX model loaded successfully.")
@@ -788,6 +791,7 @@ def load_models():
         logger.critical(f"Failed to load WhisperX model: {e}")
         return None, None
     
+    # === DIARIZATION MODEL ===
     if DIARIZATION_MODEL_PATH and DIARIZATION_MODEL_PATH.exists():
         try:
             logger.info(f"Loading Diarization Pipeline from: {DIARIZATION_MODEL_PATH}")
@@ -798,114 +802,115 @@ def load_models():
                 _loaded_diarize_model.to(device)
                 logger.info("✅ Diarization Pipeline moved to GPU.")
             else:
-                logger.warning("⚠️ Diarization Pipeline loaded on CPU.")
+                logger.warning("⚠️  Diarization Pipeline loaded on CPU (will be slower).")
+                
+            # Set diarization thresholds (matching process_audios)
+            _loaded_diarize_model.min_duration_on = 4.0
+            _loaded_diarize_model.min_duration_off = 2.0
         except Exception as e:
             logger.error(f"Failed to load Diarization Pipeline: {e}")
             _loaded_diarize_model = None
     else:
+        logger.warning("⚠️  Diarization model not found. Speaker diarization will be disabled.")
         _loaded_diarize_model = None
 
     logger.info("Models loaded successfully.")
     return _loaded_whisper_model, _loaded_diarize_model
 
-def transcribe_audio_locally(audio_path, language='de'):
+def transcribe_audio_locally(audio_path, language=None):
     """
-    Transcribes a single audio file using cached local models.
-    Wrapper for API-like access to transcription.
+    Transcribes a single audio file using cached global models.
+    This is now IDENTICAL to the transcription logic in process_audios().
+    
+    Returns:
+        tuple: (transcription_text, wordOffsets)
     """
     global _loaded_whisper_model, _loaded_diarize_model
     
     logger.info(f"--- Starting transcription for: {os.path.basename(audio_path)} ---")
     
-    if not _loaded_whisper_model or not _loaded_diarize_model:
+    # Load models if not already loaded
+    if not _loaded_whisper_model:
         _loaded_whisper_model, _loaded_diarize_model = load_models()
     
     if not _loaded_whisper_model:
-        return "Error: WhisperX model not loaded."
+        return "Error: WhisperX model not loaded.", []
 
     try:
         audio = whisperx.load_audio(audio_path)
         
-        segments, info = _loaded_whisper_model.transcribe(
-            audio, beam_size=BATCH_SIZE, language=language, vad_filter=True
-        )
+        # === SAME TRANSCRIPTION PARAMETERS AS process_audios ===
+        transcribe_kwargs = {
+            "audio": audio,
+            "batch_size": BATCH_SIZE,
+            "verbose": False,
+            "print_progress": False,
+            "task": "transcribe"
+        }
+        if language and language != 'auto' and language in WHISPER_LANG_MAP:
+            transcribe_kwargs["language"] = WHISPER_LANG_MAP[language]
+            logger.info(f"Forced language: {language} → {transcribe_kwargs['language']}")
         
-        raw_segments = list(segments)
-        segments_list = []
-        for seg in raw_segments:
-            segments_list.append({
-                "start": seg.start, "end": seg.end, "text": seg.text,
-                "words": getattr(seg, 'words', None)
-            })
+        result = _loaded_whisper_model.transcribe(**transcribe_kwargs)
         
-        detected_language = info.language if info else language
-        result = {"segments": segments_list, "language": detected_language}
-        
-        if result.get("language"):
+        # === WORD ALIGNMENT (same as process_audios) ===
+        detected_language = result.get("language", 'en')
+        if detected_language:
             try:
-                device = "cuda" if torch.cuda.is_available() else "cpu"
+                align_device = "cuda" if torch.cuda.is_available() else "cpu"
                 align_model, metadata = whisperx.load_align_model(
-                    language_code=result["language"], device=device
+                    language_code=detected_language, device=align_device
                 )
-                result = whisperx.align(result["segments"], align_model, metadata, audio, device, return_char_alignments=False)
+                result = whisperx.align(result["segments"], align_model, metadata, audio, align_device, return_char_alignments=False)
             except Exception as e:
                 logger.warning(f"Alignment failed: {e}")
 
+        # === SPEAKER DIARIZATION (same as process_audios) ===
         if _loaded_diarize_model:
             try:
-                _loaded_diarize_model.min_duration_on = 4.0
-                _loaded_diarize_model.min_duration_off = 2
                 diarize_output = _loaded_diarize_model(audio_path, min_speakers=2, max_speakers=10)
                 speaker_diarization = diarize_output.speaker_diarization
                 
-                import pandas as pd
                 segments_list = []
                 for turn, _, speaker in speaker_diarization.itertracks(yield_label=True):
+                    duration = turn.end - turn.start
+                    if duration < 0.5:  # Filter short segments (same as process_audios)
+                        continue
                     segments_list.append({'start': turn.start, 'end': turn.end, 'speaker': speaker})
                 
-                segments_list = sorted(segments_list, key=lambda x: x.get('start', 0))
-                diarize_df = pd.DataFrame(segments_list)
-                result = whisperx.assign_word_speakers(diarize_df, result)
+                if segments_list:
+                    import pandas as pd
+                    diarize_df = pd.DataFrame(segments_list)
+                    result = whisperx.assign_word_speakers(diarize_df, result)
+                else:
+                    logger.warning("   No valid speakers found. Using fallback assignment.")
+                    for i, seg in enumerate(result["segments"]):
+                        seg["speaker"] = f"SPEAKER_{i%2:02d}"
             except Exception as e:
-                logger.error(f"Diarization failed: {e}")
+                logger.error(f"Diarization failed: {e}. Using fallback assignment.")
                 for i, segment in enumerate(result["segments"]):
                     segment["speaker"] = f"SPEAKER_{i%2:02d}"
         else:
+            logger.warning("Diarization disabled. Using fallback speaker assignment.")
             for i, segment in enumerate(result["segments"]):
                 segment["speaker"] = f"SPEAKER_{i%2:02d}"
 
-        if 'segments' in result:
-            result["segments"] = sorted(result["segments"], key=lambda x: x.get('start', 0))
+        # === SEGMENT MERGING (same as process_audios) ===
+        result["segments"] = merge_consecutive_speaker_segments(result["segments"])
 
-        merged_segments = []
-        prev_segment = None
-        
-        for segment in result["segments"]:
-            speaker = segment.get("speaker", "Unknown")
-            text = segment.get("text", "").strip()
-            
-            if len(text) < 4 and text.lower() not in ["i", "a", "ok", "no", "yes", "hi"]:
-                continue
-            
-            if prev_segment and prev_segment["speaker"] == speaker:
-                prev_segment["text"] += " " + text
-            else:
-                if prev_segment:
-                    merged_segments.append(prev_segment)
-                prev_segment = {"speaker": speaker, "text": text}
-        
-        if prev_segment:
-            merged_segments.append(prev_segment)
-
-        result_lines = [f"{seg['speaker']}: {seg['text'].strip()}" for seg in merged_segments if seg['text'].strip()]
+        # === CONVERT TO TEXT FORMAT ===
+        result_lines = [f"{seg['speaker']}: {seg['text'].strip()}" for seg in result["segments"] if seg['text'].strip()]
         result_text = "\n".join(result_lines) or "No speech detected."
-        resultOffset = convert_numpy(result["segments"])
         
+        # Word offsets for downstream processing
+        resultOffset = convert_numpy(result.get("segments", []))
+        
+        logger.info(f"Transcription complete: {len(result_text)} chars, {len(result['segments'])} segments")
         return result_text, resultOffset
 
     except Exception as e:
         logger.error(f"Transcription failed: {e}", exc_info=True)
-        return f"Transcription failed: {e}"
+        return f"Transcription failed: {e}", []
 
 # --- Anonymization Engine (V2-style, simplified with DFKI-SLT model) ---
 
