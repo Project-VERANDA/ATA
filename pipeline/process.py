@@ -440,89 +440,32 @@ def validate_path(path, base):
     except ValueError:
         return False
 
-def merge_consecutive_speaker_segments(segments, max_gap_seconds=2.0):
-    """Merges consecutive segments spoken by the same speaker."""
-    if not segments:
-        return []
-
-    merged_segments = []
-    current_segment = None
-
-    for segment in segments:
-        # SAFE: Handle missing speaker key
-        speaker = segment.get("speaker", "SPEAKER_00")
-        text = segment.get("text", "")
-        start = segment.get("start", 0)
-        end = segment.get("end", 0)
-
-        if current_segment is None:
-            current_segment = {"speaker": speaker, "text": text, "start": start, "end": end}
-        else:
-            if current_segment["speaker"] == speaker:
-                gap = start - current_segment["end"]
-                if gap <= max_gap_seconds:
-                    current_segment["text"] += " " + text
-                    current_segment["end"] = end
-                else:
-                    merged_segments.append(current_segment)
-                    current_segment = {"speaker": speaker, "text": text, "start": start, "end": end}
-            else:
-                merged_segments.append(current_segment)
-                current_segment = {"speaker": speaker, "text": text, "start": start, "end": end}
-
-    if current_segment:
-        merged_segments.append(current_segment)
-
-    return merged_segments
-
-def merge_speaker_consistency(segments, max_gap_seconds=5.0):
+def merge_all_consecutive_speakers(segments):
     """
-    Consolidates speaker segments where the same speaker alternates with others.
-    Handles missing speaker keys gracefully.
+    Simple, reliable merge of ALL consecutive segments from the same speaker.
+    No timing thresholds — if adjacent speakers are identical, merge them.
     """
-    if len(segments) < 3:
+    if len(segments) < 2:
         return segments
     
     merged = []
-    i = 0
+    current = segments[0].copy()
     
-    while i < len(segments):
-        current = segments[i]
-        # SAFE: Handle missing speaker key
+    for next_seg in segments[1:]:
+        next_speaker = next_seg.get("speaker", "SPEAKER_00")
         current_speaker = current.get("speaker", "SPEAKER_00")
-        current_start = current.get("start", 0)
-        current_end = current.get("end", 0)
-        current_text = [current.get("text", "")]
         
-        j = i + 1
-        while j < len(segments):
-            next_seg = segments[j]
-            # SAFE: Handle missing speaker key
-            next_speaker = next_seg.get("speaker", "SPEAKER_00")
-            
-            gap = next_seg.get("start", 0) - current_end
-            
-            if next_speaker == current_speaker and gap <= max_gap_seconds:
-                different_speakers_between = set()
-                for k in range(i + 1, j):
-                    seg_k = segments[k]
-                    different_speakers_between.add(seg_k.get("speaker", "SPEAKER_00"))
-                
-                if len(different_speakers_between) == 1:
-                    current_text.append(next_seg.get("text", ""))
-                    current_end = next_seg.get("end", 0)
-                    j += 1
-                    continue
-            
-            break
-        
-        merged.append({
-            "speaker": current_speaker,
-            "text": " ".join(current_text),
-            "start": current_start,
-            "end": current_end
-        })
-        i = j
+        if next_speaker == current_speaker:
+            # Merge text, extend end time
+            current["text"] += " " + next_seg.get("text", "")
+            current["end"] = next_seg.get("end", current["end"])
+        else:
+            # Different speaker — save current and start new
+            merged.append(current)
+            current = next_seg.copy()
+    
+    # Don't forget the last segment
+    merged.append(current)
     
     return merged
 
@@ -842,7 +785,7 @@ def process_audios(enable_diarization=True, lang_code=None, file_list=None):
                 for i, seg in enumerate(result["segments"]):
                     seg["speaker"] = f"SPEAKER_{i%2:02d}"
 
-            result["segments"] = merge_consecutive_speaker_segments(result["segments"], max_gap_seconds=1.5)
+            result["segments"] = merge_all_consecutive_speakers(result["segments"])
             
             base_name = sanitize_filename(input_file.stem)
             transcript_file = TRANSCRIPTS_FOLDER / f"{base_name}.txt"
@@ -1030,7 +973,7 @@ def transcribe_audio_locally(audio_path, language=None):
                     segment["speaker"] = f"SPEAKER_{i % 2:02d}"
 
         # === SEGMENT MERGING (same as process_audios) ===
-        result["segments"] = merge_speaker_consistency(result["segments"], max_gap_seconds=3.0)
+        result["segments"] = merge_all_consecutive_speakers(result["segments"])
 
         # === CONVERT TO TEXT FORMAT ===
         result_lines = [f"{seg['speaker']}: {seg['text'].strip()}" for seg in result["segments"] if seg['text'].strip()]
