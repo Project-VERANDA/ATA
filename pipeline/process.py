@@ -857,7 +857,7 @@ def load_models():
             _loaded_diarize_model = Pipeline.from_pretrained(str(DIARIZATION_MODEL_PATH))
             
             if device_str == "cuda":
-                _loaded_diarize_model.to(device)
+                _loaded_diarize_model.to(device_str)
                 logger.info("✅ Diarization Pipeline moved to GPU.")
             else:
                 logger.warning("⚠️  Diarization Pipeline loaded on CPU (will be slower).")
