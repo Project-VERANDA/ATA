@@ -755,12 +755,8 @@ def process_audios(enable_diarization=True, lang_code=None, file_list=None):
     cleanup_gpu_resources()
     logger.info("Stream processing finished.")
     return len(files_to_process)
-
-# Global variables for model caching
-_loaded_whisper_model = None
-_loaded_diarize_model = None
     
-d# --- Global model cache ---
+# --- Global model cache ---
 _loaded_whisper_model = None
 _loaded_diarize_model = None
 
@@ -820,7 +816,6 @@ def load_models():
 def transcribe_audio_locally(audio_path, language=None):
     """
     Transcribes a single audio file using cached global models.
-    This is now IDENTICAL to the transcription logic in process_audios().
     
     Returns:
         tuple: (transcription_text, wordOffsets)
