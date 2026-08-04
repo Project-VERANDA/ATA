@@ -992,8 +992,8 @@
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ 
-                            text: text,
-                            lang: transcriptionLanguageSelect.value  // ✅ Also add language
+                            transcript: text,  // ✅ FIXED - now matches backend expectation
+                            lang: transcriptionLanguageSelect.value
                         })
                     });
                     
