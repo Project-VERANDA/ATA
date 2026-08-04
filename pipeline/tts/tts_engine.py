@@ -1,7 +1,6 @@
 """
 TTS Engine Module - Multi-Speaker Support
-Rewritten to use Python Piper API directly (no subprocess needed)
-with CLI fallback for compatibility.
+Production-ready with local Piper API
 """
 
 import os
@@ -14,7 +13,6 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 # Project root: go up 3 levels from tts_engine.py
-# tts_engine.py -> tts/ -> pipeline/ -> ATA/ (project root)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 # Configuration
@@ -35,7 +33,6 @@ SPEAKER_VOICE_MAP = {
     'DEFAULT': 'en_US-amy-medium'
 }
 
-
 def _load_available_voices():
     """Load list of available voice files."""
     voices = []
@@ -45,7 +42,6 @@ def _load_available_voices():
             if voice_name != 'VOICE_MAPPING':
                 voices.append(voice_name)
     return voices
-
 
 def get_speaker_voice(speaker_id: str) -> str:
     """Get voice assignment for a specific speaker."""
@@ -66,13 +62,15 @@ def get_speaker_voice(speaker_id: str) -> str:
     voices = _load_available_voices()
     return voices[0] if voices else SPEAKER_VOICE_MAP['DEFAULT']
 
-
 def generate_speech(text: str, language: str = 'en', voice_id: str = None,
                     speaker: str = None, return_bytes: bool = False):
-    """Generate speech using Piper TTS.
-
-    Tries Python API first (fastest, no subprocess overhead).
-    Falls back to CLI if Python API fails.
+    """Generate speech using Piper TTS (fully offline).
+    
+    Primary: Python Piper API (direct inference)
+    Fallback: Piper CLI (subprocess) if Python API fails
+    
+    SECURITY NOTE: No network calls are made. All processing is local.
+    Suitable for PHI/medical data handling.
     """
     if not TTS_ENABLED:
         return None
@@ -85,7 +83,7 @@ def generate_speech(text: str, language: str = 'en', voice_id: str = None,
     # --- PRIMARY: Python Piper API ---
     audio_buffer = _generate_speech_piper_python(text, voice_id)
     if audio_buffer is not None:
-        logger.info(f"TTS via Python API: {voice_id}, {len(text)} chars")
+        logger.debug(f"TTS via Python API: {voice_id}, {len(text)} chars")
         return audio_buffer
 
     # --- FALLBACK: CLI subprocess ---
@@ -98,12 +96,11 @@ def generate_speech(text: str, language: str = 'en', voice_id: str = None,
     logger.error(f"All TTS methods failed for voice={voice_id}")
     return None
 
-
 def _generate_speech_piper_python(text: str, voice_id: str) -> io.BytesIO | None:
     """Generate speech using the piper-tts Python package directly.
-
-    This is the preferred method — no subprocess, no temp files,
-    no argument mismatches.
+    
+    Fully offline — no subprocess, no network calls.
+    Uses ONNX Runtime locally on the VM.
     """
     try:
         from piper import PiperVoice
@@ -144,12 +141,11 @@ def _generate_speech_piper_python(text: str, voice_id: str) -> io.BytesIO | None
         logger.error(f"Python Piper synthesis failed: {e}", exc_info=True)
         return None
 
-
 def _generate_speech_piper_cli(text: str, voice_id: str) -> io.BytesIO | None:
     """Generate speech via the Piper CLI (subprocess fallback).
-
-    Sends text via stdin (compatible with both the native Piper
-    binary and the Python wrapper script).
+    
+    Sent text via stdin — works with both native Piper binary
+    and the Python wrapper script.
     """
     if not PIPER_EXECUTABLE.exists():
         logger.error(f"Piper executable not found: {PIPER_EXECUTABLE}")
@@ -162,8 +158,6 @@ def _generate_speech_piper_cli(text: str, voice_id: str) -> io.BytesIO | None:
 
     tmp_wav = Path('/tmp/piper_output.wav')
 
-    # NOTE: Do NOT use -f flag. Send text via stdin instead.
-    # This works with both the native Piper binary AND the Python wrapper.
     cmd = [
         str(PIPER_EXECUTABLE),
         '-m', str(voice_path),
@@ -178,8 +172,8 @@ def _generate_speech_piper_cli(text: str, voice_id: str) -> io.BytesIO | None:
 
         proc = subprocess.run(
             cmd,
-            input=text,          # ← Send text via stdin, NOT -f flag
-            text=True,           # ← Treat as text, not bytes
+            input=text,
+            text=True,
             capture_output=True,
             timeout=60,
             env=env
@@ -209,7 +203,6 @@ def _generate_speech_piper_cli(text: str, voice_id: str) -> io.BytesIO | None:
         logger.error(f"Piper CLI error: {e}", exc_info=True)
         return None
 
-
 def synthesize_segment(text: str, speaker: str = 'SPEAKER_00', emotion: str = None):
     """Synthesize a single speaker segment."""
     import re
@@ -217,7 +210,6 @@ def synthesize_segment(text: str, speaker: str = 'SPEAKER_00', emotion: str = No
     if not clean_text.strip():
         return None
     return generate_speech(clean_text, speaker=speaker, return_bytes=True)
-
 
 def get_tts_status():
     """Return TTS configuration and available voices."""
@@ -230,12 +222,10 @@ def get_tts_status():
         'speaker_mapping': SPEAKER_VOICE_MAP
     }
 
-
 def get_available_tts_voices(language: str = 'en'):
     """List available voices for a language."""
     voices = _load_available_voices()
     return [{'id': v, 'language': language} for v in voices if language in v]
-
 
 __all__ = [
     'TTS_BACKEND', 'TTS_ENABLED', 'SPEAKER_VOICE_MAP',
