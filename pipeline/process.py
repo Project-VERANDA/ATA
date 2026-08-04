@@ -474,6 +474,56 @@ def merge_consecutive_speaker_segments(segments, max_gap_seconds=2.0):
 
     return merged_segments
 
+def merge_speaker_consistency(segments, max_gap_seconds=5.0):
+    """
+    Consolidates speaker segments where the same speaker alternates with others.
+    Reduces excessive speaker switching (e.g., S00->S02->S00->S02 becomes fewer chunks).
+    """
+    if len(segments) < 3:
+        return segments
+    
+    merged = []
+    i = 0
+    
+    while i < len(segments):
+        current = segments[i]
+        current_speaker = current["speaker"]
+        current_start = current["start"]
+        current_end = current["end"]
+        current_text = [current["text"]]
+        
+        j = i + 1
+        while j < len(segments):
+            next_seg = segments[j]
+            
+            # If next speaker is same as current AND gap is small, merge
+            gap = next_seg["start"] - current_end
+            
+            if next_seg["speaker"] == current_speaker and gap <= max_gap_seconds:
+                # Check if there's only ONE different speaker between them
+                different_speakers_between = set()
+                for k in range(i + 1, j):
+                    different_speakers_between.add(segments[k]["speaker"])
+                
+                if len(different_speakers_between) == 1:
+                    # Merge across that one intervening speaker
+                    current_text.append(next_seg["text"])
+                    current_end = next_seg["end"]
+                    j += 1
+                    continue
+            
+            break
+        
+        merged.append({
+            "speaker": current_speaker,
+            "text": " ".join(current_text),
+            "start": current_start,
+            "end": current_end
+        })
+        i = j
+    
+    return merged
+
 def cleanup_gpu_resources(*objects_to_delete):
     """Aggressively clears GPU memory and runs garbage collection."""
     for obj in objects_to_delete:
@@ -868,7 +918,7 @@ def load_models():
                 
             # Set diarization thresholds (matching process_audios)
             _loaded_diarize_model.min_duration_on = 3.0
-            _loaded_diarize_model.min_duration_off = 3.0
+            _loaded_diarize_model.min_duration_off = 4.0
         except Exception as e:
             logger.error(f"Failed to load Diarization Pipeline: {e}")
             logger.error(f"   Diarization model path: {DIARIZATION_MODEL_PATH}")
