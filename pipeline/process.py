@@ -842,7 +842,7 @@ def process_audios(enable_diarization=True, lang_code=None, file_list=None):
                 for i, seg in enumerate(result["segments"]):
                     seg["speaker"] = f"SPEAKER_{i%2:02d}"
 
-            result["segments"] = merge_consecutive_speaker_segments(result["segments"])
+            result["segments"] = merge_consecutive_speaker_segments(result["segments"], max_gap_seconds=1.5)
             
             base_name = sanitize_filename(input_file.stem)
             transcript_file = TRANSCRIPTS_FOLDER / f"{base_name}.txt"
@@ -1030,7 +1030,7 @@ def transcribe_audio_locally(audio_path, language=None):
                     segment["speaker"] = f"SPEAKER_{i % 2:02d}"
 
         # === SEGMENT MERGING (same as process_audios) ===
-        result["segments"] = merge_speaker_consistency(result["segments"], max_gap_seconds=5.0)
+        result["segments"] = merge_speaker_consistency(result["segments"], max_gap_seconds=3.0)
 
         # === CONVERT TO TEXT FORMAT ===
         result_lines = [f"{seg['speaker']}: {seg['text'].strip()}" for seg in result["segments"] if seg['text'].strip()]
