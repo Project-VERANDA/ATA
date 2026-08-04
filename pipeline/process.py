@@ -449,22 +449,23 @@ def merge_all_consecutive_speakers(segments):
         return segments
     
     merged = []
+    # Ensure first segment has speaker key
     current = segments[0].copy()
+    current["speaker"] = current.get("speaker", "SPEAKER_00")
     
     for next_seg in segments[1:]:
         next_speaker = next_seg.get("speaker", "SPEAKER_00")
         current_speaker = current.get("speaker", "SPEAKER_00")
         
         if next_speaker == current_speaker:
-            # Merge text, extend end time
             current["text"] += " " + next_seg.get("text", "")
             current["end"] = next_seg.get("end", current["end"])
         else:
-            # Different speaker — save current and start new
             merged.append(current)
+            # Ensure new segment has speaker key
             current = next_seg.copy()
+            current["speaker"] = current.get("speaker", "SPEAKER_00")
     
-    # Don't forget the last segment
     merged.append(current)
     
     return merged
@@ -976,10 +977,14 @@ def transcribe_audio_locally(audio_path, language=None):
         result["segments"] = merge_all_consecutive_speakers(result["segments"])
 
         # === CONVERT TO TEXT FORMAT ===
-        result_lines = [f"{seg['speaker']}: {seg['text'].strip()}" for seg in result["segments"] if seg['text'].strip()]
+        result_lines = [f"{seg.get('speaker', 'SPEAKER_00')}: {seg.get('text', '').strip()}" for seg in result["segments"] if seg.get('text', '').strip()]
         result_text = "\n".join(result_lines) or "No speech detected."
         
         # Word offsets for downstream processing
+        for seg in result.get("segments", []):
+            if "speaker" not in seg:
+                seg["speaker"] = "SPEAKER_00"
+
         resultOffset = convert_numpy(result.get("segments", []))
         
         logger.info(f"Transcription complete: {len(result_text)} chars, {len(result['segments'])} segments")
