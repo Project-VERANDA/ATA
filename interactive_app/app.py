@@ -24,7 +24,7 @@ import requests
 CHAT_AI_API_KEY = os.getenv('CHAT_AI_API_KEY')
 CHAT_AI_ENDPOINT = os.getenv('CHAT_AI_ENDPOINT', 'https://llm.cloud.cci.charite.de/v1')
 
-# --- Path Configuration ---
+# --- Path Configuration ---s
 
 load_dotenv()
 

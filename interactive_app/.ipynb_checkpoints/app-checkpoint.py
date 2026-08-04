@@ -24,7 +24,7 @@ import requests
 CHAT_AI_API_KEY = os.getenv('CHAT_AI_API_KEY')
 CHAT_AI_ENDPOINT = os.getenv('CHAT_AI_ENDPOINT', 'https://llm.cloud.cci.charite.de/v1')
 
-# --- Path Configuration ---
+# --- Path Configuration ---s
 
 load_dotenv()
 
@@ -58,7 +58,7 @@ try:
         MODEL_FOLDER as PROCESS_MODEL_FOLDER,
         #generate_speech,
         #generate_beep,
-        #synthesize_segment,
+        synthesize_segment,
         #get_available_tts_voices,
         #get_tts_status,
         #TTS_BACKEND,

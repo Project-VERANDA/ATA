@@ -1,0 +1,69 @@
+#!/usr/bin/env python3
+"""
+Piper TTS Binary Wrapper (Match backend.py arguments)
+Accepts: -m MODEL -o OUTPUT --sample_rate RATE
+"""
+import sys
+import os
+import wave
+
+site_packages = '/home/ubuntu/miniforge3/envs/whisperx/lib/python3.13/site-packages'
+if site_packages not in sys.path:
+    sys.path.insert(0, site_packages)
+
+try:
+    from piper import PiperVoice
+except ImportError as e:
+    print(f"ERROR: Cannot import piper", file=sys.stderr)
+    sys.exit(1)
+
+def main():
+    import argparse
+    
+    parser = argparse.ArgumentParser(prog='piper')
+    parser.add_argument('-m', '--model', required=True, help='Voice model (.onnx)')
+    parser.add_argument('-o', '--output', dest='output_file', required=True, help='Output WAV file')
+    parser.add_argument('--sample_rate', type=int, default=22050, help='Sample rate')
+    parser.add_argument('--speaker_id', type=int, default=0, help='Speaker ID')
+    
+    args = parser.parse_args()
+    
+    # Read text from stdin
+    text = sys.stdin.read().strip()
+    
+    if not text:
+        print("ERROR: No input text", file=sys.stderr)
+        sys.exit(1)
+    
+    try:
+        # Load voice
+        voice = PiperVoice.load(args.model)
+        
+        # Synthesize - collect all chunks
+        chunks = list(voice.synthesize(text))
+        
+        if not chunks:
+            print("ERROR: No audio generated", file=sys.stderr)
+            sys.exit(1)
+        
+        # Get sample rate from chunk or override
+        sample_rate = args.sample_rate
+        sample_width = chunks[0].sample_width
+        channels = chunks[0].sample_channels
+        
+        # Write WAV file
+        with wave.open(str(args.output_file), 'w') as wav:
+            wav.setnchannels(channels)
+            wav.setsampwidth(sample_width)
+            wav.setframerate(sample_rate)
+            for chunk in chunks:
+                wav.writeframes(chunk.audio_int16_bytes)
+        
+    except Exception as e:
+        print(f"ERROR: {str(e)}", file=sys.stderr)
+        import traceback
+        traceback.print_exc(file=sys.stderr)
+        sys.exit(1)
+
+if __name__ == '__main__':
+    main()
