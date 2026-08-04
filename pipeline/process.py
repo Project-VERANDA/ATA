@@ -854,6 +854,10 @@ def load_models():
         try:
             logger.info(f"Loading Diarization Pipeline from: {DIARIZATION_MODEL_PATH}")
             from pyannote.audio import Pipeline
+
+            # Re-enable TF32 (pyannote disables it by default)
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
             _loaded_diarize_model = Pipeline.from_pretrained(str(DIARIZATION_MODEL_PATH))
             
             if device_str == "cuda":
@@ -867,6 +871,10 @@ def load_models():
             _loaded_diarize_model.min_duration_off = 2.0
         except Exception as e:
             logger.error(f"Failed to load Diarization Pipeline: {e}")
+            logger.error(f"   Diarization model path: {DIARIZATION_MODEL_PATH}")
+            logger.error(f"   Model exists: {DIARIZATION_MODEL_PATH.exists()}")
+            import traceback
+            logger.error(f"   Full traceback:\n{traceback.format_exc()}")
             _loaded_diarize_model = None
     else:
         logger.warning("⚠️  Diarization model not found. Speaker diarization will be disabled.")
