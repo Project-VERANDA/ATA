@@ -767,7 +767,7 @@ def load_models():
     check_gpu_resources()
     
     device_str = "cuda" if torch.cuda.is_available() else "cpu"
-    device = torch.device(device_str)
+    compute_type = "float16" if device_str == "cuda" else "float32"
     
     if _loaded_whisper_model and _loaded_diarize_model:
         logger.info("Models already loaded, skipping reload.")
@@ -779,7 +779,7 @@ def load_models():
         _loaded_whisper_model = whisperx.load_model(
             str(WHISPERX_MODEL_PATH),
             device_str,
-            compute_type=COMPUTE_TYPE,  # float16 for GPU, float32 for CPU
+            compute_type=compute_type,  # float16 for GPU, float32 for CPU
             local_files_only=True
         )
         logger.info("✅ WhisperX model loaded successfully.")
