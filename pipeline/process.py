@@ -449,7 +449,8 @@ def merge_consecutive_speaker_segments(segments, max_gap_seconds=2.0):
     current_segment = None
 
     for segment in segments:
-        speaker = segment.get("speaker", "Unknown")
+        # SAFE: Handle missing speaker key
+        speaker = segment.get("speaker", "SPEAKER_00")
         text = segment.get("text", "")
         start = segment.get("start", 0)
         end = segment.get("end", 0)
@@ -477,7 +478,7 @@ def merge_consecutive_speaker_segments(segments, max_gap_seconds=2.0):
 def merge_speaker_consistency(segments, max_gap_seconds=5.0):
     """
     Consolidates speaker segments where the same speaker alternates with others.
-    Reduces excessive speaker switching (e.g., S00->S02->S00->S02 becomes fewer chunks).
+    Handles missing speaker keys gracefully.
     """
     if len(segments) < 3:
         return segments
@@ -487,28 +488,29 @@ def merge_speaker_consistency(segments, max_gap_seconds=5.0):
     
     while i < len(segments):
         current = segments[i]
-        current_speaker = current["speaker"]
-        current_start = current["start"]
-        current_end = current["end"]
-        current_text = [current["text"]]
+        # SAFE: Handle missing speaker key
+        current_speaker = current.get("speaker", "SPEAKER_00")
+        current_start = current.get("start", 0)
+        current_end = current.get("end", 0)
+        current_text = [current.get("text", "")]
         
         j = i + 1
         while j < len(segments):
             next_seg = segments[j]
+            # SAFE: Handle missing speaker key
+            next_speaker = next_seg.get("speaker", "SPEAKER_00")
             
-            # If next speaker is same as current AND gap is small, merge
-            gap = next_seg["start"] - current_end
+            gap = next_seg.get("start", 0) - current_end
             
-            if next_seg["speaker"] == current_speaker and gap <= max_gap_seconds:
-                # Check if there's only ONE different speaker between them
+            if next_speaker == current_speaker and gap <= max_gap_seconds:
                 different_speakers_between = set()
                 for k in range(i + 1, j):
-                    different_speakers_between.add(segments[k]["speaker"])
+                    seg_k = segments[k]
+                    different_speakers_between.add(seg_k.get("speaker", "SPEAKER_00"))
                 
                 if len(different_speakers_between) == 1:
-                    # Merge across that one intervening speaker
-                    current_text.append(next_seg["text"])
-                    current_end = next_seg["end"]
+                    current_text.append(next_seg.get("text", ""))
+                    current_end = next_seg.get("end", 0)
                     j += 1
                     continue
             
@@ -1024,7 +1026,8 @@ def transcribe_audio_locally(audio_path, language=None):
         else:
             logger.warning("Diarization disabled. Using fallback speaker assignment.")
             for i, segment in enumerate(result["segments"]):
-                segment["speaker"] = f"SPEAKER_{i%2:02d}"
+                if "speaker" not in segment:
+                    segment["speaker"] = f"SPEAKER_{i % 2:02d}"
 
         # === SEGMENT MERGING (same as process_audios) ===
         result["segments"] = merge_speaker_consistency(result["segments"], max_gap_seconds=5.0)
