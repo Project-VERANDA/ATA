@@ -896,16 +896,18 @@ if [[ "$INSTALL_WEB" =~ ^[Yy]$ ]]; then
             fi
             
             # Extract subdir: en_US-lessac-medium → lessac/medium
-            parts=(${voice_id//_/ })
+            parts=(${voice_id//-/ })
             name="${parts[1]}"
             quality="${parts[2]}"
             subdir="$name/$quality"
             url="$VOICE_BASE_URL/$subdir/${voice_id}.onnx"
             
             log_info "  Downloading: ${voice_id}..."
+            log_info "    URL: ${url}"
             
             # Download to .tmp first to validate before moving
             if curl -#L --connect-timeout 30 --retry 2 "$url" -o "$target.tmp" 2>/dev/null; then
+            
                 size=$(stat -c%s "$target.tmp" 2>/dev/null || echo 0)
                 
                 if [ "$size" -gt 40000000 ]; then
