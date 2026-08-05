@@ -917,9 +917,14 @@ if [[ "$INSTALL_WEB" =~ ^[Yy]$ ]]; then
                     
                     # Download config file (.json)
                     config_url="${url%.onnx}.json"
-                    if curl -#L --connect-timeout 10 "$config_url" -o "$config_target" 2>/dev/null; then
-                        if [ -s "$config_target" ]; then
+                    if curl -#L --connect-timeout 30 "$config_url" -o "$config_target.tmp" 2>/dev/null; then
+                        # Validate JSON before accepting
+                        if [ -s "$config_target.tmp" ] && python -c "import json; json.load(open('$config_target.tmp'))" 2>/dev/null; then
+                            mv "$config_target.tmp" "$config_target"
                             echo "    Config saved"
+                        else
+                            log_warn "Invalid config JSON, skipping..."
+                            rm -f "$config_target.tmp"
                         fi
                     fi
                 else
