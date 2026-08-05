@@ -544,28 +544,41 @@ def anonymize():
         transcript_text = data.get('transcript', '')
         
         if not transcript_text:
+            logger.warning("No transcript provided to /anonymize")
             return jsonify({'error': 'No transcript provided'}), 400
         
-        if global_anonymizer and global_anonymizer.method:
-            result_text, success, msg = global_anonymizer.anonymize(transcript_text)
-        else:
-            # Fallback to per-request initialization
-            from process import anonymize_text_locally
-            result_text, success, msg = anonymize_text_locally(transcript_text)
+        # IMPORTANT: Unpack the tuple correctly
+        result_text, success, msg = anonymize_text_locally(transcript_text)
+        
+        # Log what we actually got
+        logger.info(f"Anonymization result: success={success}, text_len={len(result_text) if result_text else 0}, msg={msg}")
         
         if not success or result_text is None:
-            logging.error(f"Anonymization failed: {msg}")
-            return jsonify({'error': f'Anonymization failed: {msg}'}), 500
+            logger.error(f"Anonymization FAILED: {msg}")
+            return jsonify({
+                'error': 'Anonymization failed',
+                'details': msg,
+                'original_length': len(transcript_text)
+            }), 500
         
+        # SUCCESS - return proper structure
+        logger.info(f"Anonymization SUCCESS: {len(transcript_text)} → {len(result_text)} chars")
         return jsonify({
             'status': 'success',
             'original': transcript_text,
-            'anonymized': result_text
+            'anonymized': result_text,
+            'chars_original': len(transcript_text),
+            'chars_anonymized': len(result_text)
         })
-    except Exception as e:
-        logging.error(f"Anonymization error: {e}")
+        
+    except TypeError as e:
+        # Catch tuple unpacking errors specifically
+        logger.error(f"TUPLE UNPACKING ERROR - check anonymize_text_locally return type: {e}")
         import traceback
-        logging.error(traceback.format_exc())
+        logger.error(traceback.format_exc())
+        return jsonify({'error': f'Server configuration error: {str(e)}'}), 500
+    except Exception as e:
+        logger.error(f"Anonymization error: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 def replace_surrogates(text, lang="EN"):
