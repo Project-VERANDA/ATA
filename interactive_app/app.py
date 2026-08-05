@@ -88,6 +88,20 @@ except ImportError as e:
     logging.critical(f"Failed to import tts_engine: {e}")
     sys.exit(1)
 
+# Import Anonymization engine
+global_anonymizer = None
+try:
+    from process import AnonymizationEngine, MODEL_FOLDER
+    global_anonymizer = AnonymizationEngine(
+        method="local_mmbert",
+        level="standard",
+        model_path=MODEL_FOLDER / "multilingual_DialogPII_NER"
+    )
+    logger.info(f"✅ AnonymizationEngine pre-loaded successfully. Method: {global_anonymizer.method}")
+except Exception as e:
+    logger.error(f"⚠️ Failed to pre-load AnonymizationEngine: {e}")
+    global_anonymizer = None
+
 # Verify model path consistency
 if MODEL_FOLDER != PROCESS_MODEL_FOLDER:
     logging.warning(f"⚠️  Path mismatch detected! app.py: {MODEL_FOLDER}, process.py: {PROCESS_MODEL_FOLDER}")
@@ -535,13 +549,21 @@ def anonymize():
         if not transcript_text:
             return jsonify({'error': 'No transcript provided'}), 400
         
-        # Call anonymization from process module
-        anonymized = anonymize_text_locally(transcript_text)
+        if global_anonymizer and global_anonymizer.method:
+            result_text, success, msg = global_anonymizer.anonymize(transcript_text)
+        else:
+            # Fallback to per-request initialization
+            from process import anonymize_text_locally
+            result_text, success, msg = anonymize_text_locally(transcript_text)
+        
+        if not success or result_text is None:
+            logging.error(f"Anonymization failed: {msg}")
+            return jsonify({'error': f'Anonymization failed: {msg}'}), 500
         
         return jsonify({
             'status': 'success',
             'original': transcript_text,
-            'anonymized': anonymized
+            'anonymized': result_text
         })
     except Exception as e:
         logging.error(f"Anonymization error: {e}")
