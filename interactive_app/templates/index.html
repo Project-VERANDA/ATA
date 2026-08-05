@@ -992,22 +992,23 @@
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ 
-                            transcript: text,  // ✅ FIXED - now matches backend expectation
+                            transcript: text,
                             lang: transcriptionLanguageSelect.value
                         })
                     });
                     
                     const result = await response.json();
                     
-                    if (response.ok && result.success) {
-                        // ✅ Use 'text' field that backend actually returns
-                        anonymizedText.value = result.text || result.anonymized_text;
+                    // ✅ FIXED: Check 'status' field instead of 'success'
+                    if (response.ok && result.status === 'success') {
+                        // ✅ FIXED: Use 'anonymized' field that backend returns
+                        anonymizedText.value = result.anonymized || result.text || '';
                         anonymizedText.dispatchEvent(new Event('input'));
                         ttsContainer.classList.remove('hidden');
                         downloadBertBtn.disabled = false;
                         updateStatus("Anonymization successful!", false);
                     } else {
-                        throw new Error(result.error || "Anonymization failed.");
+                        throw new Error(result.error || result.details || "Anonymization failed.");
                     }
                 } catch (error) {
                     console.error('Anonymization error:', error);
