@@ -1005,17 +1005,32 @@ else
     if [ "$SKIP_WHISPER" = true ]; then
         log_info "Skipping WhisperX models (--skip-whisper)"
     elif [ -n "$WHISPER_SELECTION" ]; then
-        # Convert comma-separated to space-separated for proper iteration
+        # FIXED: Convert comma-separated to space-separated for proper iteration
         WHISPER_MODELS_INPUT="${WHISPER_SELECTION//,/ }"
     elif [ "$ANSWER_YES" = true ]; then
         WHISPER_MODELS_INPUT="large"
     else
+        # READ USER INPUT
         read -p "Enter WhisperX models to download (tiny, base, small, medium, large, large-turbo) or press Enter to skip: " WHISPER_MODELS_INPUT
+        
+        # ✅ FIX: Convert comma-separated to space-separated for bash for-loop
+        WHISPER_MODELS_INPUT="${WHISPER_MODELS_INPUT//,/ }"
+        
+        # Trim whitespace
+        WHISPER_MODELS_INPUT=$(echo "$WHISPER_MODELS_INPUT" | xargs)
     fi
     
     if [ -n "$WHISPER_MODELS_INPUT" ]; then
+        log_info "Processing models: $WHISPER_MODELS_INPUT"
+        
         for model_name in $WHISPER_MODELS_INPUT; do
-            model_name=$(echo "$model_name" | tr '[:upper:]' '[:lower:]')
+            # Normalize to lowercase and trim whitespace
+            model_name=$(echo "$model_name" | tr '[:upper:]' '[:lower:]' | xargs)
+            
+            if [ -z "$model_name" ]; then
+                continue
+            fi
+            
             if [ -z "${MODEL_MAP[$model_name]}" ]; then
                 log_warn "Invalid: '$model_name'. Skipping."
                 continue
@@ -1035,6 +1050,8 @@ else
                 fi
             fi
         done
+    else
+        log_info "No WhisperX models specified, skipping..."
     fi
     
     # Pyannote Diarization Model - Note about available models
@@ -1052,7 +1069,7 @@ else
         
         # Authenticate if token provided
         if [ "$AUTO_LOGIN" = true ] && [ -n "$HUGGINGFACE_TOKEN" ]; then
-            echo "Authenticating with HUGGINGFACE_TOKEN..." >&2  # stderr instead of stdout
+            echo "Authenticating with HUGGINGFACE_TOKEN..." >&2  # FIXED: stderr instead of stdout
             hf auth login --token "$HUGGINGFACE_TOKEN" --add-to-git-credential 2>/dev/null || true
         fi
         
