@@ -53,6 +53,13 @@ if str(pipeline_path) not in sys.path:
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
+# --- Logging Configuration ---
+logging.basicConfig(
+    level=logging.INFO, 
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
 # --- TTS Imports (moved from process.py to tts_engine) ---
 try:
     from process import (
@@ -107,16 +114,6 @@ if MODEL_FOLDER != PROCESS_MODEL_FOLDER:
     logging.warning(f"⚠️  Path mismatch detected! app.py: {MODEL_FOLDER}, process.py: {PROCESS_MODEL_FOLDER}")
     # Force alignment (process.py usually wins, but we align)
     MODEL_FOLDER = PROCESS_MODEL_FOLDER
-
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
-
-# --- Logging Configuration ---
-logging.basicConfig(
-    level=logging.INFO, 
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
 
 # --- Dependency Checks ---
 try:
