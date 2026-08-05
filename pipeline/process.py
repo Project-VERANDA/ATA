@@ -37,8 +37,8 @@ from openai import OpenAI
 import torch
 
 # Disable cuDNN to avoid CUDNN_STATUS_NOT_INITIALIZED with WhisperX + Pyannote
-torch.backends.cudnn.enabled = False
-torch.backends.cudnn.benchmark = False
+torch.backends.cudnn.enabled = True
+torch.backends.cudnn.benchmark = True
 
 # Re-enable TF-32 for better performance on A40 (Ampere architecture)
 torch.backends.cuda.matmul.allow_tf32 = True
