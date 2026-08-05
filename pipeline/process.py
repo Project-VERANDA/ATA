@@ -52,6 +52,10 @@ import whisperx
 # =============================================================================
 # LOCAL PROJECT IMPORTS
 # =============================================================================
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from pipeline.tts.tts_engine import (
     generate_speech,
     synthesize_segment,
