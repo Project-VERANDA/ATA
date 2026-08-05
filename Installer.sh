@@ -84,8 +84,6 @@ Examples:
   HUGGINGFACE_TOKEN=xxx ./Installer.sh --auto-login -y
   ./Installer.sh --dry-run                               # Preview actions
   ./Installer.sh --uninstall                             # Clean removal
-
-NOTE: This version uses CUDA 13.0 (newest stable) instead of deprecated CUDA 12.8
 EOF
 }
 
