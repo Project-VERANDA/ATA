@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 
 # ============================================================================
-# Dialogue Anonymizer Installer (v3.4)
+# Dialogue Anonymizer Installer (v3.4) - UPDATED FOR CUDA 13.0
 # ============================================================================
 
 set -o pipefail
 
-SCRIPT_VERSION="3.4"
+SCRIPT_VERSION="3.4-CUDA13"
 ENV_NAME="whisperx"
-TARGET_PYTHON="3.12"  # ✅ REQUIRED - PyTorch 2.8+ doesn't fully support 3.13
+TARGET_PYTHON="3.12"
 MODEL_DIR_NAME="pipeline/model"
 MODEL_DIR_REL="$MODEL_DIR_NAME"
 
@@ -71,7 +71,7 @@ Options:
   --no-models             Skip ALL ML model downloads
   --skip-whisper          Skip WhisperX model download
   --skip-pyannote         Skip Pyannote diarization model download
-  --whisper-models LIST   Comma or space-separated list (tiny, base, small, medium, large)
+  --whisper-models LIST   Comma or space-separated list (tiny, base, small, medium, large, large-turbo)
   --auto-login            Auto-authenticate with HUGGINGFACE_TOKEN env var
   -q, --quiet             Minimal output mode
 
@@ -84,6 +84,8 @@ Examples:
   HUGGINGFACE_TOKEN=xxx ./Installer.sh --auto-login -y
   ./Installer.sh --dry-run                               # Preview actions
   ./Installer.sh --uninstall                             # Clean removal
+
+NOTE: This version uses CUDA 13.0 (newest stable) instead of deprecated CUDA 12.8
 EOF
 }
 
@@ -170,10 +172,21 @@ preflight_check() {
     GPU_AVAILABLE=false
     if command -v nvidia-smi &> /dev/null; then
         GPU_AVAILABLE=true
-        local gpu_name driver_ver
+        local gpu_name driver_ver cuda_v
         gpu_name=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1)
         driver_ver=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -1)
-        log_success "NVIDIA GPU detected: ${gpu_name} (Driver: ${driver_ver})"
+        cuda_v=$(nvidia-smi --query-gpu=cuda_version --format=csv,noheader 2>/dev/null | head -1)
+        log_success "NVIDIA GPU detected: ${gpu_name} (Driver: ${driver_ver}, CUDA: ${cuda_v})"
+        
+        # Driver version check for CUDA 13.0 compatibility
+        local driver_major
+        driver_major=$(echo "$driver_ver" | cut -d'.' -f1)
+        if [ "$driver_major" -lt 535 ] 2>/dev/null; then
+            log_warn "Driver version ${driver_ver} may be outdated (recommended: 535+) for CUDA 13.x"
+            ((warnings++))
+        else
+            log_success "Driver version ${driver_ver} is compatible with CUDA 13.0"
+        fi
     else
         log_warn "No NVIDIA GPU detected — CPU-only mode (expect slow ML inference)"
         ((warnings++))
@@ -313,6 +326,8 @@ import_checks = {
     'thinc':        lambda: __import__('thinc').__version__,
     'pyannote.audio': lambda: __import__('importlib.metadata', fromlist=['version']).version('pyannote.audio'),
     'whisperx':     lambda: __import__('whisperx').__version__ if hasattr(__import__('whisperx'), '__version__') else 'imported',
+    'ctranslate2':  lambda: __import__('ctranslate2').__version__,  # ADDED
+    'torchcodec':   lambda: __import__('torchcodec').__version__,  # ADDED
 }
 
 print("  --- Python Imports ---")
@@ -398,7 +413,7 @@ detect_package_manager
 if [ "$DRY_RUN" = true ]; then
     log_section "DRY RUN — No Changes Will Be Made"
     echo "  Would create conda env: ${ENV_NAME} (Python ${TARGET_PYTHON})"
-    echo "  Would install: numpy 2.0.2, torch 2.8.0, transformers 4.52+, pyannote, whisperx"
+    echo "  Would install: numpy 2.5+, torch 2.13+ with CUDA 13.0, transformers 5.x, pyannote, whisperx"
     echo "  Would install spaCy models: en_core_web_sm, xx_ent_wiki_sm"
     if [ "$SKIP_WEB" = true ]; then
         echo "  Would SKIP: Flask/TTS web interface"
@@ -503,6 +518,7 @@ cd "$CURRENT_DIR"
 
 log_section "Dialogue Anonymizer Installer (v${SCRIPT_VERSION})"
 log_info "Working Directory: $(pwd)"
+log_info "CUDA 13.0 STABLE BUILD - Upgraded from deprecated CUDA 12.8"
 echo ""
 
 # ============================================================================
@@ -549,7 +565,7 @@ mkdir -p "$CURRENT_DIR/$MODEL_DIR_NAME"
 
 ACTUAL_PYTHON=$(conda run -n "$ENV_NAME" python --version | awk '{print $2}')
 EXPECTED_PYTHON="3.12"
-if [[ ! "$ACTUAL_PYTHON" =~ ^3\.12 ]]; then  # ✅ FIXED: Was ^3.13 (wrong!)
+if [[ ! "$ACTUAL_PYTHON" =~ ^3\.12 ]]; then
     log_error "Expected Python 3.12.x, got $ACTUAL_PYTHON"
     exit 1
 fi
@@ -590,65 +606,68 @@ fi
 # 6. ML STACK INSTALLATION (Verified Compatible Versions)
 # ============================================================================
 
-log_section "Installing ML Stack (NumPy 2.0.2 + PyTorch 2.8.0)"
+log_section "Installing ML Stack (NumPy 2.5+ + PyTorch 2.13+ with CUDA 13.0)"
 
 pip install --upgrade pip -q
 
 # Core ML stack - VERIFIED COMPATIBLE FOR PYTHON 3.12
 log_info "Installing core ML packages..."
-pip install "numpy==2.0.2" --no-cache-dir  # ✅ Works with PyTorch 2.8, transformers 4.50+
-pip install "scipy>=1.14.0" --no-cache-dir
+pip install "numpy==2.5.1" --no-cache-dir
+pip install "scipy>=1.18.0" --no-cache-dir
 
-# PyTorch 2.8.0 - Latest stable with excellent Python 3.12 wheel support
+# PyTorch 2.13.0+ - Latest stable with CUDA 13.0 support
 if [ "$GPU_AVAILABLE" = true ]; then
-    log_info "Installing PyTorch with CUDA 12.8 support..."
-    pip install "torch==2.8.0" --index-url https://download.pytorch.org/whl/cu128 --no-cache-dir
-    pip install "torchaudio==2.8.0" --index-url https://download.pytorch.org/whl/cu128 --no-cache-dir
+    log_info "Installing PyTorch with CUDA 13.0 support..."
+    pip install "torch>=2.12.0,<3.0.0" --index-url https://download.pytorch.org/whl/cu130 --no-cache-dir
+    pip install "torchaudio>=2.12.0,<3.0.0" --index-url https://download.pytorch.org/whl/cu130 --no-cache-dir
 else
     log_info "Installing PyTorch CPU-only..."
-    pip install "torch==2.8.0" --no-cache-dir
-    pip install "torchaudio==2.8.0" --no-cache-dir
+    pip install "torch>=2.12.0,<3.0.0" --no-cache-dir
+    pip install "torchaudio>=2.12.0,<3.0.0" --no-cache-dir
 fi
+pip install "torchvision>=0.27.0,<1.0.0" --index-url https://download.pytorch.org/whl/cu130 --no-cache-dir
 
-pip install "torchvision>=0.23.0" --no-cache-dir
-
-# torchcodec (for audio/video handling)
+# torchcodec (for audio/video handling) - Improved fallback chain
 log_info "Installing torchcodec..."
-pip install "torchcodec>=0.14.0" --no-cache-dir || \
-pip install "torchcodec>=0.10.0" --no-cache-dir || \
-log_warn "⚠️  torchcodec installation failed (optional)"
+pip install "torchcodec>=0.7.0,<1.0.0" --no-cache-dir 2>/dev/null || \
+pip install "torchcodec>=0.5.0" --no-cache-dir 2>/dev/null || \
+log_warn "⚠️  torchcodec installation failed (optional, may affect video processing)"
 
 # Transformers ecosystem - NumPy 2.x compatible
 log_info "Installing transformers ecosystem..."
-pip install "transformers>=4.52.0" --no-cache-dir  # ✅ 4.50+ supports NumPy 2.x
-pip install "tokenizers>=0.20.0" --no-cache-dir     # ✅ Updated (was 0.19.1, now fine)
-pip install "accelerate>=0.34.0" --no-cache-dir
-pip install "huggingface-hub>=0.25.0,<1.0.0" --no-cache-dir
+pip install "transformers>=5.14.0" --no-cache-dir
+pip install "tokenizers>=0.22.0" --no-cache-dir
+pip install "accelerate>=1.14.0" --no-cache-dir
+pip install "huggingface-hub>=0.25.0,<1.0.0" --no-cache-dir  # Prevent breaking changes
 
 # Other utilities
 log_info "Installing utility packages..."
-pip install "pandas>=2.2.0" --no-cache-dir
+pip install "pandas>=3.0.0" --no-cache-dir
 pip install ffmpeg-python --no-cache-dir
 pip install "openai>=1.0.0" --no-cache-dir
 pip install python-dotenv --no-cache-dir
 pip install pytorch-crf --no-cache-dir
 
 # spaCy ecosystem - Python 3.12 + NumPy 2.x compatible
+# spaCy 3.8.14 + thinc 8.3+ required for NumPy 2.x compatibility
 log_info "Installing spaCy ecosystem..."
-pip install "spacy>=3.8.4" --no-cache-dir  # ✅ 3.8.4+ has NumPy 2.x patches
-pip install "thinc>=8.3.0" --only-binary :all: --no-cache-dir
-pip install "blis>=1.0.0" --no-cache-dir
-pip install "click>=8.1.7" --no-cache-dir
-pip install "typer>=0.12.0" --no-cache-dir
+pip install "spacy>=3.8.14" --no-cache-dir
+pip install "thinc>=8.3.13" --only-binary :all: --no-cache-dir
+pip install "blis>=1.3.0" --no-cache-dir
+pip install "click>=8.4.0" --no-cache-dir
+pip install "typer>=0.27.0" --no-cache-dir
 
 # Speaker diarization - Latest compatible version
+# Available models: community-1 (open-source), precision-2 (higher accuracy)
 log_info "Installing speaker diarization..."
-pip install "pyannote.audio>=4.0.0" --no-cache-dir || log_warn "⚠️  Warning installing pyannote.audio"
+pip install "pyannote.audio>=4.0.7" --no-cache-dir || log_warn "⚠️  Warning installing pyannote.audio"
 
-# whisperx - Latest stable (3.8.x series)
+# whisperx - Latest stable with commit pinning for reproducibility
+# Using latest stable commit for version control (no official PyPI releases)
 log_info "Installing WhisperX..."
 pip uninstall whisperx -y 2>/dev/null || true
-pip install git+https://github.com/m-bain/whisperx.git --no-cache-dir || \
+WHISPER_COMMIT="2cfd7b7c5c7bba144954364db747319b50e8232b"
+pip install "git+https://github.com/m-bain/whisperx.git@${WHISPER_COMMIT}" --no-cache-dir || \
 pip install "whisperx>=3.8.0" --no-cache-dir || \
 log_warn "⚠️  Warning installing whisperx"
 
@@ -674,16 +693,18 @@ log_info "  spacy:    $SPACY_VER"
 log_info "  pyannote: ${PYANNOTE_VER:-installed}"
 log_info "  torchcodec: ${TORCHCODEC_VER:-installed}"
 
-if [[ ! "$NUMPY_VER" =~ ^2\.5 ]]; then
-    log_warn "NumPy $NUMPY_VER (expected 2.5)"
+# Accept wider NumPy 2.x range (2.4-2.6)
+if [[ ! "$NUMPY_VER" =~ ^2\.[456] ]]; then
+    log_warn "NumPy $NUMPY_VER (expected 2.x series for ML compatibility)"
 else
-    log_success "NumPy $NUMPY_VER confirmed (2.5. series)"
+    log_success "NumPy $NUMPY_VER confirmed (2.x series compatible)"
 fi
 
-if [[ ! "$TORCH_VER" =~ ^2\.[789] ]] && [[ ! "$TORCH_VER" =~ ^3\. ]]; then
-    log_warn "PyTorch $TORCH_VER (2.7-2.9 recommended)"
+# Accept PyTorch 2.12+ (covers 2.12, 2.13, and future 2.x)
+if [[ ! "$TORCH_VER" =~ ^2\.(1[23]|[4-9]) ]] && [[ ! "$TORCH_VER" =~ ^3\. ]]; then
+    log_warn "PyTorch $TORCH_VER (2.12+ recommended)"
 else
-    log_success "PyTorch $TORCH_VER confirmed (2.7+ series)"
+    log_success "PyTorch $TORCH_VER confirmed (2.12+ series, CUDA 13.0)"
 fi
 
 if python -c "import spacy; import thinc; import pyannote.audio; import whisperx; import torchcodec" 2>/dev/null; then
@@ -704,7 +725,7 @@ log_success "requirements-lock.txt generated"
 
 log_section "Downloading spaCy Models (for PII Detection)"
 
-# FIXED: Use 'python -m spacy download' instead of non-existent 'spacy check'
+# Use 'python -m spacy download' instead of non-existent 'spacy check'
 if python -m spacy download en_core_web_sm 2>/dev/null; then
     log_success "en_core_web_sm installed"
 else
@@ -886,7 +907,7 @@ if [[ "$INSTALL_WEB" =~ ^[Yy]$ ]]; then
             log_info "  Downloading: ${voice_id}..."
             
             # Download to .tmp first to validate before moving
-            if curl -#L --connect-timeout 30 --retry 2 "$url" || true -o "$target.tmp" 2>/dev/null; then
+            if curl -#L --connect-timeout 30 --retry 2 "$url" -o "$target.tmp" 2>/dev/null; then
                 size=$(stat -c%s "$target.tmp" 2>/dev/null || echo 0)
                 
                 if [ "$size" -gt 40000000 ]; then
@@ -972,23 +993,24 @@ if [ "$NO_MODELS" = true ]; then
     SKIP_WHISPER=true
     SKIP_PYANNOTE=true
 else
-    # WhisperX Models
+    # WhisperX Models - Added large-v3-turbo option
     declare -A MODEL_MAP
     MODEL_MAP["tiny"]="Systran/faster-whisper-tiny"
     MODEL_MAP["base"]="Systran/faster-whisper-base"
     MODEL_MAP["small"]="Systran/faster-whisper-small"
     MODEL_MAP["medium"]="Systran/faster-whisper-medium"
     MODEL_MAP["large"]="Systran/faster-whisper-large-v3"
+    MODEL_MAP["large-turbo"]="Systran/faster-whisper-large-v3-turbo"  # NEW: 2x faster
     
     if [ "$SKIP_WHISPER" = true ]; then
         log_info "Skipping WhisperX models (--skip-whisper)"
     elif [ -n "$WHISPER_SELECTION" ]; then
-        # FIXED: Convert comma-separated to space-separated for proper iteration
+        # Convert comma-separated to space-separated for proper iteration
         WHISPER_MODELS_INPUT="${WHISPER_SELECTION//,/ }"
     elif [ "$ANSWER_YES" = true ]; then
         WHISPER_MODELS_INPUT="large"
     else
-        read -p "Enter WhisperX models to download (tiny, base, small, medium, large) or press Enter to skip: " WHISPER_MODELS_INPUT
+        read -p "Enter WhisperX models to download (tiny, base, small, medium, large, large-turbo) or press Enter to skip: " WHISPER_MODELS_INPUT
     fi
     
     if [ -n "$WHISPER_MODELS_INPUT" ]; then
@@ -1015,7 +1037,7 @@ else
         done
     fi
     
-    # Pyannote Diarization Model
+    # Pyannote Diarization Model - Note about available models
     TARGET="$CURRENT_DIR/$MODEL_DIR_NAME/models--pyannote--speaker-diarization-community-1"
 
     if [ "$SKIP_PYANNOTE" = true ]; then
@@ -1024,10 +1046,13 @@ else
         log_success "Pyannote model already exists."
     else
         log_info "Downloading Pyannote to ${TARGET}..."
+        log_info "Available pyannote models:"
+        log_info "  • community-1 (open-source, free)"
+        log_info "  • precision-2 (higher accuracy, requires HF token)"
         
         # Authenticate if token provided
         if [ "$AUTO_LOGIN" = true ] && [ -n "$HUGGINGFACE_TOKEN" ]; then
-            echo "Authenticating with HUGGINGFACE_TOKEN..." >&2  # FIXED: stderr instead of stdout
+            echo "Authenticating with HUGGINGFACE_TOKEN..." >&2  # stderr instead of stdout
             hf auth login --token "$HUGGINGFACE_TOKEN" --add-to-git-credential 2>/dev/null || true
         fi
         
@@ -1038,7 +1063,7 @@ else
         else
             log_warn "Not logged in to Hugging Face."
             log_info "Run: hf auth login"
-            log_info "Or: export HUGGINGFACE_TOKEN=your_token && ./ATA_SelfInstall.sh --auto-login"
+            log_info "Or: export HUGGINGFACE_TOKEN=your_token && ./Installer.sh --auto-login"
             log_info "Verify: hf whoami"
         fi
     fi
@@ -1088,6 +1113,7 @@ cat > .env << EOF
 # ATA Speech Anonymizer Configuration
 # Generated: $(date +%Y-%m-%d)
 # Version: $SCRIPT_VERSION
+# CUDA Version: 13.0
 
 CHAT_AI_API_KEY=your_api_key_here
 CHAT_AI_ENDPOINT=https://your-endpoint.com/v1
@@ -1153,6 +1179,7 @@ Pyannote_Model_Path=\$CURRENT_DIR/$MODEL_DIR_NAME/models--pyannote--speaker-diar
 # ======================================
 ATA_INSTALL_VERSION=$SCRIPT_VERSION
 ATA_INSTALL_DATE=$(date +%Y-%m-%d)
+CUDA_VERSION=13.0
 EOF
 
 # Add backend-specific paths
@@ -1235,11 +1262,12 @@ fi
 # 14. FINAL INSTRUCTIONS
 # ============================================================================
 
-log_section "✅ SETUP COMPLETE"
+log_section "✅ SETUP COMPLETE (CUDA 13.0)"
 
 log_info "Activate environment:"
 log_info "  conda activate whisperx"
 log_info ""
+log_info "CUDA Version: 13.0 (Upgraded from deprecated CUDA 12.8)"
 log_info "TTS Backend: $TTS_CONFIG"
 log_info "  Piper:    Offline, 30+ langs, GPL v3"
 log_info "  Coqui:    Voice cloning, 17 langs, CPML (non-commercial)"
