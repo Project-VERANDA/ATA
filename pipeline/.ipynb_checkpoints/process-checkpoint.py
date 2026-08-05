@@ -61,8 +61,6 @@ from pipeline.tts.tts_engine import (
     TTS_ENABLED,
 )
 
-from audio_utils import AudioBeepReplacer
-
 # =============================================================================
 # ENVIRONMENT CONFIGURATION
 # =============================================================================
