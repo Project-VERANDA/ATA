@@ -87,6 +87,19 @@ BASE_PATH = Path(__file__).parent
 MODEL_FOLDER = BASE_PATH / 'pipeline' / 'model'
 WHISPERX_MODEL_PATH = MODEL_FOLDER / 'Systran--faster-whisper-large-v3'
 
+script_dir = Path(__file__).resolve().parent.parent  # ATA/ root
+interactive_app_path = script_dir / "interactive_app"
+
+if str(interactive_app_path) not in sys.path:
+    sys.path.insert(0, str(interactive_app_path))
+
+# Now import audio_utils (this will work now)
+try:
+    from audio_utils import AudioBeepReplacer
+except ImportError:
+    logging.warning("audio_utils not found. Beep replacement features disabled.")
+    AudioBeepReplacer = None
+
 # =============================================================================
 # END OF IMPORT SECTION
 # =============================================================================

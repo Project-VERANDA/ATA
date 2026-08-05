@@ -1,34 +1,108 @@
+# =============================================================================
+# STANDARD LIBRARY IMPORTS
+# =============================================================================
 import os
 import sys
-import whisperx
-import ffmpeg
-import torch
-import subprocess
-import gc
-import logging
-import re
+import tempfile
 import time
+import re
+import subprocess
+import logging
+import gc
 import argparse
 import json
-import numpy as np
-import spacy
-from datetime import datetime
-from collections import defaultdict
+import random
+import asyncio
 from pathlib import Path
-from openai import OpenAI
+from datetime import datetime, timezone, timedelta
+from io import BytesIO
+from collections import OrderedDict, defaultdict
+
+# =============================================================================
+# THIRD-PARTY IMPORTS
+# =============================================================================
+import numpy as np
+import requests
+import ffmpeg
+import spacy
 from dotenv import load_dotenv
+from werkzeug.utils import secure_filename
+from openai import OpenAI
 
-#from pipeline.tts.tts_engine import (
-#    generate_speech,
-#    generate_beep,
-#    synthesize_segment,
-#    get_available_tts_voices,
-#    get_tts_status,
-#    TTS_BACKEND,
-#    TTS_ENABLED,
-#)
+# =============================================================================
+# CRITICAL: cuDNN DISABLE FIX
+# =============================================================================
+# This MUST run BEFORE any whisperx/pyannote imports that trigger cuDNN init
+# =============================================================================
+import torch
 
+# Disable cuDNN to avoid CUDNN_STATUS_NOT_INITIALIZED with WhisperX + Pyannote
+torch.backends.cudnn.enabled = False
+torch.backends.cudnn.benchmark = False
+
+# Re-enable TF-32 for better performance on A40 (Ampere architecture)
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
+
+# =============================================================================
+
+# Now safe to import whisperx and pyannote-dependent modules
+import whisperx
+
+# =============================================================================
+# LOCAL PROJECT IMPORTS
+# =============================================================================
+from pipeline.tts.tts_engine import (
+    generate_speech,
+    synthesize_segment,
+    get_available_tts_voices,
+    get_tts_status,
+    TTS_BACKEND,
+    TTS_ENABLED,
+)
+
+from audio_utils import AudioBeepReplacer
+
+# =============================================================================
+# ENVIRONMENT CONFIGURATION
+# =============================================================================
 load_dotenv()
+
+CHAT_AI_API_KEY = os.getenv('CHAT_AI_API_KEY')
+CHAT_AI_ENDPOINT = os.getenv('CHAT_AI_ENDPOINT', 'https://llm.cloud.cci.charite.de/v1')
+
+# =============================================================================
+# LOGGING SETUP
+# =============================================================================
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# =============================================================================
+# GLOBAL CONSTANTS & PATHS
+# =============================================================================
+BASE_PATH = Path(__file__).parent
+MODEL_FOLDER = BASE_PATH / 'pipeline' / 'model'
+WHISPERX_MODEL_PATH = MODEL_FOLDER / 'Systran--faster-whisper-large-v3'
+
+script_dir = Path(__file__).resolve().parent.parent  # ATA/ root
+interactive_app_path = script_dir / "interactive_app"
+
+if str(interactive_app_path) not in sys.path:
+    sys.path.insert(0, str(interactive_app_path))
+
+# Now import audio_utils (this will work now)
+try:
+    from audio_utils import AudioBeepReplacer
+except ImportError:
+    logging.warning("audio_utils not found. Beep replacement features disabled.")
+    AudioBeepReplacer = None
+
+# =============================================================================
+# END OF IMPORT SECTION
+# =============================================================================
 
 # GPU Detection Check
 
@@ -379,39 +453,35 @@ def validate_path(path, base):
     except ValueError:
         return False
 
-def merge_consecutive_speaker_segments(segments, max_gap_seconds=2.0):
-    """Merges consecutive segments spoken by the same speaker."""
-    if not segments:
-        return []
-
-    merged_segments = []
-    current_segment = None
-
-    for segment in segments:
-        speaker = segment.get("speaker", "Unknown")
-        text = segment.get("text", "")
-        start = segment.get("start", 0)
-        end = segment.get("end", 0)
-
-        if current_segment is None:
-            current_segment = {"speaker": speaker, "text": text, "start": start, "end": end}
+def merge_all_consecutive_speakers(segments):
+    """
+    Simple, reliable merge of ALL consecutive segments from the same speaker.
+    No timing thresholds — if adjacent speakers are identical, merge them.
+    """
+    if len(segments) < 2:
+        return segments
+    
+    merged = []
+    # Ensure first segment has speaker key
+    current = segments[0].copy()
+    current["speaker"] = current.get("speaker", "SPEAKER_00")
+    
+    for next_seg in segments[1:]:
+        next_speaker = next_seg.get("speaker", "SPEAKER_00")
+        current_speaker = current.get("speaker", "SPEAKER_00")
+        
+        if next_speaker == current_speaker:
+            current["text"] += " " + next_seg.get("text", "")
+            current["end"] = next_seg.get("end", current["end"])
         else:
-            if current_segment["speaker"] == speaker:
-                gap = start - current_segment["end"]
-                if gap <= max_gap_seconds:
-                    current_segment["text"] += " " + text
-                    current_segment["end"] = end
-                else:
-                    merged_segments.append(current_segment)
-                    current_segment = {"speaker": speaker, "text": text, "start": start, "end": end}
-            else:
-                merged_segments.append(current_segment)
-                current_segment = {"speaker": speaker, "text": text, "start": start, "end": end}
-
-    if current_segment:
-        merged_segments.append(current_segment)
-
-    return merged_segments
+            merged.append(current)
+            # Ensure new segment has speaker key
+            current = next_seg.copy()
+            current["speaker"] = current.get("speaker", "SPEAKER_00")
+    
+    merged.append(current)
+    
+    return merged
 
 def cleanup_gpu_resources(*objects_to_delete):
     """Aggressively clears GPU memory and runs garbage collection."""
@@ -729,7 +799,7 @@ def process_audios(enable_diarization=True, lang_code=None, file_list=None):
                 for i, seg in enumerate(result["segments"]):
                     seg["speaker"] = f"SPEAKER_{i%2:02d}"
 
-            result["segments"] = merge_consecutive_speaker_segments(result["segments"])
+            result["segments"] = merge_all_consecutive_speakers(result["segments"])
             
             base_name = sanitize_filename(input_file.stem)
             transcript_file = TRANSCRIPTS_FOLDER / f"{base_name}.txt"
@@ -756,32 +826,31 @@ def process_audios(enable_diarization=True, lang_code=None, file_list=None):
     cleanup_gpu_resources()
     logger.info("Stream processing finished.")
     return len(files_to_process)
-
-# Global variables for model caching
+    
+# --- Global model cache ---
 _loaded_whisper_model = None
 _loaded_diarize_model = None
-    
+
 def load_models():
-    """Loads models locally on GPU if available for reuse."""
+    """Loads models globally for reuse across both process_audios() and transcribe_audio_locally()."""
     global _loaded_whisper_model, _loaded_diarize_model
     
     check_gpu_resources()
     
     device_str = "cuda" if torch.cuda.is_available() else "cpu"
-    device = torch.device(device_str)
+    compute_type = "float16" if device_str == "cuda" else "float32"
     
     if _loaded_whisper_model and _loaded_diarize_model:
+        logger.info("Models already loaded, skipping reload.")
         return _loaded_whisper_model, _loaded_diarize_model
 
+    # === WHISPERX MODEL (same as process_audios) ===
     try:
-        logger.info(f"Loading WhisperX model directly from: {WHISPERX_MODEL_PATH}")
-        from faster_whisper import WhisperModel
-        compute_type = "float16" if device_str == "cuda" else "float32"
-        
-        _loaded_whisper_model = WhisperModel(
-            str(WHISPERX_MODEL_PATH), 
-            device=device_str, 
-            compute_type=compute_type,
+        logger.info(f"Loading WhisperX model from: {WHISPERX_MODEL_PATH}")
+        _loaded_whisper_model = whisperx.load_model(
+            str(WHISPERX_MODEL_PATH),
+            device_str,
+            compute_type=compute_type,  # float16 for GPU, float32 for CPU
             local_files_only=True
         )
         logger.info("✅ WhisperX model loaded successfully.")
@@ -789,124 +858,154 @@ def load_models():
         logger.critical(f"Failed to load WhisperX model: {e}")
         return None, None
     
+    # === DIARIZATION MODEL ===
     if DIARIZATION_MODEL_PATH and DIARIZATION_MODEL_PATH.exists():
         try:
             logger.info(f"Loading Diarization Pipeline from: {DIARIZATION_MODEL_PATH}")
             from pyannote.audio import Pipeline
+
+            # Re-enable TF32 (pyannote disables it by default)
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
             _loaded_diarize_model = Pipeline.from_pretrained(str(DIARIZATION_MODEL_PATH))
             
             if device_str == "cuda":
-                _loaded_diarize_model.to(device)
+                _loaded_diarize_model.to(torch.device(device_str))
                 logger.info("✅ Diarization Pipeline moved to GPU.")
             else:
-                logger.warning("⚠️ Diarization Pipeline loaded on CPU.")
+                logger.warning("⚠️  Diarization Pipeline loaded on CPU (will be slower).")
+                
+            # Set diarization thresholds (matching process_audios)
+            _loaded_diarize_model.min_duration_on = 3.0
+            _loaded_diarize_model.min_duration_off = 4.0
         except Exception as e:
             logger.error(f"Failed to load Diarization Pipeline: {e}")
+            logger.error(f"   Diarization model path: {DIARIZATION_MODEL_PATH}")
+            logger.error(f"   Model exists: {DIARIZATION_MODEL_PATH.exists()}")
+            import traceback
+            logger.error(f"   Full traceback:\n{traceback.format_exc()}")
             _loaded_diarize_model = None
     else:
+        logger.warning("⚠️  Diarization model not found. Speaker diarization will be disabled.")
         _loaded_diarize_model = None
 
     logger.info("Models loaded successfully.")
     return _loaded_whisper_model, _loaded_diarize_model
 
-def transcribe_audio_locally(audio_path, language='de'):
+def transcribe_audio_locally(audio_path, language=None):
     """
-    Transcribes a single audio file using cached local models.
-    Wrapper for API-like access to transcription.
+    Transcribes a single audio file using cached global models.
+    
+    Returns:
+        tuple: (transcription_text, wordOffsets)
     """
     global _loaded_whisper_model, _loaded_diarize_model
     
     logger.info(f"--- Starting transcription for: {os.path.basename(audio_path)} ---")
     
-    if not _loaded_whisper_model or not _loaded_diarize_model:
+    # Load models if not already loaded
+    if not _loaded_whisper_model:
         _loaded_whisper_model, _loaded_diarize_model = load_models()
     
     if not _loaded_whisper_model:
-        return "Error: WhisperX model not loaded."
+        return "Error: WhisperX model not loaded.", []
 
     try:
         audio = whisperx.load_audio(audio_path)
         
-        segments, info = _loaded_whisper_model.transcribe(
-            audio, beam_size=BATCH_SIZE, language=language, vad_filter=True
-        )
+        # === SAME TRANSCRIPTION PARAMETERS AS process_audios ===
+        transcribe_kwargs = {
+            "audio": audio,
+            "batch_size": BATCH_SIZE,
+            "verbose": False,
+            "print_progress": False,
+            "task": "transcribe"
+        }
+        if language and language != 'auto' and language in WHISPER_LANG_MAP:
+            transcribe_kwargs["language"] = WHISPER_LANG_MAP[language]
+            logger.info(f"Forced language: {language} → {transcribe_kwargs['language']}")
         
-        raw_segments = list(segments)
-        segments_list = []
-        for seg in raw_segments:
-            segments_list.append({
-                "start": seg.start, "end": seg.end, "text": seg.text,
-                "words": getattr(seg, 'words', None)
-            })
+        result = _loaded_whisper_model.transcribe(**transcribe_kwargs)
         
-        detected_language = info.language if info else language
-        result = {"segments": segments_list, "language": detected_language}
-        
-        if result.get("language"):
+        # === WORD ALIGNMENT (same as process_audios) ===
+        detected_language = result.get("language", 'en')
+        if detected_language:
             try:
-                device = "cuda" if torch.cuda.is_available() else "cpu"
+                align_device = "cuda" if torch.cuda.is_available() else "cpu"
                 align_model, metadata = whisperx.load_align_model(
-                    language_code=result["language"], device=device
+                    language_code=detected_language, device=align_device
                 )
-                result = whisperx.align(result["segments"], align_model, metadata, audio, device, return_char_alignments=False)
+                result = whisperx.align(result["segments"], align_model, metadata, audio, align_device, return_char_alignments=False)
             except Exception as e:
                 logger.warning(f"Alignment failed: {e}")
 
+        # === SPEAKER DIARIZATION (same as process_audios) ===
         if _loaded_diarize_model:
             try:
-                _loaded_diarize_model.min_duration_on = 4.0
-                _loaded_diarize_model.min_duration_off = 2
-                diarize_output = _loaded_diarize_model(audio_path, min_speakers=2, max_speakers=10)
+                # Load audio as numpy, convert to torch tensor for pyannote
+                audio_np = whisperx.load_audio(audio_path)
+                
+                diarization_audio = {
+                    'waveform': torch.from_numpy(audio_np).unsqueeze(0),
+                    'sample_rate': 16000
+                }
+                
+                diarize_output = _loaded_diarize_model(
+                    diarization_audio,
+                    min_speakers=2,
+                    max_speakers=10
+                )
+                
                 speaker_diarization = diarize_output.speaker_diarization
                 
-                import pandas as pd
                 segments_list = []
                 for turn, _, speaker in speaker_diarization.itertracks(yield_label=True):
+                    duration = turn.end - turn.start
+                    if duration < 0.5:
+                        continue
                     segments_list.append({'start': turn.start, 'end': turn.end, 'speaker': speaker})
                 
-                segments_list = sorted(segments_list, key=lambda x: x.get('start', 0))
-                diarize_df = pd.DataFrame(segments_list)
-                result = whisperx.assign_word_speakers(diarize_df, result)
+                if segments_list:
+                    import pandas as pd
+                    diarize_df = pd.DataFrame(segments_list)
+                    result = whisperx.assign_word_speakers(diarize_df, result)
+                    logger.info(f"✅ Diarization complete: {len(segments_list)} speaker segments assigned")
+                else:
+                    logger.warning("No valid speakers found. Using fallback assignment.")
+                    for i, seg in enumerate(result["segments"]):
+                        seg["speaker"] = f"SPEAKER_{i%2:02d}"
             except Exception as e:
-                logger.error(f"Diarization failed: {e}")
+                logger.error(f"Diarization failed: {e}. Using fallback assignment.")
+                import traceback
+                logger.error(traceback.format_exc())
                 for i, segment in enumerate(result["segments"]):
                     segment["speaker"] = f"SPEAKER_{i%2:02d}"
         else:
+            logger.warning("Diarization disabled. Using fallback speaker assignment.")
             for i, segment in enumerate(result["segments"]):
-                segment["speaker"] = f"SPEAKER_{i%2:02d}"
+                if "speaker" not in segment:
+                    segment["speaker"] = f"SPEAKER_{i % 2:02d}"
 
-        if 'segments' in result:
-            result["segments"] = sorted(result["segments"], key=lambda x: x.get('start', 0))
+        # === SEGMENT MERGING (same as process_audios) ===
+        result["segments"] = merge_all_consecutive_speakers(result["segments"])
 
-        merged_segments = []
-        prev_segment = None
-        
-        for segment in result["segments"]:
-            speaker = segment.get("speaker", "Unknown")
-            text = segment.get("text", "").strip()
-            
-            if len(text) < 4 and text.lower() not in ["i", "a", "ok", "no", "yes", "hi"]:
-                continue
-            
-            if prev_segment and prev_segment["speaker"] == speaker:
-                prev_segment["text"] += " " + text
-            else:
-                if prev_segment:
-                    merged_segments.append(prev_segment)
-                prev_segment = {"speaker": speaker, "text": text}
-        
-        if prev_segment:
-            merged_segments.append(prev_segment)
-
-        result_lines = [f"{seg['speaker']}: {seg['text'].strip()}" for seg in merged_segments if seg['text'].strip()]
+        # === CONVERT TO TEXT FORMAT ===
+        result_lines = [f"{seg.get('speaker', 'SPEAKER_00')}: {seg.get('text', '').strip()}" for seg in result["segments"] if seg.get('text', '').strip()]
         result_text = "\n".join(result_lines) or "No speech detected."
-        resultOffset = convert_numpy(result["segments"])
         
+        # Word offsets for downstream processing
+        for seg in result.get("segments", []):
+            if "speaker" not in seg:
+                seg["speaker"] = "SPEAKER_00"
+
+        resultOffset = convert_numpy(result.get("segments", []))
+        
+        logger.info(f"Transcription complete: {len(result_text)} chars, {len(result['segments'])} segments")
         return result_text, resultOffset
 
     except Exception as e:
         logger.error(f"Transcription failed: {e}", exc_info=True)
-        return f"Transcription failed: {e}"
+        return f"Transcription failed: {e}", []
 
 # --- Anonymization Engine (V2-style, simplified with DFKI-SLT model) ---
 
@@ -1941,15 +2040,15 @@ __all__ = [
     'run_adversarial_anonymization',
     
     # TTS functions (from tts_engine)
-    #'generate_speech',
-    #'generate_beep',
-    #'synthesize_segment',
-    #'get_available_tts_voices',
-    #'get_tts_status',
+    'generate_speech',
+    'generate_beep',
+    'synthesize_segment',
+    'get_available_tts_voices',
+    'get_tts_status',
     
     # Configuration variables
-    #'TTS_BACKEND',
-    #'TTS_ENABLED',
+    'TTS_BACKEND',
+    'TTS_ENABLED',
     'CHAT_AI_API_KEY',
     'CHAT_AI_ENDPOINT',
     'DEFAULT_CHAT_AI_MODEL',
