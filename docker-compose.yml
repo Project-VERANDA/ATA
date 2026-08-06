@@ -5,7 +5,6 @@
 # SSL certificates mounted externally (organization certs stay out of images)
 # =============================================================================
 
-version: '3.8'
 
 services:
   # ==========================================================================
@@ -52,18 +51,16 @@ services:
   # ==========================================================================
   # BACKEND (Flask + WhisperX + Pyannote + TTS)
   # Runs Flask with SSL (self-signed) behind nginx reverse proxy
-  # ==========================================================================
   backend:
     build:
       context: .
       dockerfile: docker/backend/Dockerfile
     container_name: ata-backend
     expose:
-      - "5001"  # Expose internally, not published to host
+      - "5001"
     env_file:
       - .env
     environment:
-      # Override from environment for flexibility
       - CUDA_VISIBLE_DEVICES=0
       - FLASK_ENV=${FLASK_ENV:-development}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
@@ -71,17 +68,13 @@ services:
       - MODEL_DIR=/app/pipeline/model
       - LD_LIBRARY_PATH=/app/pipeline/tts/bin:/usr/local/nvidia/lib:/usr/local/nvidia/lib64:$LD_LIBRARY_PATH
     volumes:
-      # Source code (read-write for generated files)
       - ./pipeline:/app/pipeline:rw
       - ./interactive_app:/app/interactive_app:ro
       - ./audio_utils.py:/app/audio_utils.py:ro
       - ./process.py:/app/process.py:ro
-      # Generated files
       - backend-uploads:/app/uploads:rw
       - backend-logs:/app/logs:rw
-      # SSL certificates (for Flask self-signed internal SSL)
       - ${SSL_CERT_DIR:-./ssl_certs}:/app/ssl_certs:ro
-      # Temporary processing
       - backend-tmp:/app/tmp:rw
     deploy:
       resources:
@@ -100,9 +93,6 @@ services:
       retries: 3
       start_period: 120s
     restart: unless-stopped
-    mem_limit: 16g
-    mem_reservation: 8g
-    cpus: 4.0
     security_opt:
       - no-new-privileges:true
 

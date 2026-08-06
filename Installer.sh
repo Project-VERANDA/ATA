@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # ============================================================================
-# Dialogue Anonymizer Installer (v3.4) - UPDATED FOR CUDA 13.0
+# Dialogue Anonymizer Installer (v3.4)
 # ============================================================================
 
 set -o pipefail
@@ -1137,6 +1137,16 @@ cat > .env << EOF
 # Version: $SCRIPT_VERSION
 # CUDA Version: 13.0
 
+# ============================================================================
+# DOCKER COMPOSE VARIABLES
+# ============================================================================
+CURRENT_DIR=${CURRENT_DIR}
+SSL_CERT_DIR=\${CURRENT_DIR}/ssl_certs
+STATIC_FILES_PATH=\${CURRENT_DIR}/interactive_app/static
+
+# ============================================================================
+# API & ENDPOINTS
+# ============================================================================
 CHAT_AI_API_KEY=your_api_key_here
 CHAT_AI_ENDPOINT=https://your-endpoint.com/v1
 
