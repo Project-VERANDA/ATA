@@ -7,16 +7,24 @@ FROM nvidia/cuda:13.3.1-cudnn-devel-ubuntu22.04 AS base
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=UTC
 
-# Install system dependencies INCLUDING Python 3.12
+# Install system dependencies AND add Python 3.12 PPA
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     wget \
     git \
     ca-certificates \
     ffmpeg \
-    python3.12 \
-    python3.12-distutils \
-    python3.12-dev \
+    software-properties-common \
+    && rm -rf /var/lib/apt/lists/*
+
+# Add DeadSnakes PPA for Python 3.12 (not in Ubuntu 22.04 default repos)
+RUN add-apt-repository ppa:deadsnakes/ppa \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        python3.12 \
+        python3.12-venv \
+        python3.12-dev \
+        libpython3.12-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Install pip for Python 3.12
@@ -29,7 +37,7 @@ RUN groupadd -r appgroup && useradd -r -g appgroup -d /app -s /sbin/nologin appu
 
 WORKDIR /app
 
-# Copy requirements files (now in build context - docker/ exclusion fixed!)
+# Copy requirements files (docker/ exclusion now fixed in .dockerignore)
 COPY docker/backend/requirements.txt ./requirements.txt
 COPY ../../requirements-lock.txt ./requirements-lock.txt
 
