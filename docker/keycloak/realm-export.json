@@ -1,0 +1,143 @@
+{
+  "id": "ata-realm",
+  "realm": "ata-realm",
+  "displayName": "ATA Speech Anonymizer",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "registrationEmailAsUsername": true,
+  "rememberMe": true,
+  "verifyEmail": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": true,
+  "permanentLockout": false,
+  "maxFailureWaitSeconds": 900,
+  "minQuickLoginWaitSeconds": 60,
+  "waitIncrementSeconds": 60,
+  "quickLoginCheckMilliSeconds": 1000,
+  "maxDeltaTimeSeconds": 86400,
+  "failureFactor": 30,
+  
+  "roles": {
+    "realm": [
+      {
+        "name": "admin",
+        "description": "Administrator role with full access"
+      },
+      {
+        "name": "researcher",
+        "description": "Researcher role with job submission access"
+      },
+      {
+        "name": "reviewer",
+        "description": "Reviewer role with read access to anonymized outputs"
+      }
+    ]
+  },
+  
+  "clients": [
+    {
+      "clientId": "ata-client",
+      "name": "ATA Speech Anonymizer Frontend",
+      "description": "Main web application client",
+      "enabled": true,
+      "publicClient": true,
+      "protocol": "openid-connect",
+      "redirectUris": [
+        "https://transcriber.cloud.cci.charite.de/*",
+        "http://localhost:*/*",
+        "https://localhost:*/*"
+      ],
+      "webOrigins": [
+        "+"
+      ],
+      "fullScopeAllowed": true,
+      "defaultRoles": ["researcher"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "oauth2.device.authorization.grant.enabled": "true",
+        "backchannel.logout.revoke.offline.tokens": "false",
+        "backchannel.logout.session.required": "true"
+      },
+      "authenticationFlowBindingOverrides": {},
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "frontchannelLogout": true,
+      "standardFlowEnabled": true
+    },
+    {
+      "clientId": "ata-backend-api",
+      "name": "ATA Backend API",
+      "description": "Backend API service account",
+      "enabled": true,
+      "publicClient": false,
+      "protocol": "openid-connect",
+      "secret": "CHANGE_THIS_SECRET_IN_PRODUCTION",
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "bearerOnly": false,
+      "consentRequired": false,
+      "fullScopeAllowed": true
+    }
+  ],
+  
+  "defaultGroups": ["/researcher"],
+  
+  "scopeMappings": [
+    {
+      "clientScope": "offline_access",
+      "roles": ["offline_access"]
+    }
+  ],
+  
+  "clientScopes": [
+    {
+      "name": "profile",
+      "description": "OpenID Connect built-in scope: profile",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "true"
+      }
+    },
+    {
+      "name": "email",
+      "description": "OpenID Connect built-in scope: email",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "true"
+      }
+    }
+  ],
+  
+  "internationalizationEnabled": false,
+  "supportedLocales": [],
+  
+  "smtpServer": {},
+  
+  "users": [
+    {
+      "username": "admin",
+      "email": "luke.flanagan@bih-charite.de",
+      "firstName": "Admin",
+      "lastName": "User",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "CHANGE_ADMIN_PASSWORD_HERE"
+        }
+      ],
+      "realmRoles": ["admin", "user"],
+      "clientRoles": {
+        "ata-client": ["admin"]
+      }
+    }
+  ]
+}

@@ -69,3 +69,17 @@ __pycache__/
 *.tmp
 .tmp/
 requirements-lock.txt
+
+# Secrets
+
+secrets/
+*.secret
+*.password
+secrets/*.key
+secrets/*.txt
+secrets/*.crt
+
+*.pem
+*.key
+*.p12
+*.pfx

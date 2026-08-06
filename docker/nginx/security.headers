@@ -1,0 +1,35 @@
+# =============================================================================
+# SECURITY HEADERS - PCI DSS / HIPAA Compliant
+# ATA Speech Anonymizer - Medical Data Processing
+# =============================================================================
+
+# Prevent MIME type sniffing
+add_header X-Content-Type-Options "nosniff" always;
+
+# Clickjacking protection
+add_header X-Frame-Options "SAMEORIGIN" always;
+
+# XSS protection
+add_header X-XSS-Protection "1; mode=block" always;
+
+# Referrer policy
+add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+# Content Security Policy (adjust domains as needed)
+# Allows scripts/styles from self + unsafe-inline (needed for React dev mode)
+# Connects to LLM API endpoint (your organization's cloud)
+add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https://llm.cloud.cci.charite.de wss://llm.cloud.cci.charite.de; frame-ancestors 'self'; base-uri 'self'; form-action 'self';" always;
+
+# Permissions policy - restrict browser APIs
+add_header Permissions-Policy "geolocation=(), microphone=(), camera=(), payment=()" always;
+
+# HSTS - UNCOMMENT IN PRODUCTION (currently in speech-anonymizer for now)
+# add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
+
+# Cross-Origin headers (modern browser protections)
+add_header Cross-Origin-Embedder-Policy "require-corp" always;
+add_header Cross-Origin-Opener-Policy "same-origin" always;
+add_header Cross-Origin-Resource-Policy "same-origin" always;
+
+# Remove server token (hide nginx version)
+server_tokens off;

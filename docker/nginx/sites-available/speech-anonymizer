@@ -1,0 +1,183 @@
+# ============================================================================
+# Nginx Reverse Proxy Configuration for Speech Anonymizer - DOCKER VERSION
+# Adapted from production config (/etc/nginx/sites-enabled/speech-anonymizer)
+# Uses unified SSL certificates from ATA/ssl_certs/ (Docker mounted)
+# Connects to Flask backend via HTTPS
+# ============================================================================
+
+# Upstream definition (Flask app - running with SSL in Docker network)
+upstream speech_anonymizer {
+    server backend:5001;
+    keepalive 32;
+}
+
+# Rate limiting zone (REQUIRED - matches production)
+limit_req_zone $binary_remote_addr zone=api:10m rate=10r/s;
+
+# HTTP Server - Redirect to HTTPS
+server {
+    listen 80;
+    listen [::]:80;
+
+    # Handle domain and localhost (matches production)
+    server_name transcriber.cloud.cci.charite.de localhost 127.0.0.1 _;
+
+    # Redirect HTTP to HTTPS (preserves actual host header - matches production)
+    return 301 https://$http_host$request_uri;
+}
+
+# HTTPS Server - Main Application
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+
+    # Handle both domain and localhost (matches production)
+    server_name transcriber.cloud.cci.charite.de localhost 127.0.0.1 _;
+
+    # SSL Configuration - Docker version (org certs from docker-compose.yml mount)
+    # CHANGED: From /etc/letsencrypt/... to /etc/nginx/ssl/
+    ssl_certificate /etc/nginx/ssl/server.crt;
+    ssl_certificate_key /etc/nginx/ssl/server.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 10m;
+
+    # Security headers (matches production)
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+
+    # ============================================
+    # LARGE UPLOAD SETTINGS (5 GB - matches production)
+    # ============================================
+    client_max_body_size 5G;
+    client_body_buffer_size 10M;
+
+    # Timeouts for large uploads (matches production)
+    client_body_timeout 600s;
+    client_header_timeout 600s;
+    send_timeout 600s;
+
+    # ===================================================
+    # LOCATION: ROOT (/) - PROXY TO FLASK VIA HTTPS
+    # ===================================================
+    location / {
+        # Rate limiting (matches production)
+        limit_req zone=api burst=20 nodelay;
+
+        # CRITICAL: Connect to Flask via HTTPS (Flask has SSL enabled - same as production)
+        proxy_pass https://speech_anonymizer;
+        proxy_http_version 1.1;
+
+        # Backend SSL settings (skip cert verification for self-signed - matches production)
+        proxy_ssl_verify off;
+        proxy_ssl_server_name on;
+        proxy_ssl_session_reuse on;
+
+        # Essential headers for proper proxying (matches production)
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header Connection "";
+
+        # Buffering settings for large uploads (matches production)
+        proxy_request_buffering off;
+        proxy_buffering off;
+        proxy_read_timeout 600s;
+        proxy_send_timeout 600s;
+        proxy_connect_timeout 60s;
+    }
+
+    # ===================================================
+    # LOCATION: HEALTH CHECK (/health)
+    # ===================================================
+    location /health {
+        # Connect to Flask via HTTPS (matches production)
+        proxy_pass https://speech_anonymizer/health;
+        proxy_ssl_verify off;
+        proxy_ssl_server_name on;
+
+        access_log off;
+        limit_req zone=api burst=100 nodelay;
+    }
+
+    # ===================================================
+    # LOCATION: STATIC FILES (/static/)
+    # ===================================================
+    location /static/ {
+        # CHANGED: From /mnt/Data_Mount/VERANDA_DataMount/ATA/... to Docker mount
+        alias /var/www/static/;
+        expires 30d;
+        add_header Cache-Control "public, immutable";
+        try_files $uri $uri/ =404;
+    }
+
+    # ===================================================
+    # LOCATION: UPLOAD API (/upload) - LARGE FILES
+    # ===================================================
+    location /upload {
+        # Connect to Flask via HTTPS (matches production)
+        proxy_pass https://speech_anonymizer/upload;
+        proxy_ssl_verify off;
+        proxy_ssl_server_name on;
+
+        client_max_body_size 5G;
+        client_body_timeout 600s;
+
+        proxy_request_buffering off;
+        proxy_buffering off;
+        proxy_read_timeout 600s;
+        proxy_send_timeout 600s;
+        proxy_connect_timeout 60s;
+    }
+
+    # ===================================================
+    # LOCATION: RECORDING TRANSCRIBE (/transcribe_recording)
+    # ===================================================
+    location /transcribe_recording {
+        # Connect to Flask via HTTPS (matches production)
+        proxy_pass https://speech_anonymizer/transcribe_recording;
+        proxy_ssl_verify off;
+        proxy_ssl_server_name on;
+
+        client_max_body_size 5G;
+        client_body_timeout 600s;
+
+        proxy_request_buffering off;
+        proxy_buffering off;
+        proxy_read_timeout 600s;
+        proxy_send_timeout 600s;
+        proxy_connect_timeout 60s;
+    }
+
+    # ===================================================
+    # LOCATION: DOWNLOAD ENDPOINTS (/download/)
+    # ===================================================
+    location /download/ {
+        # Connect to Flask via HTTPS (matches production)
+        proxy_pass https://speech_anonymizer/download/;
+        proxy_ssl_verify off;
+        proxy_ssl_server_name on;
+
+        proxy_http_version 1.1;
+        proxy_read_timeout 300s;
+    }
+
+    # ===================================================
+    # BLOCK SENSITIVE PATHS (Added for Docker security)
+    # ===================================================
+    location ~ /pipeline/ {
+        deny all;
+        access_log off;
+    }
+
+    location ~ /model/ {
+        deny all;
+        access_log off;
+    }
+}
