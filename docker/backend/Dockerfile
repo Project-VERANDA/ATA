@@ -1,30 +1,37 @@
 # ============================================================================
-# Backend Application Dockerfile (CUDA 13.3.1)
+# Backend Application Dockerfile (CUDA 13.3.1 + Python 3.12)
 # ============================================================================
 
 FROM nvidia/cuda:13.3.1-cudnn-devel-ubuntu22.04 AS base
 
-# Prevent interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=UTC
 
-# Install system dependencies
+# Install system dependencies INCLUDING Python 3.12
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     wget \
     git \
     ca-certificates \
     ffmpeg \
+    python3.12 \
+    python3.12-distutils \
+    python3.12-dev \
     && rm -rf /var/lib/apt/lists/*
+
+# Install pip for Python 3.12
+RUN curl -sS https://bootstrap.pypa.io/get-pip.py -o get-pip.py && \
+    python3.12 get-pip.py && \
+    rm get-pip.py
 
 # Create non-root user for security
 RUN groupadd -r appgroup && useradd -r -g appgroup -d /app -s /sbin/nologin appuser
 
 WORKDIR /app
 
-# Copy requirements files
+# Copy requirements files (now in build context - docker/ exclusion fixed!)
 COPY docker/backend/requirements.txt ./requirements.txt
-COPY requirements-lock.txt ./requirements-lock.txt
+COPY ../../requirements-lock.txt ./requirements-lock.txt
 
 # Create virtual environment and install dependencies
 RUN python3.12 -m venv /app/venv && \
