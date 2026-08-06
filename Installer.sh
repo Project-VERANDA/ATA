@@ -739,7 +739,7 @@ if [ "$GPU_AVAILABLE" = true ]; then
     pip install "torch~=2.8.0" --no-cache-dir
     pip install "torchaudio~=2.8.0" --no-cache-dir
     pip install "torchvision~=0.23.0" --no-cache-dir
-    #ctranslate2 4.5.0+ required for cuDNN 9 compatibility with CUDA 13.0
+    # ctranslate2 4.5.0+ required for cuDNN 9 compatibility with CUDA 13.0
     pip install "ctranslate2>=4.5.0" --no-cache-dir
 else
     log_info "Installing PyTorch CPU-only..."
@@ -789,7 +789,7 @@ log_info "Installing WhisperX..."
 pip uninstall whisperx -y 2>/dev/null || true
 
 # Use specific commit compatible with torch 2.8
-WHISPER_COMMIT="latest"
+WHISPER_COMMIT="main"
 pip install "git+https://github.com/m-bain/whisperx.git@${WHISPER_COMMIT}" --no-cache-dir || \
 pip install "whisperx>=3.8.0" --no-cache-dir || \
 log_warn "⚠️  Warning installing whisperx"
@@ -831,10 +831,10 @@ else
 fi
 
 # Accept PyTorch 2.12+ (covers 2.12, 2.13, and future 2.x)
-if [[ ! "$TORCH_VER" =~ ^2\.(1[23]|[4-9]) ]] && [[ ! "$TORCH_VER" =~ ^3\. ]]; then
-    log_warn "PyTorch $TORCH_VER (2.12+ recommended)"
+if [[ ! "$TORCH_VER" =~ ^2\.(8|9|[0-9][0-9]) ]]; then
+    log_warn "PyTorch $TORCH_VER (2.8.0+ recommended for whisperx)"
 else
-    log_success "PyTorch $TORCH_VER confirmed (2.12+ series, CUDA 13.0)"
+    log_success "PyTorch $TORCH_VER confirmed (whisperx compatible, CUDA 13.0)"
 fi
 
 if python -c "import spacy; import thinc; import pyannote.audio; import whisperx; import torchcodec" 2>/dev/null; then
