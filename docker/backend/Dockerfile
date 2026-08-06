@@ -1,5 +1,5 @@
 # ============================================================================
-# Backend Application Dockerfile (CUDA 13.3.1 + Python 3.12)
+# Backend Application Dockerfile (CUDA 13.3.1 + Python 3.12 from Source)
 # ============================================================================
 
 FROM nvidia/cuda:13.3.1-cudnn-devel-ubuntu22.04 AS base
@@ -7,37 +7,45 @@ FROM nvidia/cuda:13.3.1-cudnn-devel-ubuntu22.04 AS base
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=UTC
 
-# Install system dependencies AND add Python 3.12 PPA
+# Install build dependencies for Python 3.12
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
+    build-essential \
+    zlib1g-dev \
+    libncurses5-dev \
+    libgdbm-dev \
+    libnss3-dev \
+    libssl-dev \
+    libreadline-dev \
+    libffi-dev \
     wget \
-    git \
-    ca-certificates \
-    ffmpeg \
-    software-properties-common \
+    libsqlite3-dev \
+    libbz2-dev \
+    liblzma-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Add DeadSnakes PPA for Python 3.12 (not in Ubuntu 22.04 default repos)
-RUN add-apt-repository ppa:deadsnakes/ppa \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends \
-        python3.12 \
-        python3.12-venv \
-        python3.12-dev \
-        libpython3.12-dev \
-    && rm -rf /var/lib/apt/lists/*
+# Download and install Python 3.12.4 from source
+RUN cd /tmp && \
+    wget -q https://www.python.org/ftp/python/3.12.4/Python-3.12.4.tgz && \
+    tar -xf Python-3.12.4.tgz && \
+    cd Python-3.12.4 && \
+    ./configure --enable-optimizations --prefix=/usr/local && \
+    make -j$(nproc) && \
+    make altinstall && \
+    ln -sf /usr/local/bin/python3.12 /usr/local/bin/python3 && \
+    ln -sf /usr/local/bin/pip3.12 /usr/local/bin/pip && \
+    rm -rf /tmp/Python-3.12.4* /tmp/get-pip.py
 
 # Install pip for Python 3.12
-RUN curl -sS https://bootstrap.pypa.io/get-pip.py -o get-pip.py && \
-    python3.12 get-pip.py && \
-    rm get-pip.py
+RUN curl -sS https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py && \
+    python3.12 /tmp/get-pip.py && \
+    rm /tmp/get-pip.py
 
 # Create non-root user for security
 RUN groupadd -r appgroup && useradd -r -g appgroup -d /app -s /sbin/nologin appuser
 
 WORKDIR /app
 
-# Copy requirements files (docker/ exclusion now fixed in .dockerignore)
+# Copy requirements files (docker/ exclusion fixed in .dockerignore)
 COPY docker/backend/requirements.txt ./requirements.txt
 COPY ../../requirements-lock.txt ./requirements-lock.txt
 
