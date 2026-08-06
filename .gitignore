@@ -72,12 +72,13 @@ requirements-lock.txt
 
 # Secrets
 
-secrets/
+#secrets/
 *.secret
 *.password
 secrets/*.key
 secrets/*.txt
 secrets/*.crt
+!secrets/setup-secrets.sh
 
 *.pem
 *.key
