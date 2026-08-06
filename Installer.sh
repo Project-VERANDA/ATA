@@ -201,7 +201,8 @@ preflight_check() {
         local gpu_name driver_ver cuda_v
         gpu_name=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1)
         driver_ver=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -1)
-        cuda_v=$(nvidia-smi --query-gpu=cuda_version --format=csv,noheader 2>/dev/null | head -1)
+        cuda_v=$(nvidia-smi --query-gpu=cuda_version --format=csv,noheader 2>/dev/null | head -1 || echo "N/A")
+[ "$cuda_v" = "Field \"cuda_version\" is not a valid field" ] && cuda_v="N/A (driver supports CUDA 13.0)"
         log_success "NVIDIA GPU detected: ${gpu_name} (Driver: ${driver_ver}, CUDA: ${cuda_v})"
         
         # Driver version check for CUDA 13.0 compatibility
@@ -733,18 +734,18 @@ pip install "scipy>=1.18.0" --no-cache-dir
 
 # PyTorch 2.13.0+ - Latest stable with CUDA 13.0 support
 if [ "$GPU_AVAILABLE" = true ]; then
-    log_info "Installing PyTorch with CUDA 13.0 support..."
-    pip install "torch==2.13.0" --index-url https://download.pytorch.org/whl/cu130 --no-cache-dir
-    pip install "torchaudio==2.13.0" --index-url https://download.pytorch.org/whl/cu130 --no-cache-dir
-    pip install "torchvision==0.28.0" --index-url https://download.pytorch.org/whl/cu130 --no-cache-dir
-
+    log_info "Installing PyTorch with CUDA support..."
+    # whisperx from main will auto-resolve to compatible versions
+    pip install "torch~=2.8.0" --no-cache-dir
+    pip install "torchaudio~=2.8.0" --no-cache-dir
+    pip install "torchvision~=0.23.0" --no-cache-dir
     #ctranslate2 4.5.0+ required for cuDNN 9 compatibility with CUDA 13.0
     pip install "ctranslate2>=4.5.0" --no-cache-dir
 else
     log_info "Installing PyTorch CPU-only..."
-    pip install "torch==2.13.0" --no-cache-dir
-    pip install "torchaudio==2.13.0" --no-cache-dir
-    pip install "torchvision==0.28.0" --no-cache-dir
+    pip install "torch~=2.8.0" --no-cache-dir
+    pip install "torchaudio~=2.8.0" --no-cache-dir
+    pip install "torchvision~=0.23.0" --no-cache-dir
 fi
 
 # torchcodec (for audio/video handling) - Improved fallback chain
