@@ -22,7 +22,7 @@ RUN groupadd -r appgroup && useradd -r -g appgroup -d /app -s /sbin/nologin appu
 
 WORKDIR /app
 
-# Copy requirements files (paths relative to BUILD CONTEXT = project root)
+# Copy requirements files
 COPY docker/backend/requirements.txt ./requirements.txt
 COPY requirements-lock.txt ./requirements-lock.txt
 
@@ -31,7 +31,7 @@ RUN python3.12 -m venv /app/venv && \
     /app/venv/bin/pip install --upgrade pip setuptools wheel && \
     /app/venv/bin/pip install --no-cache-dir -r requirements-lock.txt
 
-# Copy application code (paths relative to BUILD CONTEXT)
+# Copy application code
 COPY --chown=appuser:appgroup interactive_app/ ./interactive_app/
 COPY --chown=appuser:appgroup pipeline/ ./pipeline/
 COPY --chown=appuser:appgroup interactive_app/audio_utils.py ./audio_utils.py
