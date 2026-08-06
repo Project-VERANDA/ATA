@@ -166,6 +166,34 @@ preflight_check() {
         log_success "Disk space: ${disk_avail_gb}GB available"
     fi
 
+        if command -v docker &> /dev/null; then
+        DOCKER_INSTALLED=true
+        if docker info &> /dev/null; then
+            DOCKER_RUNNING=true
+            if docker compose version &> /dev/null; then
+                DOCKER_COMPOSE_AVAILABLE=true
+                DOCKER_COMPOSE_CMD="docker compose"
+                log_success "Docker Engine + Compose Plugin available"
+            elif docker-compose --version &> /dev/null; then
+                DOCKER_COMPOSE_AVAILABLE=true
+                DOCKER_COMPOSE_CMD="docker-compose"
+                log_warn "Legacy docker-compose detected (recommend upgrade to v2 plugin)"
+            else
+                DOCKER_COMPOSE_AVAILABLE=false
+                log_warn "Docker installed but Compose not available"
+                ((warnings++))
+            fi
+        else
+            DOCKER_RUNNING=false
+            log_warn "Docker installed but daemon not running"
+            ((warnings++))
+        fi
+    else
+        DOCKER_INSTALLED=false
+        log_warn "Docker not installed (required for containerized deployment)"
+        ((warnings++))
+    fi
+
     # GPU check
     GPU_AVAILABLE=false
     if command -v nvidia-smi &> /dev/null; then
@@ -233,6 +261,96 @@ detect_package_manager() {
     else
         PKG_UPDATE_CMD=""
         PKG_INSTALL_CMD=""
+    fi
+}
+
+# ============================================================================
+# DOCKER INSTALLATION & SETUP (2026 - Modern Docker Compose v2+)
+# ============================================================================
+
+install_docker() {
+    log_section "Docker Engine & Compose Installation"
+    
+    # Check if Docker is already installed
+    if command -v docker &> /dev/null; then
+        DOCKER_VERSION=$(docker --version | awk '{print $3}' | tr -d ',')
+        DOCKER_COMPOSE_AVAILABLE=false
+        
+        if docker compose version &> /dev/null; then
+            DOCKER_COMPOSE_CMD="docker compose"
+            DOCKER_COMPOSE_AVAILABLE=true
+            COMPOSE_VERSION=$(docker compose version --short 2>/dev/null || echo "unknown")
+            log_success "Docker ${DOCKER_VERSION} + Compose Plugin ${COMPOSE_VERSION}"
+        elif docker-compose --version &> /dev/null; then
+            DOCKER_COMPOSE_CMD="docker-compose"
+            DOCKER_COMPOSE_AVAILABLE=true
+            COMPOSE_VERSION=$(docker-compose --version | awk '{print $3}')
+            log_warn "Legacy docker-compose ${COMPOSE_VERSION} detected (recommend v2+ plugin)"
+        else
+            log_error "Docker installed but Compose plugin missing!"
+            return 1
+        fi
+        
+        # Verify Docker daemon is running
+        if docker info &> /dev/null; then
+            log_success "Docker daemon is running"
+        else
+            log_error "Docker daemon not running. Start with: sudo systemctl start docker"
+            return 1
+        fi
+        
+        # Check if user can run Docker without sudo
+        if groups | grep -qw docker; then
+            log_success "User is in 'docker' group (no sudo required)"
+        else
+            log_warn "User not in 'docker' group. Commands may require sudo."
+            log_info "Fix: sudo usermod -aG docker \$USER && newgrp docker"
+        fi
+        
+        return 0
+    fi
+    
+    # Docker NOT installed - proceed with installation
+    log_info "Docker not found. Installing Docker Engine (2026 method)..."
+    
+    if [ -n "$PKG_UPDATE_CMD" ]; then
+        # Remove old Docker installations
+        $PKG_INSTALL_CMD docker.io containerd runc 2>/dev/null || true
+        
+        # Add Docker GPG key
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg 2>/dev/null
+        
+        # Add Docker repository
+        echo "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] \
+https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | \
+sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+        
+        # Update and install
+        $PKG_UPDATE_CMD
+        $PKG_INSTALL_cmd docker-ce docker-ce-cli containerd.io docker-compose-plugin
+        
+        log_success "Docker Engine installed"
+        
+        # Start Docker service
+        if systemctl is-active --quiet docker 2>/dev/null; then
+            log_success "Docker daemon is active"
+        else
+            sudo systemctl start docker
+            sudo systemctl enable docker
+            log_success "Docker daemon started and enabled"
+        fi
+        
+        # Add user to docker group
+        if ! groups "$USER" | grep -qw docker; then
+            sudo usermod -aG docker "$USER"
+            log_info "User added to 'docker' group. Log out/in to activate."
+        fi
+        
+        return 0
+    else
+        log_error "Could not detect package manager for Docker installation"
+        log_info "Manual installation required: https://docs.docker.com/engine/install/"
+        return 1
     fi
 }
 
@@ -1307,7 +1425,12 @@ log_info ""
 log_info "Model Location: $MODEL_DIR_NAME/"
 log_info ""
 log_info "Next steps:"
-log_info "  1. Edit .env with API key (securely, chmod 600)"
+log_info "Docker Deployment:"
+log_info "  1. Generate secrets: ./scripts/setup-secrets.sh"
+log_info "  2. Start containers: docker compose up -d --build"
+log_info "  3. Check health: ./docker/scripts/health-check.sh"
+log_info "Alternatively, for local execution without docker:"
+log_info "  1. Edit .env with API key"
 log_info "  2. Place videos in pipeline/videos/"
 log_info "  3. Run: python pipeline/process.py"
 log_info ""
@@ -1316,6 +1439,12 @@ log_info "  • Re-run with --force-refresh to rebuild everything"
 log_info "  • Run with --dry-run to preview actions"
 log_info "  • Run with --uninstall to clean removal"
 log_info "  • Check requirements-lock.txt for exact package versions"
+log_info ""
+log_info "Docker Commands:"
+log_info "  docker compose ps           # List containers"
+log_info "  docker compose logs -f      # Follow logs"
+log_info "  docker compose down         # Stop all containers"
+log_info "  docker compose up -d        # Start detached"
 log_info ""
 log_info "For support: https://proton.me/support/lumo"
 log_section "End of Installation"
