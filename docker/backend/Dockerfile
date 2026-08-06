@@ -3,7 +3,7 @@
 # CUDA 13.0 Compatible
 # =============================================================================
 
-FROM nvidia/cuda:13.0-cudnn-devel-ubuntu22.04
+FROM nvidia/cuda:13.3.1-cudnn-devel-ubuntu22.04
 
 # Prevent interactive prompts during package installation
 ARG DEBIAN_FRONTEND=noninteractive
