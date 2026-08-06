@@ -1,13 +1,14 @@
 # =============================================================================
-# DOCKER-SPECIFIC EXCLUSIONS (FIXED - docker/ ALLOWED)
+# DOCKER-SPECIFIC EXCLUSIONS
 # =============================================================================
 
-# Docker build artifacts (not other Dockerfiles)
+# Docker build context (don't build other projects into this image)
 docker-compose*.yml
+# docker
 Dockerfile*
 .docker/
 .dockerignore
-.docker_env
+docker-compose.override.yml
 
 # Build artifacts not needed in containers
 *.deb
@@ -20,7 +21,7 @@ Dockerfile*
 .env.dev
 .env.local
 .env.*.local
-.env.test
+.docker_env
 
 # Test files
 *_test.py
@@ -45,7 +46,7 @@ docs/
 *.pdf
 *.pptx
 
-# IDE files
+# IDE files (already in .gitignore, but add here too)
 .idea/
 .vscode/
 *.swp
@@ -63,7 +64,7 @@ docs/
 tmp/
 __pycache__/
 
-# Scripts not needed in production (except scripts/)
+# Scripts not needed in production
 Installer.sh
 setup_nginx.sh
 ssl_certs/setup_ssl.sh
