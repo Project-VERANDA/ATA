@@ -734,14 +734,17 @@ pip install "scipy>=1.18.0" --no-cache-dir
 # PyTorch 2.13.0+ - Latest stable with CUDA 13.0 support
 if [ "$GPU_AVAILABLE" = true ]; then
     log_info "Installing PyTorch with CUDA 13.0 support..."
-    pip install "torch~=2.8.0" --index-url https://download.pytorch.org/whl/cu130 --no-cache-dir
-    pip install "torchaudio~=2.8.0" --index-url https://download.pytorch.org/whl/cu130 --no-cache-dir
-    pip install "torchvision~=0.23.0" --index-url https://download.pytorch.org/whl/cu130 --no-cache-dir
+    pip install "torch==2.13.0" --index-url https://download.pytorch.org/whl/cu130 --no-cache-dir
+    pip install "torchaudio==2.13.0" --index-url https://download.pytorch.org/whl/cu130 --no-cache-dir
+    pip install "torchvision==0.28.0" --index-url https://download.pytorch.org/whl/cu130 --no-cache-dir
+
+    #ctranslate2 4.5.0+ required for cuDNN 9 compatibility with CUDA 13.0
+    pip install "ctranslate2>=4.5.0" --no-cache-dir
 else
     log_info "Installing PyTorch CPU-only..."
-    pip install "torch~=2.8.0" --no-cache-dir
-    pip install "torchaudio~=2.8.0" --no-cache-dir
-    pip install "torchvision~=0.23.0" --no-cache-dir
+    pip install "torch==2.13.0" --no-cache-dir
+    pip install "torchaudio==2.13.0" --no-cache-dir
+    pip install "torchvision==0.28.0" --no-cache-dir
 fi
 
 # torchcodec (for audio/video handling) - Improved fallback chain
@@ -785,7 +788,7 @@ log_info "Installing WhisperX..."
 pip uninstall whisperx -y 2>/dev/null || true
 
 # Use specific commit compatible with torch 2.8
-WHISPER_COMMIT="8dcdec1"
+WHISPER_COMMIT="latest"
 pip install "git+https://github.com/m-bain/whisperx.git@${WHISPER_COMMIT}" --no-cache-dir || \
 pip install "whisperx>=3.8.0" --no-cache-dir || \
 log_warn "⚠️  Warning installing whisperx"
