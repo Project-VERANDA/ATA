@@ -56,6 +56,10 @@ services:
       context: .
       dockerfile: docker/backend/Dockerfile
     container_name: ata-backend
+    dns:      
+      - "8.8.8.8"
+      - "1.1.1.1"
+      - "8.8.4.4"
     expose:
       - "5001"
     env_file:
