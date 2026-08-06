@@ -734,14 +734,15 @@ pip install "scipy>=1.18.0" --no-cache-dir
 # PyTorch 2.13.0+ - Latest stable with CUDA 13.0 support
 if [ "$GPU_AVAILABLE" = true ]; then
     log_info "Installing PyTorch with CUDA 13.0 support..."
-    pip install "torch>=2.12.0,<3.0.0" --index-url https://download.pytorch.org/whl/cu130 --no-cache-dir
-    pip install "torchaudio>=2.12.0,<3.0.0" --index-url https://download.pytorch.org/whl/cu130 --no-cache-dir
+    pip install "torch~=2.8.0" --index-url https://download.pytorch.org/whl/cu130 --no-cache-dir
+    pip install "torchaudio~=2.8.0" --index-url https://download.pytorch.org/whl/cu130 --no-cache-dir
+    pip install "torchvision~=0.23.0" --index-url https://download.pytorch.org/whl/cu130 --no-cache-dir
 else
     log_info "Installing PyTorch CPU-only..."
-    pip install "torch>=2.12.0,<3.0.0" --no-cache-dir
-    pip install "torchaudio>=2.12.0,<3.0.0" --no-cache-dir
+    pip install "torch~=2.8.0" --no-cache-dir
+    pip install "torchaudio~=2.8.0" --no-cache-dir
+    pip install "torchvision~=0.23.0" --no-cache-dir
 fi
-pip install "torchvision>=0.27.0,<1.0.0" --index-url https://download.pytorch.org/whl/cu130 --no-cache-dir
 
 # torchcodec (for audio/video handling) - Improved fallback chain
 log_info "Installing torchcodec..."
@@ -754,7 +755,7 @@ log_info "Installing transformers ecosystem..."
 pip install "transformers>=5.14.0" --no-cache-dir
 pip install "tokenizers>=0.22.0" --no-cache-dir
 pip install "accelerate>=1.14.0" --no-cache-dir
-pip install "huggingface-hub>=0.25.0,<1.0.0" --no-cache-dir  # Prevent breaking changes
+pip install "huggingface-hub>=1.5.0,<2.0" --no-cache-dir  # Prevent breaking changes
 
 # Other utilities
 log_info "Installing utility packages..."
@@ -782,10 +783,19 @@ pip install "pyannote.audio>=4.0.7" --no-cache-dir || log_warn "⚠️  Warning 
 # Using latest stable commit for version control (no official PyPI releases)
 log_info "Installing WhisperX..."
 pip uninstall whisperx -y 2>/dev/null || true
-WHISPER_COMMIT="2cfd7b7c5c7bba144954364db747319b50e8232b"
+
+# Use specific commit compatible with torch 2.8
+WHISPER_COMMIT="8dcdec1"
 pip install "git+https://github.com/m-bain/whisperx.git@${WHISPER_COMMIT}" --no-cache-dir || \
 pip install "whisperx>=3.8.0" --no-cache-dir || \
 log_warn "⚠️  Warning installing whisperx"
+
+# Verify installation
+if python -c "import whisperx; print(whisperx.__version__)" 2>/dev/null; then
+    log_success "WhisperX installed successfully"
+else
+    log_warn "⚠️  WhisperX may have dependency issues"
+fi
 
 log_success "Base ML stack installation complete."
 
