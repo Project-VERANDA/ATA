@@ -1,0 +1,120 @@
+:root {
+  --bih-blue: #003754;
+  --bih-blue-rgb: 0, 55, 84;
+  --bih-blue-90: #0a425f;
+  --bih-blue-80: #154d6a;
+  --bih-blue-70: #1f5875;
+  --bih-coral: #ea5451;
+  --bih-coral-rgb: 234, 84, 81;
+  --bih-white: #ffffff;
+  --bih-dark-red: #af1821;
+  --bih-light-pink: #ffb0ac;
+  --bih-gold: #9d7220;
+  --bih-mineral: #009aa9;
+  --bih-lavender: #7876b6;
+  --font-primary: 'Trebuchet MS', 'Lucida Sans Unicode', 'Lucida Grande', 'Lucida Sans', Arial, sans-serif;
+  --font-size-xs: 0.75rem;
+  --font-size-sm: 0.875rem;
+  --font-size-base: 1rem;
+  --font-size-lg: 1.125rem;
+  --font-size-xl: 1.25rem;
+  --font-size-2xl: 1.5rem;
+  --font-size-3xl: 1.875rem;
+  --font-size-4xl: 2.25rem;
+  --font-size-5xl: 3rem;
+  --spacing-xs: 0.25rem;
+  --spacing-sm: 0.5rem;
+  --spacing-md: 1rem;
+  --spacing-lg: 1.5rem;
+  --spacing-xl: 2rem;
+  --spacing-2xl: 3rem;
+  --spacing-3xl: 4rem;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-full: 50%;
+  --shadow-sm: 0 1px 3px rgba(0, 55, 84, 0.1);
+  --shadow-md: 0 4px 6px rgba(0, 55, 84, 0.15);
+  --shadow-lg: 0 10px 15px rgba(0, 55, 84, 0.2);
+  --shadow-xl: 0 20px 25px rgba(0, 55, 84, 0.25);
+  --transition-fast: 150ms ease;
+  --transition-normal: 300ms ease;
+  --z-modal-backdrop: 1040;
+  --z-modal: 1050;
+  --bg-primary: #ffffff;
+  --bg-secondary: #f8fbff;
+  --bg-tertiary: #e6f3ff;
+  --text-primary: #003754;
+  --text-secondary: #1a3a5c;
+  --text-muted: #6b7c8d;
+  --border-color: #b3d9ff;
+  --input-bg: #f8fbff;
+  --input-border: #b3d9ff;
+  --success-color: #009aa9;
+  --warning-color: #9d7220;
+  --error-color: #af1821;
+  --card-bg: #ffffff;
+  --hover-bg: #e6f3ff;
+}
+.dark-theme {
+  --bg-primary: #003754;
+  --bg-secondary: #0a425f;
+  --bg-tertiary: #154d6a;
+  --text-primary: #ffffff;
+  --text-secondary: #d1e8ff;
+  --text-muted: #9fb8cd;
+  --border-color: #4a85a1;
+  --input-bg: #154d6a;
+  --input-border: #4a85a1;
+  --success-color: #ffb0ac;
+  --warning-color: #ffd700;
+  --error-color: #ff6b6b;
+  --card-bg: #0a425f;
+  --hover-bg: #154d6a;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { font-size: 16px; scroll-behavior: smooth; }
+body {
+  font-family: var(--font-primary);
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  line-height: 1.6;
+  transition: background-color var(--transition-normal), color var(--transition-normal);
+  overflow-x: hidden;
+}
+a { color: var(--bih-coral); text-decoration: none; transition: color var(--transition-fast); }
+a:hover { color: var(--bih-dark-red); }
+button {
+  font-family: var(--font-primary);
+  cursor: pointer;
+  border: none;
+  outline: none;
+  transition: all var(--transition-fast);
+}
+input, textarea, select { font-family: var(--font-primary); transition: all var(--transition-fast); }
+.container { max-width: 1200px; margin: 0 auto; padding: 0 var(--spacing-lg); }
+.btn {
+  display: inline-flex; align-items: center; gap: var(--spacing-sm);
+  padding: var(--spacing-md) var(--spacing-xl);
+  border-radius: var(--radius-full);
+  font-weight: 600; font-size: var(--font-size-lg);
+  transition: all var(--transition-normal);
+  text-decoration: none; border: 2px solid transparent;
+}
+.btn-primary { background: var(--bih-coral); color: var(--bih-white); }
+.btn-primary:hover { background: var(--bih-dark-red); transform: translateY(-3px); box-shadow: var(--shadow-lg); }
+.btn-outline { background: transparent; border-color: currentColor; color: var(--text-primary); }
+.btn-lg { padding: var(--spacing-lg) var(--spacing-2xl); font-size: var(--font-size-xl); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+.btn-block { width: 100%; justify-content: center; }
+.loading-spinner {
+  display: inline-block; width: 20px; height: 20px;
+  border: 3px solid rgba(234, 84, 81, 0.3);
+  border-radius: 50%; border-top-color: var(--bih-coral);
+  animation: spin 1s ease-in-out infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes slideUp { from { transform: translateY(50px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+.fade-in { animation: fadeIn 0.3s ease forwards; }
