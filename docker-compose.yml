@@ -1,8 +1,6 @@
 # ============================================================================
-# Docker Compose for Dialogue Anonymizer (Complete)
+# Docker Compose for Dialogue Anonymizer
 # ============================================================================
-
-version: "3.8"
 
 services:
   anonymizer:
@@ -21,13 +19,13 @@ services:
     volumes:
       # Persist models outside container
       - ./pipeline/model:/app/pipeline/model
-      # Mount input/output directories (adjust as needed)
+      # Mount input/output directories
       - ./data/input:/app/data/input:ro
       - ./data/output:/app/data/output
       # Mount config
       - ./.env:/app/.env:ro
-      # Mount entrypoint scripts
-      - ./scripts:/app/scripts:ro
+      # Mount scripts (allows updates without rebuild)
+      - ./docker/scripts:/app/scripts:ro
     environment:
       - PYTHONUNBUFFERED=1
       - TZ=UTC
@@ -49,13 +47,12 @@ services:
       retries: 3
       start_period: 60s
 
-  # Optional: React Frontend (uncomment when needed)
   frontend:
     build:
       context: .
       dockerfile: frontend/Dockerfile
       args:
-        API_URL: http://${FRONTEND_HOST:-localhost}:5000
+        API_URL: ${API_URL:-http://localhost:5000}
     container_name: dialogue-anonymizer-frontend
     ports:
       - "80:80"
@@ -69,15 +66,15 @@ services:
       timeout: 3s
       retries: 3
 
-  # Optional: Redis for Celery tasks (uncomment when using async queue)
-  # redis:
-  #   image: redis:7-alpine
-  #   container_name: anonymizer-redis
-  #   ports:
-  #     - "6379:6379"
-  #   volumes:
-  #     - redis_data:/data
-  #   restart: unless-stopped
-
+# Optional: Redis for Celery async tasks (uncomment when needed)
+# redis:
+#   image: redis:7-alpine
+#   container_name: anonymizer-redis
+#   ports:
+#     - "6379:6379"
+#   volumes:
+#     - redis_data:/data
+#   restart: unless-stopped
+# 
 # volumes:
 #   redis_data:

@@ -1,0 +1,44 @@
+# ============================================================================
+# Docker-Specific Web Requirements Override
+# Extends docker/requirements.docker.txt for web interface
+# ============================================================================
+
+# Base ML dependencies (Docker-optimized)
+-r requirements.docker.txt
+
+# Flask & Web Server
+Flask==3.0.3
+Werkzeug==3.0.6
+gunicorn==22.0.0
+flask-cors>=5.0.0
+flask-limiter>=3.10.0
+
+# Security & Authentication
+cryptography>=43.0.0,<50.0.0
+PyJWT>=2.9.0,<3.0.0
+Authlib>=1.4.0,<2.0.0
+
+# TTS (Piper backend)
+piper-tts>=1.4.0
+
+# Database
+SQLAlchemy>=2.0.0,<3.0.0
+psycopg2-binary>=2.9.0,<3.0.0
+
+# Async Task Queue
+celery>=5.4.0,<6.0.0
+redis>=5.0.0,<6.0.0
+
+# Logging & Monitoring
+structlog>=24.1.0,<25.0.0
+python-json-logger>=3.2.0,<4.0.0
+prometheus-client>=0.20.0,<1.0.0
+
+# Request helpers
+python-dotenv>=1.0.0,<2.0.0
+requests>=2.31.0,<3.0.0
+openai>=1.0.0,<2.0.0
+jinja2>=3.1.0,<4.0.0
+itsdangerous>=2.1.0,<3.0.0
+markupsafe>=2.1.0,<3.0.0
+pydub>=0.25.0,<1.0.0

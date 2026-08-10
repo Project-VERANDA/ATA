@@ -2,7 +2,6 @@
 # Docker Compose for Dialogue Anonymizer (Complete)
 # ============================================================================
 
-version: "3.8"
 
 services:
   anonymizer:

@@ -1,5 +1,6 @@
 # ============================================================================
 # Dialogue Anonymizer Backend Dockerfile
+# Uses Docker-specific requirements for build compatibility
 # ============================================================================
 
 ARG HTTP_PROXY
@@ -32,9 +33,9 @@ RUN groupadd -r appgroup && useradd -r -g appgroup -d /app -s /sbin/nologin appu
 
 WORKDIR /app
 
-# Copy requirements files
-COPY requirements.txt ./requirements.txt
-COPY requirements-web.txt ./requirements-web.txt
+# Copy Docker-specific requirements files (NOT root requirements.txt)
+COPY docker/requirements.docker.txt ./requirements.txt
+COPY docker/requirements-web.docker.txt ./requirements-web.txt
 
 # Install core ML dependencies (always required)
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \

@@ -1,0 +1,43 @@
+# ============================================================================
+# Docker-Specific Requirements Override
+# Relaxes version constraints for Docker build compatibility
+# ============================================================================
+# This file is used by Docker builds only - DO NOT commit to main workflow
+# 
+# Original requirements.txt remains unchanged for Installer.sh workflow
+
+# Core ML Stack - relaxed versions for compatibility
+numpy>=2.1.0,<3.0.0
+scipy>=1.14.0,<2.0.0
+torch>=2.4.0,<3.0.0
+torchaudio>=2.4.0,<3.0.0
+torchvision>=0.19.0,<1.0.0
+torchcodec>=0.7.0
+ctranslate2>=4.4.0
+
+# Transformers ecosystem - pinned to 4.x (5.x doesn't exist yet)
+transformers>=4.44.0,<5.0.0
+tokenizers>=0.19.0,<1.0.0
+accelerate>=0.33.0,<1.0.0
+huggingface-hub>=0.23.0,<1.0.0
+sentencepiece>=0.2.0
+
+# WhisperX & Pyannote
+whisperx @ git+https://github.com/m-bain/whisperx.git@2cfd7b7c5c7bba144954364db747319b50e8232b
+pyannote.audio>=4.0.7
+
+# NLP & Anonymization
+spacy>=3.8.0,<4.0.0
+thinc>=8.3.0,<9.0.0
+blis>=1.3.0,<2.0.0
+click>=8.1.0,<9.0.0
+typer>=0.12.0,<1.0.0
+neural-tagger>=1.0.0
+torchcrf>=0.7.2
+
+# Audio utilities
+ffmpeg-python>=0.2.0
+PyYAML>=6.0.0,<7.0.0
+
+# ONNX runtime
+onnxruntime>=1.19.0,<2.0.0
