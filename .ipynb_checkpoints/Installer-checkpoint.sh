@@ -10,6 +10,7 @@ SCRIPT_VERSION="4.1"
 ENV_NAME="whisperx"
 TARGET_PYTHON="3.12"
 REQUIREMENTS_SRC="requirements.txt"
+WEB_REQUIREMENTS_SRC="requirements-web.txt"
 
 # --- Argument Defaults ---
 SHOW_HELP=false
@@ -404,17 +405,22 @@ log_section "Installing Python Dependencies"
 
 pip install --upgrade pip setuptools wheel -q
 
-log_info "Installing from $REQUIREMENTS_SRC..."
+log_info "Installing core dependencies from $REQUIREMENTS_SRC..."
 pip install --no-cache-dir -r "$REQUIREMENTS_SRC" -q
 
-# Special case: WhisperX from git
-log_info "Installing WhisperX from git..."
-pip uninstall whisperx -y 2>/dev/null || true
-pip install "git+https://github.com/m-bain/whisperx.git@main" --no-cache-dir -q
-
-# Generate lock file for reference
-log_info "Generating requirements-lock.txt..."
-pip freeze > "$CURRENT_DIR/requirements-lock.txt"
+# Conditional web interface dependencies
+if [ "$WEB_MODE_CHOICE" = "flask" ] || [ "$WEB_MODE_CHOICE" = "both" ]; then
+    log_info "Installing web interface dependencies from $WEB_REQUIREMENTS_SRC..."
+    if [ -f "$WEB_REQUIREMENTS_SRC" ]; then
+        pip install --no-cache-dir -r "$WEB_REQUIREMENTS_SRC" -q
+        log_success "Web dependencies installed"
+    else
+        log_warn "Web requirements file not found: $WEB_REQUIREMENTS_SRC"
+        log_warn "Proceeding without web-specific packages"
+    fi
+else
+    log_info "Skipping web interface dependencies (--skip-flask or --skip-web)"
+fi
 
 # Verify imports
 if python -c "import torch, transformers, spacy" 2>/dev/null; then
@@ -471,19 +477,6 @@ fi
 if [ "$WEB_MODE_CHOICE" = "flask" ] || [ "$WEB_MODE_CHOICE" = "both" ]; then
     log_section "Installing Flask Backend"
     log_warn "$PHASE_OUT_NOTE"
-    
-    pip install flask cryptography flask-cors structlog requests --no-cache-dir -q
-    log_success "Flask backend installed"
-    
-    TTS_CONFIG="piper"
-    pip install "piper-tts>=1.4.2" --no-cache-dir -q
-    
-    # Set up TTS voices in pipeline/tts/voices
-    if [ ! -d "pipeline/tts/voices" ]; then
-        mkdir -p pipeline/tts/voices pipeline/tts/bin
-    fi
-    
-    log_info "TTS configured with Piper backend"
 fi
 
 # --- REACT FRONTEND INSTALLATION ---

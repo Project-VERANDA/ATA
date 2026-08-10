@@ -1,217 +1,83 @@
-# =============================================================================
-# ATA Speech Anonymizer - Docker Compose Configuration
-# Medical Data Processing (PHI/PII)
-# Compatible with Installer.sh + setup_nginx.sh patterns
-# SSL certificates mounted externally (organization certs stay out of images)
-# =============================================================================
+# ============================================================================
+# Docker Compose for Dialogue Anonymizer (Complete)
+# ============================================================================
 
+version: "3.8"
 
 services:
-  # ==========================================================================
-  # NGINX REVERSE PROXY (Matches setup_nginx.sh configuration)
-  # Handles TLS termination + Static files + Reverse proxy to Flask
-  # ==========================================================================
-  nginx:
-    image: nginx:1.25-alpine
-    container_name: ata-nginx
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      # Main nginx config (simplified - delegates to conf.d/)
-      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      # Site configs (includes speech-anonymizer)
-      - ./docker/nginx/sites-available:/etc/nginx/conf.d/:ro
-      # SSL certificates from organization - MOUNTED, NOT BAKED INTO IMAGE
-      - ${SSL_CERT_DIR:-./ssl_certs}:/etc/nginx/ssl:ro
-      # Mount to /etc/letsencrypt for setup_nginx.sh compatibility (optional)
-      - ${SSL_CERT_DIR:-./ssl_certs}:/etc/letsencrypt/live/transcriber.cloud.cci.charite.de/:ro
-      # Static files (from interactive_app)
-      - ${STATIC_FILES_PATH:-./interactive_app/static}:/var/www/static:ro
-      # Nginx logs
-      - ./logs/nginx:/var/log/nginx
-    depends_on:
-      backend:
-        condition: service_healthy
-    networks:
-      - ata-frontend
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "https://localhost/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    security_opt:
-      - no-new-privileges:true
-    cap_add:
-      - NET_BIND_SERVICE
-    cap_drop:
-      - ALL
-
-  # ==========================================================================
-  # BACKEND (Flask + WhisperX + Pyannote + TTS)
-  # Runs Flask with SSL (self-signed) behind nginx reverse proxy
-  backend:
+  anonymizer:
     build:
       context: .
-      dockerfile: docker/backend/Dockerfile
+      dockerfile: Dockerfile
       args:
-        - HTTP_PROXY=http://proxy.charite.de:8080
-        - HTTPS_PROXY=http://proxy.charite.de:8080
-        - NO_PROXY=127.0.0.0/8,localhost,gitlab.cci.charite.de,cci.charite.de
-    container_name: ata-backend
-    dns:      
-      - "8.8.8.8"
-      - "1.1.1.1"
-      - "8.8.4.4"
-    expose:
-      - "5001"
-    env_file:
-      - .env
-    environment:
-      - CUDA_VISIBLE_DEVICES=0
-      - FLASK_ENV=${FLASK_ENV:-development}
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - ATA_HOME=/app
-      - MODEL_DIR=/app/pipeline/model
-      - LD_LIBRARY_PATH=/app/pipeline/tts/bin:/usr/local/nvidia/lib:/usr/local/nvidia/lib64:$LD_LIBRARY_PATH
+        BUILD_WEB: ${BUILD_WEB:-true}
+        DOWNLOAD_MODELS: ${DOWNLOAD_MODELS:-false}
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-}
+    container_name: dialogue-anonymizer
+    ports:
+      - "5000:5000"
     volumes:
-      - ./pipeline:/app/pipeline:rw
-      - ./interactive_app:/app/interactive_app:ro
-      - ./audio_utils.py:/app/audio_utils.py:ro
-      - ./process.py:/app/process.py:ro
-      - backend-uploads:/app/uploads:rw
-      - backend-logs:/app/logs:rw
-      - ${SSL_CERT_DIR:-./ssl_certs}:/app/ssl_certs:ro
-      - backend-tmp:/app/tmp:rw
+      # Persist models outside container
+      - ./pipeline/model:/app/pipeline/model
+      # Mount input/output directories (adjust as needed)
+      - ./data/input:/app/data/input:ro
+      - ./data/output:/app/data/output
+      # Mount config
+      - ./.env:/app/.env:ro
+      # Mount entrypoint scripts
+      - ./scripts:/app/scripts:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TZ=UTC
+      - DOWNLOAD_MODELS=${DOWNLOAD_MODELS:-false}
+      - HUGGINGFACE_TOKEN=${HUGGINGFACE_TOKEN:-}
+      - WHISPER_MODEL=${WHISPER_MODEL:-large}
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
-              count: all
+              count: 1
               capabilities: [gpu]
-    networks:
-      - ata-frontend
-      - ata-backend
+    restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "curl -kf https://localhost:5001/health || exit 1"]
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 120s
-    restart: unless-stopped
-    security_opt:
-      - no-new-privileges:true
+      start_period: 60s
 
-  # ==========================================================================
-  # KEYCLOAK (Authentication / SSO - Optional)
-  # ==========================================================================
-  keycloak:
-    image: quay.io/keycloak/keycloak:26.0
-    container_name: ata-keycloak
-    profiles:
-      - auth  # Only run with: docker-compose --profile auth up
-    expose:
-      - "8080"
-    environment:
-      - KEYCLOAK_ADMIN=${KEYCLOAK_ADMIN:-admin}
-      - KEYCLOAK_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD:-changeme}
-      - KC_DB=dev-file
-      - KC_PROXY_HEADERS=xforwarded
-      - KC_HOSTNAME=${KEYCLOAK_HOSTNAME:-auth.transcriber.cloud.cci.charite.de}
-      - HTTPS_PORT=8443
-    volumes:
-      - keycloak-data:/opt/keycloak/data
-      - ./docker/keycloak/realm-export.json:/opt/keycloak/import/realm-export.json:ro
-    command: start-dev --import-realm
-    networks:
-      - ata-frontend
-      - ata-backend
+  # Optional: React Frontend (uncomment when needed)
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        API_URL: http://${FRONTEND_HOST:-localhost}:5000
+    container_name: dialogue-anonymizer-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      anonymizer:
+        condition: service_healthy
+    restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health/started"]
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/"]
       interval: 30s
-      timeout: 10s
+      timeout: 3s
       retries: 3
-    restart: unless-stopped
 
-  # ==========================================================================
-  # REDIS (Celery Task Queue - Optional)
-  # ==========================================================================
-  redis:
-    image: redis:7-alpine
-    container_name: ata-redis
-    profiles:
-      - queue  # Only run with: docker-compose --profile queue up
-    expose:
-      - "6379"
-    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
-    volumes:
-      - redis-data:/data
-    networks:
-      - ata-backend
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-    restart: unless-stopped
+  # Optional: Redis for Celery tasks (uncomment when using async queue)
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: anonymizer-redis
+  #   ports:
+  #     - "6379:6379"
+  #   volumes:
+  #     - redis_data:/data
+  #   restart: unless-stopped
 
-  # ==========================================================================
-  # POSTGRESQL (Job Metadata Storage - Optional)
-  # ==========================================================================
-  postgres:
-    image: postgres:16-alpine
-    container_name: ata-postgres
-    profiles:
-      - database  # Only run with: docker-compose --profile database up
-    expose:
-      - "5432"
-    environment:
-      - POSTGRES_USER=${POSTGRES_USER:-ata_user}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
-      - POSTGRES_DB=${POSTGRES_DB:-ata_db}
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-      - ./docker/postgres/init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
-    networks:
-      - ata-backend
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ata_user} -d ${POSTGRES_DB:-ata_db}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
-
-# ============================================================================
-# NETWORKS (Segregated for security)
-# ============================================================================
-networks:
-  ata-frontend:
-    driver: bridge
-    ipam:
-      config:
-        - subnet: 172.30.0.0/16
-  ata-backend:
-    driver: bridge
-    internal: true  # No external access - backend only talks to other containers
-    ipam:
-      config:
-        - subnet: 172.31.0.0/16
-
-# ============================================================================
-# VOLUMES (Persistent storage)
-# ============================================================================
-volumes:
-  backend-uploads:
-  backend-logs:
-  backend-tmp:
-  keycloak-data:
-  redis-data:
-  postgres-data:
-
-# Add proxy args to backend service build
-x-proxy-args: &proxy-args
-  HTTP_PROXY: "http://proxy.charite.de:8080"
-  HTTPS_PROXY: "http://proxy.charite.de:8080"
-  NO_PROXY: "127.0.0.0/8,localhost,gitlab.cci.charite.de,cci.charite.de"
+# volumes:
+#   redis_data:
