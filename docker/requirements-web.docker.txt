@@ -3,8 +3,8 @@
 # Extends docker/requirements.docker.txt for web interface
 # ============================================================================
 
-# Base ML dependencies (Docker-optimized)
--r requirements.docker.txt
+# Base ML dependencies (renamed to requirements.txt in Docker build)
+-r requirements.txt
 
 # Flask & Web Server
 Flask==3.0.3
