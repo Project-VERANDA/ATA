@@ -3,8 +3,9 @@ import { Link } from 'react-router-dom';
 import { BrandingLogos } from '../components/BrandingLogos';
 import { useAuth } from '../contexts/AuthContext';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faQuestionCircle, faSignOutAlt, faUser } from '@fortawesome/free-solid-svg-icons';
+import { faQuestionCircle } from '@fortawesome/free-solid-svg-icons';
 import CitationInfo from '../components/CitationInfo';
+import Button from '../components/Button';
 
 const LandingPage: React.FC = () => {
   const [showCitationInfo, setShowCitationInfo] = useState(false);
@@ -35,7 +36,6 @@ const LandingPage: React.FC = () => {
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-            {/* Info Button */}
             <button
               onClick={() => setShowCitationInfo(true)}
               style={{
@@ -51,41 +51,15 @@ const LandingPage: React.FC = () => {
               <FontAwesomeIcon icon={faQuestionCircle} />
             </button>
 
-            {/* Login/Logout */}
             {isAuthenticated ? (
               <>
-                <span style={{ color: '#666', fontSize: '14px' }}>
-                  {user?.name}
-                </span>
+                <span style={{ color: '#666', fontSize: '14px' }}>{user?.name}</span>
                 <Link to="/dashboard">
-                  <button style={{
-                    padding: '10px 20px',
-                    backgroundColor: '#6d4aff',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '6px',
-                    cursor: 'pointer',
-                    fontSize: '14px',
-                  }}>
-                    Dashboard
-                  </button>
+                  <Button variant="primary">Dashboard</Button>
                 </Link>
               </>
             ) : (
-              <button
-                onClick={login}
-                style={{
-                  padding: '10px 20px',
-                  backgroundColor: '#6d4aff',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                  fontSize: '14px',
-                }}
-              >
-                Sign In
-              </button>
+              <Button onClick={login} variant="primary">Sign In</Button>
             )}
           </div>
         </div>
@@ -98,7 +72,6 @@ const LandingPage: React.FC = () => {
         backgroundColor: '#f9fafb',
       }}>
         <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
-          {/* Branding Section */}
           <BrandingLogos variant="landing" />
 
           {/* Hero Section */}
@@ -110,11 +83,7 @@ const LandingPage: React.FC = () => {
             boxShadow: '0 4px 20px rgba(0,0,0,0.08)',
             marginBottom: '40px',
           }}>
-            <h2 style={{ 
-              fontSize: '36px', 
-              margin: '0 0 16px',
-              color: '#1a1a1a',
-            }}>
+            <h2 style={{ fontSize: '36px', margin: '0 0 16px', color: '#1a1a1a' }}>
               Professional Speech Processing Pipeline
             </h2>
             <p style={{ 
@@ -130,48 +99,15 @@ const LandingPage: React.FC = () => {
 
             <div style={{ display: 'flex', justifyContent: 'center', gap: '20px', flexWrap: 'wrap' }}>
               {!isAuthenticated ? (
-                <button
-                  onClick={login}
-                  style={{
-                    padding: '16px 40px',
-                    fontSize: '18px',
-                    backgroundColor: '#6d4aff',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '8px',
-                    cursor: 'pointer',
-                  }}
-                >
+                <Button onClick={login} variant="primary" size="lg">
                   Get Started →
-                </button>
+                </Button>
               ) : (
                 <Link to="/submit-job">
-                  <button style={{
-                    padding: '16px 40px',
-                    fontSize: '18px',
-                    backgroundColor: '#6d4aff',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '8px',
-                    cursor: 'pointer',
-                  }}>
-                    Submit New Job
-                  </button>
+                  <Button variant="primary" size="lg">Submit New Job</Button>
                 </Link>
               )}
-              <a href="#features">
-                <button style={{
-                  padding: '16px 40px',
-                  fontSize: '18px',
-                  backgroundColor: '#fff',
-                  color: '#6d4aff',
-                  border: '2px solid #6d4aff',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                }}>
-                  Learn More
-                </button>
-              </a>
+              <Button variant="outline" size="lg">Learn More</Button>
             </div>
           </div>
 
@@ -219,12 +155,9 @@ const LandingPage: React.FC = () => {
             fontSize: '14px',
             color: '#ccc',
           }}>
-            <div>
-              © 2026 Berlin Institute of Health (BIH)<br />
-              All rights reserved.
-            </div>
+            <div>© 2026 Berlin Institute of Health (BIH)<br />All rights reserved.</div>
             <div style={{ textAlign: 'right' }}>
-              <p style={{ margin: 0 }}>Contact: <a href="mailto:luke.flanagan@bih-charite.de" style={{ color: '#fff' }}>luke.flanagan@bih-charite.de</a></p>
+              <p style={{ margin: 0 }}>Contact: <a href="mailto:speech-tech@bih-charite.de" style={{ color: '#fff' }}>speech-tech@bih-charite.de</a></p>
               <p style={{ margin: '4px 0 0' }}>Version: 1.0.0 | Last Updated: August 2026</p>
             </div>
           </div>
