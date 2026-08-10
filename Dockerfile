@@ -11,8 +11,9 @@ ENV NO_PROXY=${NO_PROXY}
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=UTC
 
+# Fix typo: ca-certifies → ca-certificates
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl wget git ca-certifies ffmpeg \
+    curl wget git ca-certificates ffmpeg \
     libgomp1 libsm6 libxext6 \
     && rm -rf /var/lib/apt/lists/*
 
@@ -20,13 +21,14 @@ RUN groupadd -r appgroup && useradd -r -g appgroup -d /app -s /sbin/nologin appu
 
 WORKDIR /app
 
-# Only copy requirements.txt (skip lock file)
-COPY docker/backend/requirements.txt ./requirements.txt
+# Copy from project root (adjust path based on your build context)
+COPY requirements.txt ./requirements.txt
 
-# Install directly from requirements.txt
+# Install dependencies
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
     pip install --no-cache-dir -r requirements.txt
 
+# Copy application code
 COPY --chown=appuser:appgroup interactive_app/ ./interactive_app/
 COPY --chown=appuser:appgroup pipeline/ ./pipeline/
 COPY --chown=appuser:appgroup interactive_app/audio_utils.py ./audio_utils.py

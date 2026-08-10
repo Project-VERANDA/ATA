@@ -9,7 +9,7 @@ set -o pipefail
 SCRIPT_VERSION="4.1"
 ENV_NAME="whisperx"
 TARGET_PYTHON="3.12"
-REQUIREMENTS_SRC="docker/backend/requirements.txt"
+REQUIREMENTS_SRC="requirements.txt"
 
 # --- Argument Defaults ---
 SHOW_HELP=false

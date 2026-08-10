@@ -1,0 +1,73 @@
+# Core framework
+Flask==3.0.3
+Werkzeug==3.0.6
+gunicorn==22.0.0
+
+# ML Stack (CUDA 13.0 compatible)
+numpy>=2.5.1,<3.0.0
+scipy>=1.18.0
+torch>=2.12.0,<3.0.0
+torchaudio>=2.12.0,<3.0.0
+torchvision>=0.27.0,<1.0.0
+torchcodec>=0.7.0
+ctranslate2>=4.4.0
+
+# Transformers ecosystem
+transformers>=5.14.0
+tokenizers>=0.22.0
+accelerate>=1.14.0
+huggingface-hub>=0.25.0,<1.0.0
+sentencepiece>=0.2.0
+
+# WhisperX & Pyannote
+whisperx @ git+https://github.com/m-bain/whisperx.git@2cfd7b7c5c7bba144954364db747319b50e8232b
+pyannote.audio>=4.0.7
+
+# NLP & Anonymization
+spacy>=3.8.14
+thinc>=8.3.13
+blis>=1.3.0
+click>=8.4.0
+typer>=0.27.0
+neural-tagger>=1.0.0
+torchcrf>=0.7.2
+
+# Utilities
+python-dotenv>=1.0.1
+requests>=2.32.3
+openai>=1.0.0
+pandas>=3.0.0
+ffmpeg-python>=0.2.0
+pydub>=0.25.1
+PyYAML>=6.0.2
+jinja2>=3.1.4
+itsdangerous>=2.2.0
+markupsafe>=2.1.5
+
+# TTS
+piper-tts>=1.4.2
+onnxruntime>=1.19.0
+
+# Security & Auth
+cryptography>=44.0.0
+PyJWT>=2.9.0
+Authlib>=1.4.1
+
+# Async task queue
+celery>=5.4.0
+redis>=5.2.0
+
+# Database (for job tracking)
+SQLAlchemy>=2.0.36
+psycopg2-binary>=2.9.10
+
+# CORS & API
+flask-cors>=5.0.0
+flask-limiter>=3.10.0
+
+# Logging
+structlog>=24.4.0
+python-json-logger>=3.2.0
+
+# Monitoring
+prometheus-client>=0.21.0
