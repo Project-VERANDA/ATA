@@ -30,6 +30,7 @@ thinc>=8.3.13
 blis>=1.3.0
 click>=8.4.0
 typer>=0.27.0
+neural-tagger>=1.0.0
 torchcrf>=0.7.2
 
 # Audio utilities (minimal)
