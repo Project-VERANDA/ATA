@@ -24,9 +24,8 @@ log_success() { echo -e "${GREEN}[ENTRYPOINT]${NC} $*"; }
 log_warn()    { echo -e "${YELLOW}[ENTRYPOINT]${NC} $*"; }
 log_error()   { echo -e "${RED}[ENTRYPOINT]${NC} $*" >&2; }
 
-# Ensure model directory exists and has proper permissions
+# Ensure model directory exists
 mkdir -p "$MODEL_DIR"
-chown -R appuser:appgroup "$MODEL_DIR" 2>/dev/null || true
 
 echo ""
 log_info "=========================================="
@@ -36,7 +35,7 @@ echo ""
 
 # Check if models exist
 count_whisper() {
-    ls -1 "$MODEL_DIR"/Systran* 2>/dev/null | wc -l || echo 0
+    find "$MODEL_DIR" -maxdepth 1 -name "Systran*" -type d 2>/dev/null | wc -l
 }
 
 count_pyannote() {
@@ -57,65 +56,68 @@ log_info "  Pyannote:   $PYANNOTE_COUNT model"
 log_info "  PII NER:    $PII_COUNT model"
 echo ""
 
-# Download models if requested and none exist
+# Download models if requested and missing
 if [ "$DOWNLOAD_MODELS" = "true" ]; then
     log_info "DOWNLOAD_MODELS=true - downloading models if missing..."
     
-    if [ "$WHISPER_COUNT" -eq 0 ]; then
-        log_info "Downloading WhisperX model ($WHISPER_MODEL)..."
-        python "$APP_DIR/scripts/download_models.py" \
-            --whisper "$WHISPER_MODEL" \
-            --base-path "$APP_DIR" \
-            ${HF_TOKEN:+--hf-token "$HF_TOKEN"}
+    # Use the existing download_models.py script
+    DL_SCRIPT="$APP_DIR/scripts/download_models.py"
+    
+    if [ ! -f "$DL_SCRIPT" ]; then
+        log_warn "Download script not found at $DL_SCRIPT"
+        log_info "Available scripts:"
+        ls -la "$APP_DIR/scripts/" 2>/dev/null || echo "  No scripts directory"
     else
-        log_info "WhisperX models already present"
+        if [ "$WHISPER_COUNT" -eq 0 ]; then
+            log_info "Downloading WhisperX model ($WHISPER_MODEL)..."
+            python "$DL_SCRIPT" \
+                --whisper "$WHISPER_MODEL" \
+                --base-path "$APP_DIR" \
+                ${HF_TOKEN:+--hf-token "$HF_TOKEN"} || \
+                log_warn "WhisperX download failed - continuing anyway"
+        else
+            log_info "WhisperX models already present"
+        fi
+        
+        if [ "$PYANNOTE_COUNT" -eq 0 ]; then
+            log_info "Downloading Pyannote model..."
+            python "$DL_SCRIPT" \
+                --pyannote \
+                --base-path "$APP_DIR" \
+                ${HF_TOKEN:+--hf-token "$HF_TOKEN"} || \
+                log_warn "Pyannote download failed - continuing anyway"
+        else
+            log_info "Pyannote model already present"
+        fi
+        
+        if [ "$PII_COUNT" -eq 0 ]; then
+            log_info "Downloading PII NER model..."
+            python "$DL_SCRIPT" \
+                --pii \
+                --base-path "$APP_DIR" \
+                ${HF_TOKEN:+--hf-token "$HF_TOKEN"} || \
+                log_warn "PII model download failed - continuing anyway"
+        else
+            log_info "PII NER model already present"
+        fi
     fi
     
-    if [ "$PYANNOTE_COUNT" -eq 0 ]; then
-        log_info "Downloading Pyannote model..."
-        python "$APP_DIR/scripts/download_models.py" \
-            --pyannote \
-            --base-path "$APP_DIR" \
-            ${HF_TOKEN:+--hf-token "$HF_TOKEN"}
-    else
-        log_info "Pyannote model already present"
-    fi
-    
-    if [ "$PII_COUNT" -eq 0 ]; then
-        log_info "Downloading PII NER model..."
-        python "$APP_DIR/scripts/download_models.py" \
-            --pii \
-            --base-path "$APP_DIR" \
-            ${HF_TOKEN:+--hf-token "$HF_TOKEN"}
-    else
-        log_info "PII NER model already present"
-    fi
-    
-    log_success "Model download complete"
+    log_success "Model download phase complete"
     echo ""
 else
-    log_info "DOWNLOAD_MODELS=false - skipping automatic model download"
-    log_info "Models will be mounted from volume or downloaded on-demand by application"
+    log_info "DOWNLOAD_MODELS=false - models expected from volume mount"
+    log_info "  If models are missing, set DOWNLOAD_MODELS=true in .env"
     echo ""
 fi
 
 # Verify .env exists
 if [ ! -f "$APP_DIR/.env" ]; then
     log_warn ".env not found - application may use defaults or fail"
-    log_info "  Mount .env file via docker-compose volumes"
 fi
 
-# Check required directories
-for dir in pipeline interactive_app; do
-    if [ ! -d "$APP_DIR/$dir" ]; then
-        log_warn "Directory missing: $APP_DIR/$dir"
-    fi
-done
-
 echo ""
-log_info "Starting Flask application..."
+log_info "Starting application: $@"
 echo ""
 
-# Execute the main command (passed as arguments to entrypoint)
-# This allows docker compose CMD to be respected
+# Execute the CMD passed by Docker
 exec "$@"

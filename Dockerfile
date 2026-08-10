@@ -1,6 +1,5 @@
 # ============================================================================
-# Dialogue Anonymizer Dockerfile
-# Supports optional features via build arguments
+# Dialogue Anonymizer Backend Dockerfile
 # ============================================================================
 
 ARG HTTP_PROXY
@@ -10,9 +9,8 @@ ARG NO_PROXY
 # Build arguments for optional features
 ARG BUILD_WEB=true
 ARG DOWNLOAD_MODELS=false
-ARG PYTHON_VERSION=3.12
 
-FROM python:${PYTHON_VERSION}-slim-bookworm
+FROM python:3.12-slim-bookworm
 
 # Proxy configuration
 ENV HTTP_PROXY=${HTTP_PROXY}
@@ -53,23 +51,18 @@ COPY --chown=appuser:appgroup interactive_app/ ./interactive_app/
 COPY --chown=appuser:appgroup pipeline/ ./pipeline/
 COPY --chown=appuser:appgroup interactive_app/audio_utils.py ./audio_utils.py
 
-# Create model directory with proper permissions for optional model downloads at runtime
-RUN mkdir -p /app/pipeline/model && chown -R appuser:appgroup /app/pipeline/model
+# Copy scripts from docker/scripts/
+COPY --chown=appuser:appgroup docker/scripts/ ./scripts/
 
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+# Create model directory with proper permissions
+RUN mkdir -p /app/pipeline/model && chown -R appuser:appgroup /app/pipeline/model
 
 USER appuser
 
-# Health check endpoint (adjust if your Flask app uses different path)
 EXPOSE 5000
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:5000/health || exit 1
 
-# Entry point script for optional model initialization
-# COPY entrypoint.sh ./entrypoint.sh
-# RUN chmod +x ./entrypoint.sh
-# ENTRYPOINT ["./entrypoint.sh"]
-
+ENTRYPOINT ["bash", "/app/scripts/entrypoint.sh"]
 CMD ["python", "-m", "flask", "run", "--host=0.0.0.0", "--port=5000"]
