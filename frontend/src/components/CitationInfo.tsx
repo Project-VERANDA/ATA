@@ -134,8 +134,14 @@ const CitationInfo: React.FC = () => {
         <h4 style={{ margin: '0 0 12px', fontSize: '16px' }}>Acknowledgments</h4>
         <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '14px', lineHeight: '1.6' }}>
           <li>This tool was developed as part of the VERANDA project between AG Health Data Privacy at the Berlin Institute of Health at the Charité and Dr. Roland Roller at the Speech and Language Group at the German Center for Artificial Intelligence (Deutsches Forschungszentrum für Künstliche Intelligenz GmbH, DFKI) .</li>
-          <li></li>
-          <li></li>
+          <li>The Anonymization engine is driven by DialogPII: A multilingual dataset of synthetic dialog transcripts to detect personal information. https://huggingface.co/DFKI-SLT/multilingual_DialogPII_NER</li>
+          <li>Transcription Engine driven by WhisperX (https://github.com/m-bain/whisperX)<br/>
+		(@article{bain2022whisperx,<br/>
+  		title={WhisperX: Time-Accurate Speech Transcription of Long-Form Audio},<br/>
+  		author={Bain, Max and Huh, Jaesung and Han, Tengda and Zisserman, Andrew},<br/>
+  		journal={INTERSPEECH 2023},<br/>
+  		year={2023}<br/>
+		}</li>
         </ul>
       </div>
 
