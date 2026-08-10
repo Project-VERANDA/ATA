@@ -314,7 +314,7 @@ Solution:
   *   [ ] Create a new production interface.
       * [ ] Add buttons for the interface to enable/disable each feature in the pipeline.
   *   [ ] Move from Flask to a production service.
-  *   [ ] Integrate Docker
+  *   [x] Integrate Docker
   *   [ ] Integrate Keycloak Auth
     *   [ ] Connect to Charité Keycloak instance.
     *   [ ] Spin-up local Keycloak server if no existing service detected.
@@ -385,6 +385,7 @@ Solution:
 * [ ] Text-to-speech
   *   [x] Add text to speech for the output transcripts.
   *   [x] Improved TTS: Switch from Google TTS to a local text-to-speech engine.
+  *   [ ] Get Coquit xtts working.
 
 * [ ] 
 
