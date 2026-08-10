@@ -4,7 +4,7 @@ ARG NO_PROXY
 
 FROM python:3.12-slim-bookworm
 
-# Proxy configuration
+# Apply proxy env vars
 ENV HTTP_PROXY=${HTTP_PROXY}
 ENV HTTPS_PROXY=${HTTPS_PROXY}
 ENV NO_PROXY=${NO_PROXY}
@@ -12,20 +12,25 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=UTC
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl wget git ca-certifies ffmpeg \
-    libgomp1 libsm6 libxext6 \
+    curl \
+    wget \
+    git \
+    ca-certificates \
+    ffmpeg \
+    libgomp1 \
+    libsm6 \
+    libxext6 \
     && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd -r appgroup && useradd -r -g appgroup -d /app -s /sbin/nologin appuser
 
 WORKDIR /app
 
-# Only copy requirements.txt (skip lock file)
 COPY docker/backend/requirements.txt ./requirements.txt
+COPY ../../requirements-lock.txt ./requirements-lock.txt
 
-# Install directly from requirements.txt
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
-    pip install --no-cache-dir -r requirements.txt
+    pip install --no-cache-dir -r requirements-lock.txt
 
 COPY --chown=appuser:appgroup interactive_app/ ./interactive_app/
 COPY --chown=appuser:appgroup pipeline/ ./pipeline/
