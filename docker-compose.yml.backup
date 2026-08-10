@@ -55,10 +55,6 @@ services:
     build:
       context: .
       dockerfile: docker/backend/Dockerfile
-      args:
-        - HTTP_PROXY=http://proxy.charite.de:8080
-        - HTTPS_PROXY=http://proxy.charite.de:8080
-        - NO_PROXY=127.0.0.0/8,localhost,gitlab.cci.charite.de,cci.charite.de
     container_name: ata-backend
     dns:      
       - "8.8.8.8"
