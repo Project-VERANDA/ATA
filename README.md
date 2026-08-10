@@ -318,6 +318,7 @@ Solution:
   *   [ ] Integrate Keycloak Auth
     *   [ ] Connect to Charité Keycloak instance.
     *   [ ] Spin-up local Keycloak server if no existing service detected.
+  *   [ ] Update with correct and full citation information & contact information.
 * [ ] Transcription & Audio Processing
   *  [x] Disable the translation feature of WhisperX.
   *  [ ] Confidence scoring	❌ Missing	Can't filter low-quality segments
