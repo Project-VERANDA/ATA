@@ -33,6 +33,9 @@ services:
       - DOWNLOAD_MODELS=${DOWNLOAD_MODELS:-false}
       - HUGGINGFACE_TOKEN=${HUGGINGFACE_TOKEN:-}
       - WHISPER_MODEL=${WHISPER_MODEL:-large}
+      - FLASK_APP=interactive_app/app.py
+      - FLASK_RUN_HOST=0.0.0.0
+      - FLASK_RUN_PORT=5000
     deploy:
       resources:
         reservations:
@@ -62,9 +65,9 @@ services:
     container_name: dialogue-anonymizer-frontend
     ports:
       - "8080:80"  # Changed to 8080 to avoid conflict with anonymizer port
-    depends_on:
-      anonymizer:
-        condition: service_healthy
+    #depends_on:
+    #  anonymizer:
+        #condition: service_healthy
     restart: unless-stopped
     
     # DNS configuration to fix EAI_AGAIN errors
