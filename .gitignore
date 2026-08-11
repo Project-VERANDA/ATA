@@ -45,6 +45,8 @@ ssl_certs/.generated_by_ata
 ssl_certs/.backups/
 ssl_certs/server.crt
 ssl_certs/server.key
+/etc/letsencrypt/**
+config.sh
 
 # Unrelated files
 *.csv

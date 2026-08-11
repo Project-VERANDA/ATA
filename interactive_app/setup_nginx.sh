@@ -20,6 +20,12 @@ SPEECH_SITE="/etc/nginx/sites-enabled/speech-anonymizer"
 SPEECH_SITE_BACKUP="/etc/nginx/backups/speech-anonymizer.$(date +%Y%m%d_%H%M%S).bak"
 MAIN_CONF_BACKUP="/etc/nginx/backups/nginx.conf.$(date +%Y%m%d_%H%M%S).bak"
 
+if [[ -f "config.sh" ]]; then
+    source config.sh
+fi
+
+ENABLE_CSP_HEADER="true"
+
 MAX_BODY_SIZE="5G"
 PROXY_READ_TIMEOUT="600s"
 PROXY_SEND_TIMEOUT="600s"
@@ -83,26 +89,99 @@ check_nginx() {
 check_ssl_certificates() {
     print_info "Checking for SSL certificates..."
     
+    # ==========================================================
+    # PRIORITY 1: Let's Encrypt / Certbot (Production Preferred)
+    # ==========================================================
+    CERTBOT_CERT="/etc/letsencrypt/live/transcriber.cloud.cci.charite.de/fullchain.pem"
+    CERTBOT_KEY="/etc/letsencrypt/live/transcriber.cloud.cci.charite.de/privkey.pem"
+    
+    if [[ -f "$CERTBOT_CERT" && -f "$CERTBOT_KEY" ]]; then
+        print_success "Certbot/Let's Encrypt certificates detected!"
+        print_info "Using: $CERTBOT_CERT"
+        
+        export SSL_CERT_FILE="$CERTBOT_CERT"
+        export SSL_KEY_FILE="$CERTBOT_KEY"
+        
+        # Validate certificate and key match
+        local cert_modulus=$(openssl x509 -noout -modulus -in "$CERTBOT_CERT" 2>/dev/null | openssl md5 | awk '{print $NF}')
+        local key_modulus=$(openssl rsa -noout -modulus -in "$CERTBOT_KEY" 2>/dev/null | openssl md5 | awk '{print $NF}')
+        
+        if [[ "$cert_modulus" != "$key_modulus" ]]; then
+            print_error "Let's Encrypt certificate and key do not match!"
+            print_info "Cert MD5: $cert_modulus"
+            print_info "Key MD5:  $key_modulus"
+            return 1
+        fi
+        
+        # Check expiry
+        local expiry_date=$(openssl x509 -enddate -noout -in "$CERTBOT_CERT" 2>/dev/null | cut -d= -f2)
+        local expiry_epoch=$(date -d "$expiry_date" +%s 2>/dev/null)
+        local now_epoch=$(date +%s)
+        local days_left=$(( (expiry_epoch - now_epoch) / 86400 ))
+        
+        print_success "Certificate expires: $expiry_date ($days_left days remaining)"
+        
+        if [[ "$days_left" -lt 14 ]]; then
+            print_warning "Certificate expires in less than 14 days! Run: sudo certbot renew"
+        fi
+        
+        return 0
+    fi
+    
+    # ==========================================================
+    # PRIORITY 2: Self-Signed from ATA/ssl_certs/ (Development)
+    # ==========================================================
     if [[ -f "$SSL_CERT_FILE" && -f "$SSL_KEY_FILE" ]]; then
-        print_success "Certificates found: $SSL_CERT_DIR"
+        print_success "Self-signed certificates found: $SSL_CERT_DIR"
+        print_info "Using: $SSL_CERT_FILE"
+        
+        # Validate certificate and key match
+        local cert_modulus=$(openssl x509 -noout -modulus -in "$SSL_CERT_FILE" 2>/dev/null | openssl md5 | awk '{print $NF}')
+        local key_modulus=$(openssl rsa -noout -modulus -in "$SSL_KEY_FILE" 2>/dev/null | openssl md5 | awk '{print $NF}')
+        
+        if [[ "$cert_modulus" != "$key_modulus" ]]; then
+            print_error "Self-signed certificate and key do not match!"
+            print_info "Cert MD5: $cert_modulus"
+            print_info "Key MD5:  $key_modulus"
+            return 1
+        fi
+        
+        # Check expiry
+        local expiry_date=$(openssl x509 -enddate -noout -in "$SSL_CERT_FILE" 2>/dev/null | cut -d= -f2)
+        local expiry_epoch=$(date -d "$expiry_date" +%s 2>/dev/null)
+        local now_epoch=$(date +%s)
+        local days_left=$(( (expiry_epoch - now_epoch) / 86400 ))
+        
+        print_info "Certificate expires: $expiry_date ($days_left days remaining)"
+        
+        return 0
+    fi
+    
+    # ==========================================================
+    # NO CERTIFICATES FOUND - Error Out
+    # ==========================================================
+    print_error "No SSL certificates found!"
+    echo ""
+    echo "Options:"
+    echo "  1. Install Certbot and request a Let's Encrypt certificate:"
+    echo "     sudo apt install certbot python3-certbot-nginx"
+    echo "     sudo certbot --nginx -d transcriber.cloud.cci.charite.de"
+    echo ""
+    echo "  2. Generate self-signed certificates using ATA script:"
+    echo "     ./ssl_certs/setup_ssl.sh"
+    echo ""
+    echo "  3. Continue with HTTP only (NOT recommended for medical data):"
+    read -p "Continue with HTTP only? [y/N] " -n 1 -r
+    echo
+    
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        export USE_HTTPS=false
+        print_warning "WARNING: Running without SSL/TLS encryption!"
+        print_warning "Medical data will be transmitted in plain text."
         return 0
     else
-        print_warning "No certificates found in $SSL_CERT_DIR!"
-        echo ""
-        echo -e "${YELLOW}Please run the SSL certificate setup script first:${NC}"
-        echo "  cd $ATA_PROJECT_ROOT"
-        echo "  ./ssl_certs/setup_ssl.sh"
-        echo ""
-        echo "Or continue without SSL (HTTP only):"
-        read -p "Continue with HTTP only? [y/N] " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            export USE_HTTPS=false
-            return 0
-        else
-            print_error "Aborted - SSL certificates are required for HTTPS"
-            exit 1
-        fi
+        print_error "Aborted - SSL certificates are required for secure operation"
+        exit 1
     fi
 }
 
@@ -152,6 +231,27 @@ fix_malformed_site_configs() {
 
 create_site_config() {
     print_info "Creating nginx site configuration..."
+    
+    # ============================================
+    # CERTIFICATE PRIORITY: LET'S ENCRYPT > SELF-SIGNED
+    # ============================================
+    CERTBOT_CERT="${LETSENCRYPT_FULLCHAIN_PATH:-/etc/letsencrypt/live/${DOMAIN_NAME}/fullchain.pem}"
+    CERTBOT_KEY="${LETSENCRYPT_PRIVKEY_PATH:-/etc/letsencrypt/live/${DOMAIN_NAME}/privkey.pem}"
+    
+    # Check for Certbot/Let's Encrypt certificates first
+    if [[ -z "$SSL_CERT_FILE" || -z "$SSL_KEY_FILE" ]]; then
+        print_error "SSL_CERT_FILE or SSL_KEY_FILE not set!"
+        exit 1
+    fi
+    
+    # Determine certificate type for logging
+    if [[ "$SSL_CERT_FILE" == "/etc/letsencrypt"* ]]; then
+        print_success "Using Let's Encrypt certificates."
+        USE_LETSENCRYPT=true
+    else
+        print_info "Using self-signed certificates."
+        USE_LETSENCRYPT=false
+    fi
     
     # ============================================
     # UPSTREAM AND RATE LIMITING
@@ -283,7 +383,8 @@ server {
     
     server_name transcriber.cloud.cci.charite.de localhost 127.0.0.1 _;
 
-    # SSL Configuration (external termination — from ssl_certs/ directory)
+    # SSL Configuration (external termination)
+    # Uses Let's Encrypt if available, otherwise self-signed from ATA/ssl_certs/
     ssl_certificate ${SSL_CERT_FILE};
     ssl_certificate_key ${SSL_KEY_FILE};
     ssl_protocols TLSv1.2 TLSv1.3;
@@ -294,7 +395,7 @@ server {
 
     # ===================================================
     # UPSTREAM SSL SETTINGS (Flask serves HTTPS with self-signed certs)
-    # Applied at server level for all proxied locations
+    # Applied at server level for all proxied locations to Flask
     # ===================================================
     proxy_ssl_verify off;
     proxy_ssl_server_name on;
@@ -305,6 +406,16 @@ server {
     add_header X-Content-Type-Options "nosniff" always;
     add_header X-XSS-Protection "1; mode=block" always;
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+EOF
+
+        # Add Content-Security-Policy header (optional, for medical data security)
+        if [[ -n "$ENABLE_CSP_HEADER" ]]; then
+            cat >> "$SPEECH_SITE" << 'EOF'
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self';" always;
+EOF
+        fi
+
+        cat >> "$SPEECH_SITE" << EOF
 
     # Large upload settings
     client_max_body_size 5G;
@@ -579,7 +690,7 @@ show_summary() {
     echo "  • Backend protocol:     ${FLASK_PROTOCOL} (Flask on port ${FLASK_PORT})"
     echo "  • Max upload size:      ${MAX_BODY_SIZE}"
     echo "  • Rate limiting:        api:10m (10 req/s)"
-    echo "  • External SSL certs:   ${SSL_CERT_DIR}"
+    echo "  • External SSL certs:   ${SSL_CERT_FILE}"
     echo "  • Upstream SSL:         Enabled for Flask (self-signed certs)"
     echo "  • Site config:          ${SPEECH_SITE}"
     echo ""
