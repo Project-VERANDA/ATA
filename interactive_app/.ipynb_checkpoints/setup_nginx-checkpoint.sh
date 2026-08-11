@@ -210,7 +210,7 @@ server {
     location ^~ /app/ {
         limit_req zone=api burst=50 nodelay;
 
-        proxy_pass http://127.0.0.1:8080;
+        proxy_pass https://127.0.0.1:8080;
         proxy_http_version 1.1;
 
         proxy_set_header Host $host;
@@ -238,7 +238,7 @@ server {
     # HEALTH CHECK (/health)
     # ===================================================
     location /health {
-        proxy_pass http://127.0.0.1:5001/health;
+        proxy_pass https://127.0.0.1:5001/health;
         access_log off;
         limit_req zone=api burst=100 nodelay;
     }
@@ -249,7 +249,7 @@ server {
     location / {
         limit_req zone=api burst=20 nodelay;
 
-        proxy_pass http://127.0.0.1:5001;
+        proxy_pass https://127.0.0.1:5001;
         proxy_http_version 1.1;
 
         proxy_set_header Host $host;
@@ -308,7 +308,7 @@ server {
     location ^~ /app/ {
         limit_req zone=api burst=50 nodelay;
 
-        proxy_pass http://127.0.0.1:${REACT_PORT};
+        proxy_pass https://127.0.0.1:${REACT_PORT};
         proxy_http_version 1.1;
 
         proxy_set_header Host \$host;
@@ -523,7 +523,7 @@ verify_changes() {
     fi
     
     # Check React port
-    if grep -q "proxy_pass http://127.0.0.1:${REACT_PORT}" "$SPEECH_SITE"; then
+    if grep -q "proxy_pass https://127.0.0.1:${REACT_PORT}" "$SPEECH_SITE"; then
         print_success "React proxy port: ${REACT_PORT} (verified)"
     else
         print_error "React proxy port NOT configured!"
