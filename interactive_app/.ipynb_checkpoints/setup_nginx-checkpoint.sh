@@ -336,7 +336,7 @@ server {
     # HEALTH CHECK (/health)
     # ===================================================
     location /health {
-        proxy_pass https://speech_anonymizer/health;
+        proxy_pass http://speech_anonymizer/health;
         proxy_ssl_verify off;
         proxy_ssl_server_name on;
         access_log off;
@@ -347,7 +347,7 @@ server {
     # UPLOAD ENDPOINT (/upload)
     # ===================================================
     location /upload {
-        proxy_pass https://speech_anonymizer/upload;
+        proxy_pass http://speech_anonymizer/upload;
         proxy_ssl_verify off;
         proxy_ssl_server_name on;
 
@@ -365,7 +365,7 @@ server {
     # RECORDING TRANSCRIBE (/transcribe_recording)
     # ===================================================
     location /transcribe_recording {
-        proxy_pass https://speech_anonymizer/transcribe_recording;
+        proxy_pass http://speech_anonymizer/transcribe_recording;
         proxy_ssl_verify off;
         proxy_ssl_server_name on;
 
@@ -383,7 +383,7 @@ server {
     # DOWNLOAD ENDPOINTS (/download/)
     # ===================================================
     location /download/ {
-        proxy_pass https://speech_anonymizer/download/;
+        proxy_pass http://speech_anonymizer/download/;
         proxy_ssl_verify off;
         proxy_ssl_server_name on;
 
@@ -397,7 +397,7 @@ server {
     location / {
         limit_req zone=api burst=20 nodelay;
 
-        proxy_pass https://speech_anonymizer;
+        proxy_pass http://speech_anonymizer;
         proxy_http_version 1.1;
 
         proxy_ssl_verify off;
@@ -531,7 +531,7 @@ verify_changes() {
     fi
     
     # Check backend port
-    if grep -q "proxy_pass https://speech_anonymizer" "$SPEECH_SITE" || grep -q "proxy_pass http://127.0.0.1:${FLASK_PORT}" "$SPEECH_SITE"; then
+    if grep -q "proxy_pass http://127.0.0.1:5001;" "$SPEECH_SITE" || grep -q "proxy_pass http://127.0.0.1:${FLASK_PORT}" "$SPEECH_SITE"; then
         print_success "Backend proxy: Flask on port ${FLASK_PORT} (verified)"
     else
         print_error "Backend proxy NOT configured!"
