@@ -1,0 +1,279 @@
+# =============================================================================
+# ATA Speech Anonymizer - Production Docker Compose Override
+# Hardened security settings for medical/PHI data processing
+# Extends docker-compose.yml with production-specific configurations
+# =============================================================================
+
+
+services:
+  # ==========================================================================
+  # NGINX - Production Overrides
+  # ==========================================================================
+  nginx:
+    profiles:
+      - prod  # Only run with: docker-compose --profile prod up
+    volumes:
+      # Production nginx config (may differ from dev)
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      # Site configs
+      - ./docker/nginx/sites-available:/etc/nginx/conf.d/:ro
+      # Production SSL certificates (different path than dev - organization certs)
+      # Ensure this points to your production cert location (NOT self-signed)
+      - ${PROD_SSL_CERT_DIR:-./ssl_certs/prod}:/etc/nginx/ssl:ro
+      # ALSO mount for setup_nginx.sh compatibility
+      - ${PROD_SSL_CERT_DIR:-./ssl_certs/prod}:/etc/letsencrypt/live/transcriber.cloud.cci.charite.de/:ro
+      # Static files (read-only in production)
+      - ${STATIC_FILES_PATH:-./interactive_app/static}:/var/www/static:ro
+      # Nginx logs with rotation
+      - ./logs/nginx:/var/log/nginx
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '1.0'
+          memory: 512M
+    # Security hardening (production only)
+    read_only: true
+    tmpfs:
+      - /tmp:size=100M
+      - /var/cache/nginx:size=50M
+      - /var/run:size=10M
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=./docker/nginx/seccomp-profile.json  # Optional: custom seccomp profile
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        compress: "true"
+
+  # ==========================================================================
+  # BACKEND - Production Overrides
+  # ==========================================================================
+  backend:
+    profiles:
+      - prod  # Only run with: docker-compose --profile prod up
+    build:
+      target: production  # Use multi-stage build if available
+    volumes:
+      # Source code (read-only in production - no runtime modifications)
+      - ./pipeline:/app/pipeline:ro
+      - ./interactive_app:/app/interactive_app:ro
+      - ./audio_utils.py:/app/audio_utils.py:ro
+      - ./process.py:/app/process.py:ro
+      # Generated files (write access required for processing)
+      - uploads-volume:/app/uploads:rw
+      - backend-logs:/app/logs:rw
+      # SSL certificates (organization production certs)
+      - ${PROD_SSL_CERT_DIR:-./ssl_certs/prod}:/app/ssl_certs:ro
+      # Temporary processing space
+      - backend-tmp:/app/tmp:rw
+    environment:
+      - FLASK_ENV=production
+      - LOG_LEVEL=WARNING
+      - DEBUG=false
+    deploy:
+      resources:
+        limits:
+          cpus: '8.0'
+          memory: 32G
+        reservations:
+          cpus: '4.0'
+          memory: 16G
+    # Security hardening (production only)
+    read_only: true
+    tmpfs:
+      - /tmp:size=1G
+      - /app/tmp:size=1G
+      - /run:size=50M
+    cap_drop:
+      - ALL
+    cap_add:
+      - SYS_PTRACE  # Required for CUDA debugging (remove if not needed)
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=./docker/backend/seccomp-profile.json
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+        compress: "true"
+    # Restart policy with exponential backoff
+    restart: on-failure:5
+
+  # ==========================================================================
+  # KEYCLOAK - Production Overrides (if using authentication)
+  # ==========================================================================
+  keycloak:
+    profiles:
+      - prod
+    environment:
+      - KC_DB=postgres
+      - KC_DB_URL=jdbc:postgresql://postgres:5432/${POSTGRES_DB:-ata_db}
+      - KC_DB_USERNAME=${POSTGRES_USER:-ata_user}
+      - KC_DB_PASSWORD=${POSTGRES_PASSWORD:-changeme}
+      - KEYCLOAK_ADMIN=${KEYCLOAK_ADMIN:-admin}
+      - KEYCLOAK_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD_FILE:-/run/secrets/keycloak_admin_password}
+      - KC_PROXY_HEADERS=xforwarded
+      - KC_HOSTNAME=${KEYCLOAK_HOSTNAME:-auth.transcriber.cloud.cci.charite.de}
+      - KC_HTTPS_ENABLED=true
+      - KC_HTTPS_CERTIFICATE=/etc/keycloak/ssl/server.crt
+      - KC_HTTPS_CERTIFICATE_KEY=/etc/keycloak/ssl/server.key
+    volumes:
+      - keycloak-prod-data:/opt/keycloak/data
+      - ./docker/keycloak/realm-export.json:/opt/keycloak/import/realm-export.json:ro
+      # Production SSL certs for Keycloak
+      - ${PROD_SSL_CERT_DIR:-./ssl_certs/prod}:/etc/keycloak/ssl:ro
+    secrets:
+      - keycloak_admin_password
+    command: start --import-realm
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+        reservations:
+          cpus: '1.0'
+          memory: 1G
+
+  # ==========================================================================
+  # REDIS - Production Overrides
+  # ==========================================================================
+  redis:
+    profiles:
+      - prod
+    command: redis-server --appendonly yes --maxmemory 1gb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-prod-data:/data
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ==========================================================================
+  # POSTGRESQL - Production Overrides
+  # ==========================================================================
+  postgres:
+    profiles:
+      - prod
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-ata_user}
+      - POSTGRES_PASSWORD_FILE=/run/secrets/postgres_password
+      - POSTGRES_DB=${POSTGRES_DB:-ata_db}
+    volumes:
+      - postgres-prod-data:/var/lib/postgresql/data
+      - ./docker/postgres/init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    secrets:
+      - postgres_password
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 8G
+        reservations:
+          cpus: '1.0'
+          memory: 4G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # ==========================================================================
+  # SECURE NGINX (Alternative: Full Production Nginx Stack)
+  # ==========================================================================
+  # Uncomment if you want separate nginx for production SSL termination
+  # nginx-ssl:
+  #   image: nginx:1.25-alpine
+  #   container_name: ata-nginx-prod
+  #   ports:
+  #     - "80:80"
+  #     - "443:443"
+  #   volumes:
+  #     - ./docker/nginx/nginx-prod.conf:/etc/nginx/nginx.conf:ro
+  #     - ${PROD_SSL_CERT_DIR}:/etc/nginx/ssl:ro
+  #     - ./logs/nginx:/var/log/nginx
+  #   depends_on:
+  #     - backend
+  #   networks:
+  #     - ata-frontend
+  #   restart: always
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         cpus: '1.0'
+  #         memory: 512M
+
+# ============================================================================
+# SECRETS MANAGEMENT (Docker Secrets - NOT in .env)
+# ============================================================================
+secrets:
+  postgres_password:
+    file: ./secrets/postgres_password.txt
+  keycloak_admin_password:
+    file: ./secrets/keycloak_admin_password.txt
+  jwt_secret:
+    file: ./secrets/jwt_secret.txt
+  encryption_key:
+    file: ./secrets/encryption_key.txt
+
+# ============================================================================
+# NETWORKS (Same as development - segregated)
+# ============================================================================
+networks:
+  ata-frontend:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/16
+  ata-backend:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.31.0.0/16
+
+# ============================================================================
+# VOLUMES (Production-specific named volumes)
+# ============================================================================
+volumes:
+  backend-uploads:
+    driver: local
+  backend-logs:
+    driver: local
+  backend-tmp:
+    driver: local
+  keycloak-data:
+    driver: local
+  keycloak-prod-data:
+    driver: local
+  redis-data:
+    driver: local
+  redis-prod-data:
+    driver: local
+  postgres-data:
+    driver: local
+  postgres-prod-data:
+    driver: local
+  uploads-volume:
+    driver: local
