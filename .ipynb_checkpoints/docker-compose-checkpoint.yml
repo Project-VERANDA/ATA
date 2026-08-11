@@ -15,7 +15,7 @@ services:
         NO_PROXY: ${NO_PROXY:-}
     container_name: dialogue-anonymizer
     ports:
-      - "5000:5000"
+      - "5001:5000"
     volumes:
       # Persist models outside container
       - ./pipeline/model:/app/pipeline/model
@@ -43,7 +43,7 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
-    restart: unless-ststopped
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 30s
