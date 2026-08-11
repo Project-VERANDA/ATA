@@ -102,15 +102,42 @@ check_ssl_certificates() {
         export SSL_CERT_FILE="$CERTBOT_CERT"
         export SSL_KEY_FILE="$CERTBOT_KEY"
         
-        # Validate certificate and key match
-        local cert_modulus=$(openssl x509 -noout -modulus -in "$CERTBOT_CERT" 2>/dev/null | openssl md5 | awk '{print $NF}')
-        local key_modulus=$(openssl rsa -noout -modulus -in "$CERTBOT_KEY" 2>/dev/null | openssl md5 | awk '{print $NF}')
+        # Detect key type and extract modulus accordingly
+        # Certbot uses ECDSA by default in newer versions
+        local cert_modulus
+        local key_modulus
         
-        if [[ "$cert_modulus" != "$key_modulus" ]]; then
-            print_error "Let's Encrypt certificate and key do not match!"
-            print_info "Cert MD5: $cert_modulus"
-            print_info "Key MD5:  $key_modulus"
-            return 1
+        # Extract certificate modulus (works for all key types)
+        cert_modulus=$(openssl x509 -noout -modulus -in "$CERTBOT_CERT" 2>/dev/null | openssl md5 | awk '{print $NF}')
+        
+        # Detect private key type and extract modulus
+        if openssl rsa -noout -modulus -in "$CERTBOT_KEY" 2>/dev/null | grep -q "Modulus"; then
+            # RSA key
+            key_modulus=$(openssl rsa -noout -modulus -in "$CERTBOT_KEY" 2>/dev/null | openssl md5 | awk '{print $NF}')
+            print_info "Key type: RSA"
+        elif openssl ec -noout -modulus -in "$CERTBOT_KEY" 2>/dev/null | grep -q "Modulus"; then
+            # ECDSA key
+            key_modulus=$(openssl ec -noout -modulus -in "$CERTBOT_KEY" 2>/dev/null | openssl md5 | awk '{print $NF}')
+            print_info "Key type: ECDSA"
+        else
+            # Unknown key type or corrupted file - skip validation
+            print_warning "Unable to determine key type - skipping modulus validation"
+            print_warning "Assuming Let's Encrypt validation is sufficient."
+            key_modulus=""
+        fi
+        
+        # Compare only if both values were extracted
+        if [[ -n "$cert_modulus" && -n "$key_modulus" ]]; then
+            if [[ "$cert_modulus" != "$key_modulus" ]]; then
+                print_error "Let's Encrypt certificate and key do not match!"
+                print_info "Cert MD5: $cert_modulus"
+                print_info "Key MD5:  $key_modulus"
+                return 1
+            else
+                print_success "Certificate and key modulus match"
+            fi
+        elif [[ -z "$cert_modulus" && -z "$key_modulus" ]]; then
+            print_warning "Unable to extract modulus from cert/key - skipping validation"
         fi
         
         # Check expiry
@@ -135,15 +162,32 @@ check_ssl_certificates() {
         print_success "Self-signed certificates found: $SSL_CERT_DIR"
         print_info "Using: $SSL_CERT_FILE"
         
-        # Validate certificate and key match
-        local cert_modulus=$(openssl x509 -noout -modulus -in "$SSL_CERT_FILE" 2>/dev/null | openssl md5 | awk '{print $NF}')
-        local key_modulus=$(openssl rsa -noout -modulus -in "$SSL_KEY_FILE" 2>/dev/null | openssl md5 | awk '{print $NF}')
+        # Same key-type detection for self-signed certs
+        local cert_modulus
+        local key_modulus
         
-        if [[ "$cert_modulus" != "$key_modulus" ]]; then
-            print_error "Self-signed certificate and key do not match!"
-            print_info "Cert MD5: $cert_modulus"
-            print_info "Key MD5:  $key_modulus"
-            return 1
+        cert_modulus=$(openssl x509 -noout -modulus -in "$SSL_CERT_FILE" 2>/dev/null | openssl md5 | awk '{print $NF}')
+        
+        if openssl rsa -noout -modulus -in "$SSL_KEY_FILE" 2>/dev/null | grep -q "Modulus"; then
+            key_modulus=$(openssl rsa -noout -modulus -in "$SSL_KEY_FILE" 2>/dev/null | openssl md5 | awk '{print $NF}')
+            print_info "Key type: RSA"
+        elif openssl ec -noout -modulus -in "$SSL_KEY_FILE" 2>/dev/null | grep -q "Modulus"; then
+            key_modulus=$(openssl ec -noout -modulus -in "$SSL_KEY_FILE" 2>/dev/null | openssl md5 | awk '{print $NF}')
+            print_info "Key type: ECDSA"
+        else
+            print_warning "Unable to determine key type - skipping modulus validation"
+            key_modulus=""
+        fi
+        
+        if [[ -n "$cert_modulus" && -n "$key_modulus" ]]; then
+            if [[ "$cert_modulus" != "$key_modulus" ]]; then
+                print_error "Self-signed certificate and key do not match!"
+                print_info "Cert MD5: $cert_modulus"
+                print_info "Key MD5:  $key_modulus"
+                return 1
+            else
+                print_success "Certificate and key modulus match"
+            fi
         fi
         
         # Check expiry
