@@ -64,7 +64,7 @@ services:
       network: host
     container_name: dialogue-anonymizer-frontend
     ports:
-      - "80:80"  # Changed to 8080 to avoid conflict with anonymizer port
+      - "8080:80"  # Changed to 8080 to avoid conflict with anonymizer port
     #depends_on:
     #  anonymizer:
         #condition: service_healthy
