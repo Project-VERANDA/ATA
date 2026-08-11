@@ -56,7 +56,7 @@ services:
       context: .
       dockerfile: frontend/Dockerfile
       args:
-        API_URL: ${API_URL:-http://localhost:5000}
+        API_URL: ${API_URL:-http://localhost:5001}
         HTTP_PROXY: ${HTTP_PROXY:-}
         HTTPS_PROXY: ${HTTPS_PROXY:-}
         NO_PROXY: ${NO_PROXY:-}
