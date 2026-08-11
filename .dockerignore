@@ -1,89 +1,58 @@
-# =============================================================================
-# DOCKER-SPECIFIC EXCLUSIONS (FIXED - docker/ ALLOWED)
-# =============================================================================
+# Build outputs
+dist/
+build/
 
-# Docker build artifacts (not other Dockerfiles)
-docker-compose*.yml
-Dockerfile*
-.docker/
-.dockerignore
-.docker_env
+# Node modules (recreated during build)
+node_modules/
 
-# Build artifacts not needed in containers
-*.deb
-*.rpm
-*.tar.gz
-!requirements.lock.txt
+# Data Mounts - CRITICAL (prevents 8GB context)
+../Data_Mount/
+../VERANDA_DataMount/
+../pipeline/audios/
+../pipeline/videos/
+../pipeline/transcripts/
+../ModelTraining/
+*.wav
+*.mp3
+*.flac
+*.ogg
+*.json
+*.audio
+*.txt
 
-# Development configs
-.env.test
-.env.dev
-.env.local
-.env.*.local
-.env.test
+# Git
+.git/
+.gitignore
 
-# Test files
-*_test.py
-test_*.py
-tests/
-pytest.ini
-.pytest_cache/
-.coverage
-htmlcov/
-.tox/
-coverage.xml
+# Environment
+.env
+.env.*
 
-# Build logs
-build_logs/
-*.log
-!logs/.gitkeep
-
-# Documentation not needed in runtime
-*.md
-!README.md
-docs/
-*.pdf
-*.pptx
-
-# IDE files
-.idea/
+# IDE
 .vscode/
+.idea/
 *.swp
 *.swo
-*.swn
-*~
+.DS_Store
+
+# Logs
+logs/
+*.log
+
+# Temporary
+tmp/
+temp/
+
+# Python
+__pycache__/
+*.pyc
+.pyo
+.pyd
 
 # Backup files
-*.bak
 *.backup
-*.old
+*.bak
+*~
 
-# Temporary Docker build cache
-.tmp/
-tmp/
-__pycache__/
-
-# Scripts not needed in production (except scripts/)
-Installer.sh
-setup_nginx.sh
-ssl_certs/setup_ssl.sh
-*.sh
-!scripts/*.sh
-
-# HuggingFace cache (downloaded at runtime)
-.huggingface/
-hf_cache/
-transformers_cache/
-
-# Node modules (built separately for frontend)
-node_modules/
-frontend/node_modules/
-
-# React build output (copied during build)
-frontend/dist/
-frontend/build/
-
-# Large test datasets
-test_data/
-sample_audio/
-sample_video/
+# SSL certs (use secrets instead)
+../ssl_certs/
