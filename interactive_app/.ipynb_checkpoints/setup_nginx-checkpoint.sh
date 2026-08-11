@@ -35,7 +35,7 @@ STATIC_FILES_PATH="${ATA_PROJECT_ROOT}/interactive_app/static"
 
 # Ports (MUST match your services)
 REACT_PORT=8080          # React frontend (Docker container)
-FLASK_PORT=5001          # Flask backend (HTTPS)
+FLASK_PORT=5002          # Flask backend (HTTPS)
 FLASK_PROTOCOL="https"   # Flask runs with SSL enabled
 FLASK_APP="app.py"       # Flask app filename
 

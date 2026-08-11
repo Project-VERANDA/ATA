@@ -15,7 +15,7 @@ services:
         NO_PROXY: ${NO_PROXY:-}
     container_name: dialogue-anonymizer
     ports:
-      - "5001:5000"
+      - "5002:5000"
     volumes:
       # Persist models outside container
       - ./pipeline/model:/app/pipeline/model
