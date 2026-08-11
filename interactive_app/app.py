@@ -1295,31 +1295,31 @@ def generate_beep_route():
 
 if __name__ == '__main__':
     use_https = os.getenv('USE_HTTPS', 'true').lower() == 'true'
+    port = int(os.getenv('FLASK_RUN_PORT', '5001'))
+    host = os.getenv('FLASK_RUN_HOST', '127.0.0.1')
 
-    # Initialize certificates (handles existing/user-provided detection)
     if use_https:
         cert_file, key_file = create_self_signed_cert()
         if cert_file and key_file and os.path.exists(cert_file):
-            logger.info(f"Using SSL certificate: {cert_file}")
-            logger.info(f"Using SSL key: {key_file}")
-            
-            try:
-                ssl_context = (cert_file, key_file)
-                
-                if cert_file and key_file:
-                    logger.info("Starting server with HTTPS (using ATA certificate)")
-                    app.run(debug=False, host='0.0.0.0', port=5001, ssl_context=ssl_context, threaded=True)
-                else:
-                    logger.info("Starting server with HTTPS (ad-hoc certificate)")
-                    app.run(debug=False, host='0.0.0.0', port=5001, ssl_context='adhoc', threaded=True)
-            except Exception as e:
-                logger.error(f"Failed to start HTTPS server: {e}")
-                logger.info("Falling back to HTTP")
-                app.run(debug=False, host='0.0.0.0', port=5001, threaded=True)
+            logger.info(f"Starting Flask with HTTPS on {host}:{port}")
+            logger.info(f"  SSL cert: {cert_file}")
+            logger.info(f"  SSL key:  {key_file}")
+            app.run(
+                debug=False,
+                host=host,
+                port=port,
+                ssl_context=(cert_file, key_file),
+                threaded=True
+            )
         else:
-            # Fall back to ad-hoc if cert generation failed
-            logger.info("Starting server with HTTPS (ad-hoc certificate)")
-            app.run(debug=False, host='0.0.0.0', port=5001, ssl_context='adhoc', threaded=True)
+            logger.warning("Certificate generation failed — falling back to ad-hoc SSL")
+            app.run(
+                debug=False,
+                host=host,
+                port=port,
+                ssl_context='adhoc',
+                threaded=True
+            )
     else:
-        logger.info("Starting server with HTTP")
-        app.run(debug=False, host='0.0.0.0', port=5001, threaded=True)
+        logger.warning("Starting Flask with HTTP (USE_HTTPS=false) — NOT recommended for medical data")
+        app.run(debug=False, host=host, port=port, threaded=True)
