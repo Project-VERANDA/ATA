@@ -1,0 +1,58 @@
+# Build outputs
+dist/
+build/
+
+# Node modules (recreated during build)
+node_modules/
+
+# Data Mounts - CRITICAL (prevents 8GB context)
+../Data_Mount/
+../VERANDA_DataMount/
+../pipeline/audios/
+../pipeline/videos/
+../pipeline/transcripts/
+../ModelTraining/
+*.wav
+*.mp3
+*.flac
+*.ogg
+*.json
+*.audio
+*.txt
+
+# Git
+.git/
+.gitignore
+
+# Environment
+.env
+.env.*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+logs/
+*.log
+
+# Temporary
+tmp/
+temp/
+
+# Python
+__pycache__/
+*.pyc
+.pyo
+.pyd
+
+# Backup files
+*.backup
+*.bak
+*~
+
+# SSL certs (use secrets instead)
+../ssl_certs/
