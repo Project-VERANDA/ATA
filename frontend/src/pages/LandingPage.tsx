@@ -21,7 +21,6 @@ function LandingPage() {
         background: 'linear-gradient(135deg, var(--bih-blue) 0%, var(--bih-blue-70) 100%)',
         color: 'var(--bih-white)', padding: 'var(--spacing-3xl) 0 calc(var(--spacing-3xl) * 1.5)', position: 'relative', overflow: 'hidden',
       }}>
-        {/* Background Pattern */}
         <div style={{
           position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
           opacity: 0.05, zIndex: 0,
@@ -170,7 +169,6 @@ function LandingPage() {
                   {f.desc}
                 </p>
                 
-                {/* Decorative corner accent */}
                 <div style={{
                   position: 'absolute',
                   top: '-20px',
@@ -316,25 +314,43 @@ function LandingPage() {
             <div>
               <h4 style={{ fontWeight: 700, marginBottom: 'var(--spacing-md)', color: 'var(--bih-coral)' }}>Project</h4>
               <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                <li style={{ marginBottom: 'var(--spacing-sm)'><a href="/app/" style={{ color: 'rgba(255,255,255,0.7)', textDecoration: 'none' }}>Home</a></li>
-                <li style={{ marginBottom: 'var(--spacing-sm)'><a href="/app/signin" style={{ color: 'rgba(255,255,255,0.7)', textDecoration: 'none' }}>Sign In</a></li>
-                <li style={{ marginBottom: 'var(--spacing-sm)'><a href="/app/dashboard" style={{ color: 'rgba(255,255,255,0.7)', textDecoration: 'none' }}>Dashboard</a></li>
+                <li style={{ marginBottom: 'var(--spacing-sm)' }}>
+                  <a href="/app/" style={{ color: 'rgba(255,255,255,0.7)', textDecoration: 'none' }}>Home</a>
+                </li>
+                <li style={{ marginBottom: 'var(--spacing-sm)' }}>
+                  <a href="/app/signin" style={{ color: 'rgba(255,255,255,0.7)', textDecoration: 'none' }}>Sign In</a>
+                </li>
+                <li style={{ marginBottom: 'var(--spacing-sm)' }}>
+                  <a href="/app/dashboard" style={{ color: 'rgba(255,255,255,0.7)', textDecoration: 'none' }}>Dashboard</a>
+                </li>
               </ul>
             </div>
             <div>
               <h4 style={{ fontWeight: 700, marginBottom: 'var(--spacing-md)', color: 'var(--bih-coral)' }}>Documentation</h4>
               <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                <li style={{ marginBottom: 'var(--spacing-sm)'><a href="#" style={{ color: 'rgba(255,255,255,0.7)', textDecoration: 'none' }}>User Guide</a></li>
-                <li style={{ marginBottom: 'var(--spacing-sm)'><a href="#" style={{ color: 'rgba(255,255,255,0.7)', textDecoration: 'none' }}>API Reference</a></li>
-                <li style={{ marginBottom: 'var(--spacing-sm)'><a href="#" style={{ color: 'rgba(255,255,255,0.7)', textDecoration: 'none' }}>Privacy Policy</a></li>
+                <li style={{ marginBottom: 'var(--spacing-sm)' }}>
+                  <a href="#" style={{ color: 'rgba(255,255,255,0.7)', textDecoration: 'none' }}>User Guide</a>
+                </li>
+                <li style={{ marginBottom: 'var(--spacing-sm)' }}>
+                  <a href="#" style={{ color: 'rgba(255,255,255,0.7)', textDecoration: 'none' }}>API Reference</a>
+                </li>
+                <li style={{ marginBottom: 'var(--spacing-sm)' }}>
+                  <a href="#" style={{ color: 'rgba(255,255,255,0.7)', textDecoration: 'none' }}>Privacy Policy</a>
+                </li>
               </ul>
             </div>
             <div>
               <h4 style={{ fontWeight: 700, marginBottom: 'var(--spacing-md)', color: 'var(--bih-coral)' }}>Contact</h4>
               <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                <li style={{ marginBottom: 'var(--spacing-sm)'><span style={{ color: 'rgba(255,255,255,0.7)' }}>Charité Berlin</span></li>
-                <li style={{ marginBottom: 'var(--spacing-sm)'><span style={{ color: 'rgba(255,255,255,0.7)' }}>BIH Center</span></li>
-                <li style={{ marginBottom: 'var(--spacing-sm)'><span style={{ color: 'rgba(255,255,255,0.7)' }}>DFKI GmbH</span></li>
+                <li style={{ marginBottom: 'var(--spacing-sm)' }}>
+                  <span style={{ color: 'rgba(255,255,255,0.7)' }}>Charité Berlin</span>
+                </li>
+                <li style={{ marginBottom: 'var(--spacing-sm)' }}>
+                  <span style={{ color: 'rgba(255,255,255,0.7)' }}>BIH Center</span>
+                </li>
+                <li style={{ marginBottom: 'var(--spacing-sm)' }}>
+                  <span style={{ color: 'rgba(255,255,255,0.7)' }}>DFKI GmbH</span>
+                </li>
               </ul>
             </div>
           </div>
