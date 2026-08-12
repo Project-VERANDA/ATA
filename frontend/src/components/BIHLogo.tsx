@@ -6,52 +6,27 @@ interface BIHLogoProps {
 }
 
 function BIHLogo({ variant = 'standard', size = 'md' }: BIHLogoProps) {
+  // Adjust these dimensions based on how the SVG looks in your app
   const sizes = {
-    sm: { bar: '28px', barH: '3px', text: '1.2em', sub: '0.6em' },
-    md: { bar: '40px', barH: '4px', text: '1.5em', sub: '0.7em' },
-    lg: { bar: '56px', barH: '5px', text: '2em', sub: '0.8em' },
+    sm: { width: '80px', height: 'auto' },
+    md: { width: '120px', height: 'auto' },
+    lg: { width: '180px', height: 'auto' },
   };
   const s = sizes[size];
 
   return (
-    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '12px' }}>
-      <div 
+    <a href="/app/" style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}>
+      <img 
+        src="/logos/Online_251121A_BIH_Logo_RGB_BIH_Logo_StandardClaim_ENG_BlauKorall.svg"
+        alt="BIH at Charité" 
         style={{ 
-          width: s.bar, 
-          height: s.barH, 
-          background: 'var(--bih-coral, #ea5451)', // Fallback
-          flexShrink: 0 
-        }} 
+          width: s.width, 
+          height: s.height,
+          flexShrink: 0,
+          display: 'block'
+        }}
       />
-      {variant === 'standard' ? (
-        <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.2 }}>
-          <span style={{ 
-            fontSize: s.text, 
-            fontWeight: 700, 
-            color: 'var(--text-primary, #003754)', // Fallback
-            fontFamily: 'var(--font-primary, Trebuchet MS)' // Fallback
-          }}>
-            BIH
-          </span>
-          <span style={{ 
-            fontSize: s.sub, 
-            color: 'var(--text-muted, #6b7c8d)', // Fallback
-            fontFamily: 'var(--font-primary, Trebuchet MS)' // Fallback
-          }}>
-            at Charité
-          </span>
-        </div>
-      ) : (
-        <span style={{ 
-          fontSize: s.text, 
-          fontWeight: 700, 
-          color: 'var(--text-primary, #003754)', // Fallback
-          fontFamily: 'var(--font-primary, Trebuchet MS)' // Fallback
-        }}>
-          BIH
-        </span>
-      )}
-    </div>
+    </a>
   );
 }
 

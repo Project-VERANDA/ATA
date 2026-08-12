@@ -2,7 +2,7 @@ import React, { useContext, useState } from 'react';
 import { Link, useLocation, Outlet, Navigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
-import BIHLogo from '../components/BIHLogo';
+import BIHLogo from './BIHLogo';
 import { useAuth as useAuthHook } from '../contexts/AuthContext';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
