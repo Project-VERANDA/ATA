@@ -17,6 +17,19 @@ function LandingPage() {
 
   return (
     <div style={{ minHeight: '100vh', fontFamily: 'var(--font-primary)' }}>
+      {/* Top Navigation Bar */}
+      <nav style={{
+        background: 'var(--bg-primary)',
+        padding: 'var(--spacing-md) var(--spacing-xl)',
+        borderBottom: '1px solid var(--border-color)',
+        boxShadow: 'var(--shadow-sm)',
+      }}>
+        <div className="container" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <img src={bihLogoPath} alt="BIH Center" style={{ height: '3rem', width: 'auto', objectFit: 'contain' }} />
+          <Link to="/signin" className="btn btn-primary">Get Started →</Link>
+        </div>
+      </nav>
+
       {/* Hero Section */}
       <section style={{
         background: 'linear-gradient(135deg, var(--bih-blue) 0%, var(--bih-blue-70) 100%)',
@@ -29,71 +42,46 @@ function LandingPage() {
           backgroundSize: '40px 40px',
         }} />
         
-        <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '0 var(--spacing-lg)', position: 'relative', zIndex: 1 }}>
-          {/* Partner Logos Banner */}
-          <div style={{
-            background: 'rgba(255,255,255,0.08)',
-            backdropFilter: 'blur(10px)',
-            padding: 'var(--spacing-md) var(--spacing-xl)',
-            borderRadius: 'var(--radius-lg)',
-            display: 'inline-block',
-            marginBottom: 'var(--spacing-2xl)',
-            border: '1px solid rgba(255,255,255,0.2)',
+        <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '0 var(--spacing-lg)', position: 'relative', zIndex: 1, textAlign: 'center' }}>
+          <h1 style={{ 
+            fontSize: 'clamp(2.5rem, 6vw, var(--font-size-5xl))', 
+            fontWeight: 700, 
+            marginBottom: 'var(--spacing-lg)', 
+            lineHeight: 1.1,
+            textShadow: '0 2px 20px rgba(0,0,0,0.2)',
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-xl)', justifyContent: 'center', flexWrap: 'wrap' }}>
-              <img src={bihLogoPath} alt="BIH Center" style={{ height: '4rem', width: 'auto', objectFit: 'contain' }} />
-              <span style={{ fontSize: '2rem', fontWeight: 700, color: 'rgba(255,255,255,0.6)' }}>+</span>
-              <img src={dfkiLogoPath} alt="DFKI" style={{ height: '3.5rem', width: 'auto', objectFit: 'contain' }} />
-              <span style={{ fontSize: '2rem', fontWeight: 700, color: 'rgba(255,255,255,0.6)' }}>=</span>
-              <img src={verandaLogoPath} alt="VERANDA" style={{ height: '4.5rem', width: 'auto', objectFit: 'contain' }} />
-            </div>
-            <p style={{ textAlign: 'center', marginTop: 'var(--spacing-md)', fontSize: '0.95rem', opacity: 0.85, letterSpacing: '1px', textTransform: 'uppercase' }}>
-              Innovative Research Partnership
-            </p>
-          </div>
-
-          {/* Main Hero Content */}
-          <div style={{ textAlign: 'center', maxWidth: '900px', margin: '0 auto' }}>
-            <h1 style={{ 
-              fontSize: 'clamp(2.5rem, 6vw, var(--font-size-5xl))', 
-              fontWeight: 700, 
-              marginBottom: 'var(--spacing-lg)', 
-              lineHeight: 1.1,
-              textShadow: '0 2px 20px rgba(0,0,0,0.2)',
+            Speech <span style={{ color: 'var(--bih-coral)' }}>Anonymizer</span>
+          </h1>
+          
+          <p style={{ 
+            fontSize: 'var(--font-size-xl)', 
+            maxWidth: '750px', 
+            margin: '0 auto var(--spacing-2xl)', 
+            opacity: 0.95,
+            lineHeight: 1.7,
+          }}>
+            Record, upload, transcribe, edit, and anonymize speech with advanced AI models. 
+            Protect participant privacy while preserving data utility for research.
+          </p>
+          
+          <div style={{ 
+            display: 'flex', 
+            gap: 'var(--spacing-lg)', 
+            justifyContent: 'center', 
+            flexWrap: 'wrap',
+          }}>
+            <Link to="/signin" className="btn btn-primary btn-lg" style={{
+              boxShadow: '0 8px 30px rgba(234, 84, 81, 0.4)',
             }}>
-              Speech <span style={{ color: 'var(--bih-coral)' }}>Anonymizer</span>
-            </h1>
+              Get Started →
+            </Link>
             
-            <p style={{ 
-              fontSize: 'var(--font-size-xl)', 
-              maxWidth: '750px', 
-              margin: '0 auto var(--spacing-2xl)', 
-              opacity: 0.95,
-              lineHeight: 1.7,
+            <a href="#features" className="btn btn-outline btn-lg" style={{ 
+              borderColor: 'var(--bih-white)', 
+              color: 'var(--bih-white)',
             }}>
-              Record, upload, transcribe, edit, and anonymize speech with advanced AI models. 
-              Protect participant privacy while preserving data utility for research.
-            </p>
-            
-            <div style={{ 
-              display: 'flex', 
-              gap: 'var(--spacing-lg)', 
-              justifyContent: 'center', 
-              flexWrap: 'wrap',
-            }}>
-              <Link to="/signin" className="btn btn-primary btn-lg" style={{
-                boxShadow: '0 8px 30px rgba(234, 84, 81, 0.4)',
-              }}>
-                Get Started →
-              </Link>
-              
-              <a href="#features" className="btn btn-outline btn-lg" style={{ 
-                borderColor: 'var(--bih-white)', 
-                color: 'var(--bih-white)',
-              }}>
-                Learn More ↓
-              </a>
-            </div>
+              Learn More ↓
+            </a>
           </div>
         </div>
       </section>
@@ -169,16 +157,6 @@ function LandingPage() {
                 }}>
                   {f.desc}
                 </p>
-                
-                <div style={{
-                  position: 'absolute',
-                  top: '-20px',
-                  right: '-20px',
-                  width: '80px',
-                  height: '80px',
-                  background: 'linear-gradient(135deg, rgba(0,55,84,0.05) 0%, rgba(0,85,170,0.05) 100%)',
-                  borderRadius: '50%',
-                }} />
               </div>
             ))}
           </div>
@@ -192,14 +170,14 @@ function LandingPage() {
         color: 'var(--bih-white)',
       }}>
         <div className="container">
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 'var(--spacing-2xl)' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 'var(--spacing-2xl)', textAlign: 'center' }}>
             {[
               { value: '11+', label: 'Languages Supported' },
               { value: '100%', label: 'Local Processing' },
               { value: 'GDPR', label: 'Compliant Design' },
               { value: 'Open', label: 'Source Available' },
             ].map((stat, i) => (
-              <div key={i} style={{ textAlign: 'center' }}>
+              <div key={i}>
                 <div style={{ 
                   fontSize: 'clamp(2rem, 4vw, var(--font-size-3xl))', 
                   fontWeight: 700, 
@@ -214,6 +192,48 @@ function LandingPage() {
               </div>
             ))}
           </div>
+        </div>
+      </section>
+
+      {/* Partner Section - With Logos Above Footer */}
+      <section style={{ 
+        padding: 'var(--spacing-3xl) 0', 
+        background: 'var(--bg-secondary)',
+        textAlign: 'center',
+        borderTop: '1px solid var(--border-color)',
+      }}>
+        <div className="container">
+          <h3 style={{ 
+            fontSize: 'var(--font-size-2xl)', 
+            fontWeight: 700, 
+            color: 'var(--text-primary)', 
+            marginBottom: 'var(--spacing-xl)',
+          }}>
+            Developed By
+          </h3>
+          <div style={{ 
+            display: 'flex', 
+            gap: 'var(--spacing-3xl)', 
+            justifyContent: 'center', 
+            alignItems: 'center', 
+            flexWrap: 'wrap',
+            marginBottom: 'var(--spacing-xl)',
+          }}>
+            <div>
+              <img src={bihLogoPath} alt="BIH Center" style={{ height: '4rem', width: 'auto', objectFit: 'contain', marginBottom: 'var(--spacing-md)' }} />
+              <p style={{ fontSize: 'var(--font-size-lg)', color: 'var(--text-primary)', fontWeight: 600 }}>BIH Center</p>
+              <p style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>Charité Berlin</p>
+            </div>
+            <div style={{ fontSize: '2rem', color: 'var(--bih-coral)', fontWeight: 700 }}>&</div>
+            <div>
+              <img src={dfkiLogoPath} alt="DFKI" style={{ height: '3.5rem', width: 'auto', objectFit: 'contain', marginBottom: 'var(--spacing-md)' }} />
+              <p style={{ fontSize: 'var(--font-size-lg)', color: 'var(--text-primary)', fontWeight: 600 }}>DFKI GmbH</p>
+              <p style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>Kaiserslautern</p>
+            </div>
+          </div>
+          <p style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>
+            Joint initiative under the VERANDA project
+          </p>
         </div>
       </section>
 
@@ -264,13 +284,10 @@ function LandingPage() {
           }}>
             Start Your First Job
           </Link>
-          <p style={{ marginTop: 'var(--spacing-lg)', fontSize: 'var(--font-size-sm)', opacity: 0.8 }}>
-            No credit card required • Research accounts available
-          </p>
         </div>
       </section>
 
-      {/* Footer - Partner Acknowledgement */}
+      {/* Footer */}
       <footer style={{ 
         background: '#0a1f2e', 
         color: 'var(--bih-white)', 
@@ -278,34 +295,6 @@ function LandingPage() {
         borderTop: '1px solid rgba(255,255,255,0.1)',
       }}>
         <div className="container">
-          <div style={{ marginBottom: 'var(--spacing-2xl)' }}>
-            <p style={{ 
-              fontSize: 'var(--font-size-lg)', 
-              opacity: 0.7, 
-              marginBottom: 'var(--spacing-xl)',
-              textAlign: 'center',
-            }}>
-              Developed by BIH & DFKI researchers
-            </p>
-            <div style={{ 
-              display: 'flex', 
-              gap: 'var(--spacing-2xl)', 
-              justifyContent: 'center', 
-              alignItems: 'center', 
-              flexWrap: 'wrap',
-            }}>
-              <img src={bihLogoPath} alt="BIH Center" style={{ height: '3.5rem', width: 'auto', opacity: 0.9 }} />
-              <img src={dfkiLogoPath} alt="DFKI" style={{ height: '3rem', width: 'auto', opacity: 0.9 }} />
-            </div>
-          </div>
-          
-          <hr style={{ 
-            border: 'none', 
-            height: '1px', 
-            background: 'rgba(255,255,255,0.1)', 
-            marginBottom: 'var(--spacing-2xl)',
-          }} />
-          
           <div style={{ 
             display: 'grid', 
             gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', 
@@ -355,6 +344,13 @@ function LandingPage() {
               </ul>
             </div>
           </div>
+          
+          <hr style={{ 
+            border: 'none', 
+            height: '1px', 
+            background: 'rgba(255,255,255,0.1)', 
+            marginBottom: 'var(--spacing-xl)',
+          }} />
           
           <div style={{ textAlign: 'center' }}>
             <p style={{ fontSize: 'var(--font-size-sm)', opacity: 0.5 }}>
