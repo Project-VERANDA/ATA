@@ -76,6 +76,8 @@ services:
       - 1.1.1.1
     dns_opt:
       - use-ndots
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/app/"]
       interval: 30s
