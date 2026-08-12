@@ -21,12 +21,50 @@ from io import BytesIO
 from dotenv import load_dotenv
 import json
 import requests
+
+
+import torch
+torch.backends.cudnn.enabled = False
+torch.backends.cudnn.benchmark = False
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
+# ============================================================================
+
 CHAT_AI_API_KEY = os.getenv('CHAT_AI_API_KEY')
 CHAT_AI_ENDPOINT = os.getenv('CHAT_AI_ENDPOINT', 'https://llm.cloud.cci.charite.de/v1')
 
 # --- Path Configuration ---s
 
 load_dotenv()
+
+
+# Load config.sh
+
+CONFIG_PATH = Path(__file__).parent / "config.sh"
+if CONFIG_PATH.exists():
+    # Source config.sh and load into environment
+    import subprocess
+    result = subprocess.run(
+        ["bash", "-c", f"source {CONFIG_PATH} && env"],
+        capture_output=True, text=True
+    )
+    for line in result.stdout.strip().split("\n"):
+        if "=" in line:
+            key, value = line.split("=", 1)
+            os.environ.setdefault(key, value.strip('"\''))
+
+# Certificate paths (use your config.sh variables)
+FLASK_SSL_CERT = os.getenv("LETSENCRYPT_FULLCHAIN_PATH") or \
+                 "/etc/letsencrypt/live/transcriber.cloud.cci.charite.de/fullchain.pem"
+FLASK_SSL_KEY = os.getenv("LETSENCRYPT_PRIVKEY_PATH") or \
+                "/etc/letsencrypt/live/transcriber.cloud.cci.charite.de/privkey.pem"
+
+# Bind settings
+FLASK_BIND_HOST = os.getenv("FLASK_BIND_HOST") or "0.0.0.0"
+FLASK_BIND_PORT = int(os.getenv("FLASK_BIND_PORT") or "5001")
+
+# Domain name (for logging)
+DOMAIN_NAME = os.getenv("DOMAIN_NAME") or "transcriber.cloud.cci.charite.de"
 
 # Determine the directory containing this script (interactive_app/)
 current_script_dir = Path(__file__).resolve().parent
@@ -44,7 +82,14 @@ if str(pipeline_path) not in sys.path:
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-# --- UPDATED IMPORTS from process.py ---
+# --- Logging Configuration ---
+logging.basicConfig(
+    level=logging.INFO, 
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# --- TTS Imports (moved from process.py to tts_engine) ---
 try:
     from process import (
         transcribe_audio_locally, 
@@ -56,13 +101,6 @@ try:
         CHAT_AI_ENDPOINT,
         anonymize_text_locally,
         MODEL_FOLDER as PROCESS_MODEL_FOLDER,
-        #generate_speech,
-        #generate_beep,
-        synthesize_segment,
-        #get_available_tts_voices,
-        #get_tts_status,
-        #TTS_BACKEND,
-        #TTS_ENABLED,
         LLM_ANONYM_FOLDER,
         ANONYM_FOLDER,
         BASE_PATH,
@@ -72,32 +110,39 @@ except ImportError as e:
     logging.critical(f"Looking in pipeline: {pipeline_path}")
     sys.exit(1)
 
-# Also import from tts_engine directly as fallback
+# Import TTS directly from tts_engine (NOT through process.py)
 try:
     from pipeline.tts.tts_engine import (
-        get_tts_status,
+        generate_speech,
+        synthesize_segment,
         get_available_tts_voices,
+        get_tts_status,
         TTS_BACKEND,
         TTS_ENABLED,
     )
-except ImportError:
-    pass  # Already imported from process
+except ImportError as e:
+    logging.critical(f"Failed to import tts_engine: {e}")
+    sys.exit(1)
+
+# Import Anonymization engine
+global_anonymizer = None
+try:
+    from process import AnonymizationEngine, MODEL_FOLDER
+    global_anonymizer = AnonymizationEngine(
+        method="local_mmbert",
+        level="standard",
+        model_path=MODEL_FOLDER / "multilingual_DialogPII_NER"
+    )
+    logger.info(f"✅ AnonymizationEngine pre-loaded successfully. Method: {global_anonymizer.method}")
+except Exception as e:
+    logger.error(f"⚠️ Failed to pre-load AnonymizationEngine: {e}")
+    global_anonymizer = None
 
 # Verify model path consistency
 if MODEL_FOLDER != PROCESS_MODEL_FOLDER:
     logging.warning(f"⚠️  Path mismatch detected! app.py: {MODEL_FOLDER}, process.py: {PROCESS_MODEL_FOLDER}")
     # Force alignment (process.py usually wins, but we align)
     MODEL_FOLDER = PROCESS_MODEL_FOLDER
-
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
-
-# --- Logging Configuration ---
-logging.basicConfig(
-    level=logging.INFO, 
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
 
 # --- Dependency Checks ---
 try:
@@ -521,7 +566,49 @@ def get_relevant_offsets(conversation, offsets):
     
     return peep_array
 
-
+@app.route('/anonymize', methods=['POST'])
+def anonymize():
+    try:
+        data = request.get_json()
+        transcript_text = data.get('transcript', '')
+        
+        if not transcript_text:
+            logger.warning("No transcript provided to /anonymize")
+            return jsonify({'error': 'No transcript provided'}), 400
+        
+        # IMPORTANT: Unpack the tuple correctly
+        result_text, success, msg = anonymize_text_locally(transcript_text)
+        
+        # Log what we actually got
+        logger.info(f"Anonymization result: success={success}, text_len={len(result_text) if result_text else 0}, msg={msg}")
+        
+        if not success or result_text is None:
+            logger.error(f"Anonymization FAILED: {msg}")
+            return jsonify({
+                'error': 'Anonymization failed',
+                'details': msg,
+                'original_length': len(transcript_text)
+            }), 500
+        
+        # SUCCESS - return proper structure
+        logger.info(f"Anonymization SUCCESS: {len(transcript_text)} → {len(result_text)} chars")
+        return jsonify({
+            'status': 'success',
+            'original': transcript_text,
+            'anonymized': result_text,
+            'chars_original': len(transcript_text),
+            'chars_anonymized': len(result_text)
+        })
+        
+    except TypeError as e:
+        # Catch tuple unpacking errors specifically
+        logger.error(f"TUPLE UNPACKING ERROR - check anonymize_text_locally return type: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return jsonify({'error': f'Server configuration error: {str(e)}'}), 500
+    except Exception as e:
+        logger.error(f"Anonymization error: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
 
 def replace_surrogates(text, lang="EN"):
     lang = lang.upper()
@@ -754,51 +841,6 @@ def transcribe_recording():
         if converted_file_path and os.path.exists(converted_file_path):
             os.unlink(converted_file_path)
         return jsonify({'error': f'Error processing recording: {str(e)}'}), 500
-
-@app.route('/anonymize', methods=['POST'])
-def anonymize_route():
-    """Anonymize uploaded transcript or text."""
-    try:
-        # Parse request
-        data = request.get_json()
-        if not data:
-            return jsonify({'error': 'No JSON data provided'}), 400
-        
-        text = data.get('text', '').strip()
-        lang = data.get('lang', 'EN')
-        if not text:
-            return jsonify({'error': 'No text provided'}), 400
-        
-        logger.info(f"📥 Received anonymization request ({len(text)} chars)")
-        
-        # Call anonymization
-        from pipeline.process import anonymize_text_locally
-        result_text, success, msg = anonymize_text_locally(text)
-        
-        if not success or result_text is None:
-            logger.error(f"❌ Anonymization failed: {msg}")
-            return jsonify({
-                'success': False,
-                'error': msg,
-                'original_text': text
-            }), 500
-        
-        # Log what changed
-        changes = sum(1 for a, b in zip(text.split(), result_text.split()) if a != b)
-        logger.info(f"✅ Anonymization complete: {changes} replacements made")
-        
-        # Return BOTH original and anonymized for debugging
-        return jsonify({
-            'success': True,
-            'text': result_text,
-            'original_text': text,
-            'changes_made': changes
-        })
-        
-    except Exception as e:
-        logger.error(f"❌ Route error: {e}", exc_info=True)
-        return jsonify({'error': str(e)}), 500
-
 
 @app.route('/surrogate_text', methods=['POST'])
 def surrogate_text():
@@ -1282,31 +1324,51 @@ def generate_beep_route():
 
 if __name__ == '__main__':
     use_https = os.getenv('USE_HTTPS', 'true').lower() == 'true'
-
-    # Initialize certificates (handles existing/user-provided detection)
+    
     if use_https:
-        cert_file, key_file = create_self_signed_cert()
-        if cert_file and key_file and os.path.exists(cert_file):
-            logger.info(f"Using SSL certificate: {cert_file}")
-            logger.info(f"Using SSL key: {key_file}")
-            
-            try:
-                ssl_context = (cert_file, key_file)
-                
-                if cert_file and key_file:
-                    logger.info("Starting server with HTTPS (using ATA certificate)")
-                    app.run(debug=False, host='0.0.0.0', port=5001, ssl_context=ssl_context, threaded=True)
-                else:
-                    logger.info("Starting server with HTTPS (ad-hoc certificate)")
-                    app.run(debug=False, host='0.0.0.0', port=5001, ssl_context='adhoc', threaded=True)
-            except Exception as e:
-                logger.error(f"Failed to start HTTPS server: {e}")
-                logger.info("Falling back to HTTP")
-                app.run(debug=False, host='0.0.0.0', port=5001, threaded=True)
+        cert_to_use = None
+        key_to_use = None
+        
+        # Priority 1: Check if Certbot/production cert exists
+        if os.path.exists(FLASK_SSL_CERT) and os.path.exists(FLASK_SSL_KEY):
+            cert_to_use = FLASK_SSL_CERT
+            key_to_use = FLASK_SSL_KEY
+            logger.info(f"Using production certificate from config.sh")
+            logger.info(f"  Domain:   {DOMAIN_NAME}")
+            logger.info(f"  SSL cert: {cert_to_use}")
+            logger.info(f"  SSL key:  {key_to_use}")
+        
+        # Priority 2: Fallback to self-signed if Certbot cert not found
         else:
-            # Fall back to ad-hoc if cert generation failed
-            logger.info("Starting server with HTTPS (ad-hoc certificate)")
-            app.run(debug=False, host='0.0.0.0', port=5001, ssl_context='adhoc', threaded=True)
+            logger.warning(f"Production certificate not found at {FLASK_SSL_CERT}")
+            logger.warning("Falling back to self-signed certificate (development mode)")
+            
+            cert_to_use, key_to_use = create_self_signed_cert()
+            
+            if not cert_to_use or not os.path.exists(cert_to_use):
+                logger.error("CRITICAL: Self-signed certificate generation failed!")
+                logger.error("Cannot start Flask without valid SSL certificate.")
+                sys.exit(1)
+            
+            logger.info(f"  SSL cert: {cert_to_use}")
+            logger.info(f"  SSL key:  {key_to_use}")
+        
+        # Verify files are readable before starting
+        if not os.access(cert_to_use, os.R_OK) or not os.access(key_to_use, os.R_OK):
+            logger.error(f"Certificate files not readable!")
+            logger.error(f"  Cert: {cert_to_use}")
+            logger.error(f"  Key:  {key_to_use}")
+            sys.exit(1)
+        
+        logger.info(f"Starting Flask with HTTPS on {FLASK_BIND_HOST}:{FLASK_BIND_PORT}")
+        
+        app.run(
+            debug=False,
+            host=FLASK_BIND_HOST,
+            port=FLASK_BIND_PORT,
+            ssl_context=(cert_to_use, key_to_use),
+            threaded=True
+        )
     else:
-        logger.info("Starting server with HTTP")
-        app.run(debug=False, host='0.0.0.0', port=5001, threaded=True)
+        logger.warning("Starting Flask with HTTP (USE_HTTPS=false) — NOT recommended for medical data")
+        app.run(debug=False, host=FLASK_BIND_HOST, port=FLASK_BIND_PORT, threaded=True)

@@ -37,6 +37,35 @@ CHAT_AI_ENDPOINT = os.getenv('CHAT_AI_ENDPOINT', 'https://llm.cloud.cci.charite.
 
 load_dotenv()
 
+
+# Load config.sh
+
+CONFIG_PATH = Path(__file__).parent / "config.sh"
+if CONFIG_PATH.exists():
+    # Source config.sh and load into environment
+    import subprocess
+    result = subprocess.run(
+        ["bash", "-c", f"source {CONFIG_PATH} && env"],
+        capture_output=True, text=True
+    )
+    for line in result.stdout.strip().split("\n"):
+        if "=" in line:
+            key, value = line.split("=", 1)
+            os.environ.setdefault(key, value.strip('"\''))
+
+# Certificate paths (use your config.sh variables)
+FLASK_SSL_CERT = os.getenv("LETSENCRYPT_FULLCHAIN_PATH") or \
+                 "/etc/letsencrypt/live/transcriber.cloud.cci.charite.de/fullchain.pem"
+FLASK_SSL_KEY = os.getenv("LETSENCRYPT_PRIVKEY_PATH") or \
+                "/etc/letsencrypt/live/transcriber.cloud.cci.charite.de/privkey.pem"
+
+# Bind settings
+FLASK_BIND_HOST = os.getenv("FLASK_BIND_HOST") or "0.0.0.0"
+FLASK_BIND_PORT = int(os.getenv("FLASK_BIND_PORT") or "5001")
+
+# Domain name (for logging)
+DOMAIN_NAME = os.getenv("DOMAIN_NAME") or "transcriber.cloud.cci.charite.de"
+
 # Determine the directory containing this script (interactive_app/)
 current_script_dir = Path(__file__).resolve().parent
 
@@ -1295,31 +1324,51 @@ def generate_beep_route():
 
 if __name__ == '__main__':
     use_https = os.getenv('USE_HTTPS', 'true').lower() == 'true'
-    port = int(os.getenv('FLASK_RUN_PORT', '5001'))
-    host = os.getenv('FLASK_RUN_HOST', '127.0.0.1')
-
+    
     if use_https:
-        cert_file, key_file = create_self_signed_cert()
-        if cert_file and key_file and os.path.exists(cert_file):
-            logger.info(f"Starting Flask with HTTPS on {host}:{port}")
-            logger.info(f"  SSL cert: {cert_file}")
-            logger.info(f"  SSL key:  {key_file}")
-            app.run(
-                debug=False,
-                host=host,
-                port=port,
-                ssl_context=(cert_file, key_file),
-                threaded=True
-            )
+        cert_to_use = None
+        key_to_use = None
+        
+        # Priority 1: Check if Certbot/production cert exists
+        if os.path.exists(FLASK_SSL_CERT) and os.path.exists(FLASK_SSL_KEY):
+            cert_to_use = FLASK_SSL_CERT
+            key_to_use = FLASK_SSL_KEY
+            logger.info(f"Using production certificate from config.sh")
+            logger.info(f"  Domain:   {DOMAIN_NAME}")
+            logger.info(f"  SSL cert: {cert_to_use}")
+            logger.info(f"  SSL key:  {key_to_use}")
+        
+        # Priority 2: Fallback to self-signed if Certbot cert not found
         else:
-            logger.warning("Certificate generation failed — falling back to ad-hoc SSL")
-            app.run(
-                debug=False,
-                host=host,
-                port=port,
-                ssl_context='adhoc',
-                threaded=True
-            )
+            logger.warning(f"Production certificate not found at {FLASK_SSL_CERT}")
+            logger.warning("Falling back to self-signed certificate (development mode)")
+            
+            cert_to_use, key_to_use = create_self_signed_cert()
+            
+            if not cert_to_use or not os.path.exists(cert_to_use):
+                logger.error("CRITICAL: Self-signed certificate generation failed!")
+                logger.error("Cannot start Flask without valid SSL certificate.")
+                sys.exit(1)
+            
+            logger.info(f"  SSL cert: {cert_to_use}")
+            logger.info(f"  SSL key:  {key_to_use}")
+        
+        # Verify files are readable before starting
+        if not os.access(cert_to_use, os.R_OK) or not os.access(key_to_use, os.R_OK):
+            logger.error(f"Certificate files not readable!")
+            logger.error(f"  Cert: {cert_to_use}")
+            logger.error(f"  Key:  {key_to_use}")
+            sys.exit(1)
+        
+        logger.info(f"Starting Flask with HTTPS on {FLASK_BIND_HOST}:{FLASK_BIND_PORT}")
+        
+        app.run(
+            debug=False,
+            host=FLASK_BIND_HOST,
+            port=FLASK_BIND_PORT,
+            ssl_context=(cert_to_use, key_to_use),
+            threaded=True
+        )
     else:
         logger.warning("Starting Flask with HTTP (USE_HTTPS=false) — NOT recommended for medical data")
-        app.run(debug=False, host=host, port=port, threaded=True)
+        app.run(debug=False, host=FLASK_BIND_HOST, port=FLASK_BIND_PORT, threaded=True)
