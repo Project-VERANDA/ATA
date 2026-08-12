@@ -3,68 +3,56 @@ import React from 'react';
 interface BIHLogoProps {
   variant?: 'standard' | 'short';
   size?: 'sm' | 'md' | 'lg';
-  className?: string;
 }
 
-const BIHLogo: React.FC<BIHLogoProps> = ({
-  variant = 'standard',
-  size = 'md',
-  className = '',
-}) => {
-  // Use public asset path (actual BIH logo SVG file)
-  const bihLogoPath = '/logos/Online_251121A_BIH_Logo_RGB_BIH_Logo_StandardClaim_ENG_BlauKorall.svg';
-
+function BIHLogo({ variant = 'standard', size = 'md' }: BIHLogoProps) {
   const sizes = {
-    sm: { height: '2rem' },
-    md: { height: '3rem' },
-    lg: { height: '4rem' },
+    sm: { bar: '28px', barH: '3px', text: '1.2em', sub: '0.6em' },
+    md: { bar: '40px', barH: '4px', text: '1.5em', sub: '0.7em' },
+    lg: { bar: '56px', barH: '5px', text: '2em', sub: '0.8em' },
   };
-
-  const sizeStyles = sizes[size];
+  const s = sizes[size];
 
   return (
-    <div 
-      className={className} 
-      style={{ 
-        display: 'inline-block',
-        lineHeight: 0, // Remove extra space below image
-      }}
-    >
-      <img 
-        src={bihLogoPath} 
-        alt="BIH Center at Charité" 
+    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '12px' }}>
+      <div 
         style={{ 
-          height: sizeStyles.height, 
-          width: 'auto', 
-          objectFit: 'contain',
-          display: 'block',
-        }}
-        onError={(e) => {
-          console.error('BIH logo failed to load:', e);
-          // Show fallback text if image fails
-          const target = e.target as HTMLImageElement;
-          target.style.display = 'none';
-          const fallback = target.parentElement?.querySelector('.bih-logo-fallback');
-          if (fallback) {
-            fallback.style.display = 'inline-block';
-          }
-        }}
+          width: s.bar, 
+          height: s.barH, 
+          background: 'var(--bih-coral, #ea5451)', // Fallback
+          flexShrink: 0 
+        }} 
       />
-      {/* Fallback if logo image fails to load */}
-      <span 
-        className="bih-logo-fallback"
-        style={{
-          display: 'none',
-          fontSize: size === 'lg' ? '1.5rem' : size === 'md' ? '1.25rem' : '1rem',
-          fontWeight: 700,
-          color: 'var(--text-primary)',
-          marginLeft: '8px',
-        }}
-      >
-        BIH<span style={{ color: 'var(--bih-coral)' }}>Center</span>
-      </span>
+      {variant === 'standard' ? (
+        <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.2 }}>
+          <span style={{ 
+            fontSize: s.text, 
+            fontWeight: 700, 
+            color: 'var(--text-primary, #003754)', // Fallback
+            fontFamily: 'var(--font-primary, Trebuchet MS)' // Fallback
+          }}>
+            BIH
+          </span>
+          <span style={{ 
+            fontSize: s.sub, 
+            color: 'var(--text-muted, #6b7c8d)', // Fallback
+            fontFamily: 'var(--font-primary, Trebuchet MS)' // Fallback
+          }}>
+            at Charité
+          </span>
+        </div>
+      ) : (
+        <span style={{ 
+          fontSize: s.text, 
+          fontWeight: 700, 
+          color: 'var(--text-primary, #003754)', // Fallback
+          fontFamily: 'var(--font-primary, Trebuchet MS)' // Fallback
+        }}>
+          BIH
+        </span>
+      )}
     </div>
   );
-};
+}
 
 export default BIHLogo;
