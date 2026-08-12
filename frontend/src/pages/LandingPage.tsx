@@ -1,8 +1,5 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import bihLogo from '/logos/Online_251121A_BIH_Logo_RGB_BIH_Logo_StandardClaim_ENG_BlauKorall.svg';
-import dfkiLogo from '/logos/dfki_Logo_sz.svg';
-import verandaLogo from '/logos/VERANDA_LOGO.svg';
 
 function LandingPage() {
   const features = [
@@ -13,6 +10,10 @@ function LandingPage() {
     { icon: '📁', title: 'Batch Processing', desc: 'Upload and process multiple files with configurable settings.' },
     { icon: '📊', title: 'Job Management', desc: 'Track progress and manage all anonymization jobs from one dashboard.' },
   ];
+
+  const bihLogoPath = '/logos/Online_251121A_BIH_Logo_RGB_BIH_Logo_StandardClaim_ENG_BlauKorall.svg';
+  const dfkiLogoPath = '/logos/dfki_Logo_sz.svg';
+  const verandaLogoPath = '/logos/VERANDA_LOGO.svg';
 
   return (
     <div style={{ minHeight: '100vh', fontFamily: 'var(--font-primary)' }}>
@@ -40,11 +41,11 @@ function LandingPage() {
             border: '1px solid rgba(255,255,255,0.2)',
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-xl)', justifyContent: 'center', flexWrap: 'wrap' }}>
-              <img src={bihLogo} alt="BIH Center" style={{ height: '4rem', width: 'auto', objectFit: 'contain' }} />
+              <img src={bihLogoPath} alt="BIH Center" style={{ height: '4rem', width: 'auto', objectFit: 'contain' }} />
               <span style={{ fontSize: '2rem', fontWeight: 700, color: 'rgba(255,255,255,0.6)' }}>+</span>
-              <img src={dfkiLogo} alt="DFKI" style={{ height: '3.5rem', width: 'auto', objectFit: 'contain' }} />
+              <img src={dfkiLogoPath} alt="DFKI" style={{ height: '3.5rem', width: 'auto', objectFit: 'contain' }} />
               <span style={{ fontSize: '2rem', fontWeight: 700, color: 'rgba(255,255,255,0.6)' }}>=</span>
-              <img src={verandaLogo} alt="VERANDA" style={{ height: '4.5rem', width: 'auto', objectFit: 'contain' }} />
+              <img src={verandaLogoPath} alt="VERANDA" style={{ height: '4.5rem', width: 'auto', objectFit: 'contain' }} />
             </div>
             <p style={{ textAlign: 'center', marginTop: 'var(--spacing-md)', fontSize: '0.95rem', opacity: 0.85, letterSpacing: '1px', textTransform: 'uppercase' }}>
               Innovative Research Partnership
@@ -293,8 +294,8 @@ function LandingPage() {
               alignItems: 'center', 
               flexWrap: 'wrap',
             }}>
-              <img src={bihLogo} alt="BIH Center" style={{ height: '3.5rem', width: 'auto', opacity: 0.9 }} />
-              <img src={dfkiLogo} alt="DFKI" style={{ height: '3rem', width: 'auto', opacity: 0.9 }} />
+              <img src={bihLogoPath} alt="BIH Center" style={{ height: '3.5rem', width: 'auto', opacity: 0.9 }} />
+              <img src={dfkiLogoPath} alt="DFKI" style={{ height: '3rem', width: 'auto', opacity: 0.9 }} />
             </div>
           </div>
           

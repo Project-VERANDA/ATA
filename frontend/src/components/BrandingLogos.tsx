@@ -1,7 +1,4 @@
 import React from 'react';
-import bihLogo from '/logos/Online_251121A_BIH_Logo_RGB_BIH_Logo_StandardClaim_ENG_BlauKorall.svg';
-import dfkiLogo from '/logos/dfki_Logo_sz.svg';
-import verandaLogo from '/logos/VERANDA_LOGO.svg';
 
 interface BrandingLogosProps {
   variant?: 'hero' | 'footer' | 'compact';
@@ -14,10 +11,14 @@ const BrandingLogos: React.FC<BrandingLogosProps> = ({
   showEquation = true,
   className = '',
 }) => {
-  const sizes = {
-    hero: { height: '4rem', gap: '2.5rem', textSize: '2.5rem' },
-    footer: { height: '3rem', gap: '3rem', textSize: '2rem' },
-    compact: { height: '2rem', gap: '1.5rem', textSize: '1.25rem' },
+  const bihLogoPath = '/logos/Online_251121A_BIH_Logo_RGB_BIH_Logo_StandardClaim_ENG_BlauKorall.svg';
+  const dfkiLogoPath = '/logos/dfki_Logo_sz.svg';
+  const verandaLogoPath = '/logos/VERANDA_LOGO.svg';
+
+  const sizes: Record<'hero' | 'footer' | 'compact', { height: number; gap: string; textSize: string }> = {
+    hero: { height: 64, gap: '2.5rem', textSize: '2.5rem' },
+    footer: { height: 48, gap: '3rem', textSize: '2rem' },
+    compact: { height: 32, gap: '1.5rem', textSize: '1.25rem' },
   };
 
   const size = sizes[variant];
@@ -32,10 +33,10 @@ const BrandingLogos: React.FC<BrandingLogosProps> = ({
         flexWrap: 'wrap',
       }}>
         <img 
-          src={bihLogo} 
+          src={bihLogoPath} 
           alt="BIH Center" 
           style={{ 
-            height: size.height, 
+            height: `${size.height}px`, 
             width: 'auto', 
             objectFit: 'contain',
             transition: 'opacity 0.3s ease',
@@ -49,10 +50,10 @@ const BrandingLogos: React.FC<BrandingLogosProps> = ({
           <>
             <span style={{ fontSize: size.textSize, fontWeight: 700, opacity: 0.5 }}>+</span>
             <img 
-              src={dfkiLogo} 
+              src={dfkiLogoPath} 
               alt="DFKI" 
               style={{ 
-                height: size.height * 0.85, 
+                height: `${size.height * 0.85}px`, 
                 width: 'auto', 
                 objectFit: 'contain',
               }}
@@ -62,10 +63,10 @@ const BrandingLogos: React.FC<BrandingLogosProps> = ({
             />
             <span style={{ fontSize: size.textSize, fontWeight: 700, opacity: 0.5 }}>=</span>
             <img 
-              src={verandaLogo} 
+              src={verandaLogoPath} 
               alt="VERANDA" 
               style={{ 
-                height: size.height * 1.2, 
+                height: `${size.height * 1.2}px`, 
                 width: 'auto', 
                 objectFit: 'contain',
               }}
@@ -78,10 +79,10 @@ const BrandingLogos: React.FC<BrandingLogosProps> = ({
         
         {!showEquation && (
           <img 
-            src={verandaLogo} 
+            src={verandaLogoPath} 
             alt="VERANDA" 
             style={{ 
-              height: size.height * 1.2, 
+              height: `${size.height * 1.2}px`, 
               width: 'auto', 
               objectFit: 'contain',
             }}

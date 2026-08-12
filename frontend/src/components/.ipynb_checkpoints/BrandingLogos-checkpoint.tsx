@@ -1,64 +1,94 @@
 import React from 'react';
 
-interface LogoProps {
-  src: string;
-  alt: string;
-  height?: string;
+interface BrandingLogosProps {
+  variant?: 'hero' | 'footer' | 'compact';
+  showEquation?: boolean;
+  className?: string;
 }
 
-const Logo: React.FC<LogoProps> = ({ src, alt, height = '40px' }) => (
-  <img 
-    src={src} 
-    alt={alt} 
-    style={{ 
-      height, 
-      width: 'auto', 
-      maxHeight: '100%',
-      objectFit: 'contain'
-    }} 
-  />
-);
+const BrandingLogos: React.FC<BrandingLogosProps> = ({
+  variant = 'compact',
+  showEquation = true,
+  className = '',
+}) => {
+  const bihLogoPath = '/logos/Online_251121A_BIH_Logo_RGB_BIH_Logo_StandardClaim_ENG_BlauKorall.svg';
+  const dfkiLogoPath = '/logos/dfki_Logo_sz.svg';
+  const verandaLogoPath = '/logos/VERANDA_LOGO.svg';
 
-export const BrandingLogos: React.FC<{ variant?: 'landing' | 'footer' }> = ({ variant = 'landing' }) => {
-  const containerStyle: React.CSSProperties = {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: variant === 'landing' ? 'space-between' : 'center',
-    flexWrap: 'wrap',
-    gap: '20px',
-    padding: '20px 0',
+  const sizes: Record<'hero' | 'footer' | 'compact', { height: number; gap: string; textSize: string }> = {
+    hero: { height: 64, gap: '2.5rem', textSize: '2.5rem' },
+    footer: { height: 48, gap: '3rem', textSize: '2rem' },
+    compact: { height: 32, gap: '1.5rem', textSize: '1.25rem' },
   };
 
-  const logoContainerStyle: React.CSSProperties = {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '20px',
-  };
+  const size = sizes[variant];
 
   return (
-    <div style={containerStyle}>
-      <div style={logoContainerStyle}>
-        {/* BIH Logo */}
-        <Logo 
-          src="/logos/Online_251121A_BIH_Logo_RGB_BIH_Logo_StandardClaim_ENG_BlauKorall.svg" 
-          alt="Berlin Institute of Health (BIH) Logo" 
-          height="60px"
+    <div className={className}>
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: size.gap,
+        justifyContent: 'center',
+        flexWrap: 'wrap',
+      }}>
+        <img 
+          src={bihLogoPath} 
+          alt="BIH Center" 
+          style={{ 
+            height: `${size.height}px`, 
+            width: 'auto', 
+            objectFit: 'contain',
+            transition: 'opacity 0.3s ease',
+          }}
+          onError={(e) => {
+            console.warn('BIH logo failed to load:', e);
+          }}
         />
-        {/* DFKI Logo */}
-        <Logo 
-          src="/logos/dfki-logo_sz.svg" 
-          alt="German Research Center for Artificial Intelligence (DFKI) Logo" 
-          height="50px"
-        />
+        
+        {showEquation && (
+          <>
+            <span style={{ fontSize: size.textSize, fontWeight: 700, opacity: 0.5 }}>+</span>
+            <img 
+              src={dfkiLogoPath} 
+              alt="DFKI" 
+              style={{ 
+                height: `${size.height * 0.85}px`, 
+                width: 'auto', 
+                objectFit: 'contain',
+              }}
+              onError={(e) => {
+                console.warn('DFKI logo failed to load:', e);
+              }}
+            />
+            <span style={{ fontSize: size.textSize, fontWeight: 700, opacity: 0.5 }}>=</span>
+            <img 
+              src={verandaLogoPath} 
+              alt="VERANDA" 
+              style={{ 
+                height: `${size.height * 1.2}px`, 
+                width: 'auto', 
+                objectFit: 'contain',
+              }}
+              onError={(e) => {
+                console.warn('VERANDA logo failed to load:', e);
+              }}
+            />
+          </>
+        )}
+        
+        {!showEquation && (
+          <img 
+            src={verandaLogoPath} 
+            alt="VERANDA" 
+            style={{ 
+              height: `${size.height * 1.2}px`, 
+              width: 'auto', 
+              objectFit: 'contain',
+            }}
+          />
+        )}
       </div>
-      
-      {variant === 'landing' && (
-        <div style={{ textAlign: 'right' }}>
-          <small style={{ color: '#666' }}>
-            Joint Initiative
-          </small>
-        </div>
-      )}
     </div>
   );
 };
