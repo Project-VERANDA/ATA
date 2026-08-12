@@ -25,7 +25,7 @@ function App() {
   return (
     <ThemeProvider>
       <AuthProvider>
-          <BrowserRouter basename="/app"> 
+          <BrowserRouter basename="/app/"> 
             <Routes>
               <Route element={<Layout />}>
                 <Route path="/" element={<LandingPage />} />
