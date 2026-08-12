@@ -345,7 +345,7 @@ server {
         alias ${LOGOS_PATH}/;
         expires 30d;
         add_header Cache-Control "public, immutable";
-        try_files $uri =404;
+        try_files \$uri =404;
     }
 
     # ===================================================
@@ -469,7 +469,7 @@ EOF
         alias ${LOGOS_PATH}/;
         expires 30d;
         add_header Cache-Control "public, immutable";
-        try_files $uri =404;
+        try_files \$uri =404;
     }
 
     # ===================================================
