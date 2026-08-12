@@ -6,6 +6,7 @@
 #   - Compatible with setup_ssl.sh certificate management
 #   - Routes /app/ to React frontend (Docker port 8080, HTTP)
 #   - Routes / to Flask backend (HTTPS port 5001, end-to-end SSL)
+#   - Routes /logos/ to static logo files (frontend/dist/logos)
 #   - Includes backups and rollback support
 #===============================================================================
 
@@ -38,6 +39,7 @@ SSL_CERT_DIR="${ATA_PROJECT_ROOT}/ssl_certs"
 SSL_CERT_FILE="${SSL_CERT_DIR}/server.crt"
 SSL_KEY_FILE="${SSL_CERT_DIR}/server.key"
 STATIC_FILES_PATH="${ATA_PROJECT_ROOT}/interactive_app/static"
+LOGOS_PATH="${ATA_PROJECT_ROOT}/frontend/dist/logos"
 
 # Ports (MUST match your services)
 REACT_PORT=8080          # React frontend (Docker container, HTTP)
@@ -103,30 +105,23 @@ check_ssl_certificates() {
         export SSL_KEY_FILE="$CERTBOT_KEY"
         
         # Detect key type and extract modulus accordingly
-        # Certbot uses ECDSA by default in newer versions
         local cert_modulus
         local key_modulus
         
-        # Extract certificate modulus (works for all key types)
         cert_modulus=$(openssl x509 -noout -modulus -in "$CERTBOT_CERT" 2>/dev/null | openssl md5 | awk '{print $NF}')
         
-        # Detect private key type and extract modulus
         if openssl rsa -noout -modulus -in "$CERTBOT_KEY" 2>/dev/null | grep -q "Modulus"; then
-            # RSA key
             key_modulus=$(openssl rsa -noout -modulus -in "$CERTBOT_KEY" 2>/dev/null | openssl md5 | awk '{print $NF}')
             print_info "Key type: RSA"
         elif openssl ec -noout -modulus -in "$CERTBOT_KEY" 2>/dev/null | grep -q "Modulus"; then
-            # ECDSA key
             key_modulus=$(openssl ec -noout -modulus -in "$CERTBOT_KEY" 2>/dev/null | openssl md5 | awk '{print $NF}')
             print_info "Key type: ECDSA"
         else
-            # Unknown key type or corrupted file - skip validation
             print_warning "Unable to determine key type - skipping modulus validation"
             print_warning "Assuming Let's Encrypt validation is sufficient."
             key_modulus=""
         fi
         
-        # Compare only if both values were extracted
         if [[ -n "$cert_modulus" && -n "$key_modulus" ]]; then
             if [[ "$cert_modulus" != "$key_modulus" ]]; then
                 print_error "Let's Encrypt certificate and key do not match!"
@@ -140,7 +135,6 @@ check_ssl_certificates() {
             print_warning "Unable to extract modulus from cert/key - skipping validation"
         fi
         
-        # Check expiry
         local expiry_date=$(openssl x509 -enddate -noout -in "$CERTBOT_CERT" 2>/dev/null | cut -d= -f2)
         local expiry_epoch=$(date -d "$expiry_date" +%s 2>/dev/null)
         local now_epoch=$(date +%s)
@@ -162,7 +156,6 @@ check_ssl_certificates() {
         print_success "Self-signed certificates found: $SSL_CERT_DIR"
         print_info "Using: $SSL_CERT_FILE"
         
-        # Same key-type detection for self-signed certs
         local cert_modulus
         local key_modulus
         
@@ -190,7 +183,6 @@ check_ssl_certificates() {
             fi
         fi
         
-        # Check expiry
         local expiry_date=$(openssl x509 -enddate -noout -in "$SSL_CERT_FILE" 2>/dev/null | cut -d= -f2)
         local expiry_epoch=$(date -d "$expiry_date" +%s 2>/dev/null)
         local now_epoch=$(date +%s)
@@ -279,10 +271,6 @@ create_site_config() {
     # ============================================
     # CERTIFICATE PRIORITY: LET'S ENCRYPT > SELF-SIGNED
     # ============================================
-    CERTBOT_CERT="${LETSENCRYPT_FULLCHAIN_PATH:-/etc/letsencrypt/live/${DOMAIN_NAME}/fullchain.pem}"
-    CERTBOT_KEY="${LETSENCRYPT_PRIVKEY_PATH:-/etc/letsencrypt/live/${DOMAIN_NAME}/privkey.pem}"
-    
-    # Check for Certbot/Let's Encrypt certificates first
     if [[ -z "$SSL_CERT_FILE" || -z "$SSL_KEY_FILE" ]]; then
         print_error "SSL_CERT_FILE or SSL_KEY_FILE not set!"
         exit 1
@@ -351,8 +339,17 @@ server {
     send_timeout 600s;
 
     # ===================================================
+    # LOGOS STATIC FILES (/logos/)
+    # ===================================================
+    location ^~ /logos/ {
+        alias ${LOGOS_PATH}/;
+        expires 30d;
+        add_header Cache-Control "public, immutable";
+        try_files $uri =404;
+    }
+
+    # ===================================================
     # REACT FRONTEND (/app/) - PROXY TO DOCKER CONTAINER
-    # React container serves HTTP on port 8080
     # ===================================================
     location ^~ /app/ {
         limit_req zone=api burst=50 nodelay;
@@ -375,14 +372,14 @@ server {
     # STATIC FILES (/static/)
     # ===================================================
     location /static/ {
-        alias /mnt/Data_Mount/VERANDA_DataMount/ATA/interactive_app/static/;
+        alias /mnt/Data_Mount/VERANDA_DataMount/Experimental/ATA/interactive_app/static/;
         expires 30d;
         add_header Cache-Control "public, immutable";
         try_files $uri $uri/ =404;
     }
 
     # ===================================================
-    # HEALTH CHECK (/health) - PROXY TO FLASK (HTTP in this mode)
+    # HEALTH CHECK (/health) - PROXY TO FLASK (HTTP)
     # ===================================================
     location /health {
         proxy_pass http://127.0.0.1:5001/health;
@@ -428,7 +425,6 @@ server {
     server_name transcriber.cloud.cci.charite.de localhost 127.0.0.1 _;
 
     # SSL Configuration (external termination)
-    # Uses Let's Encrypt if available, otherwise self-signed from ATA/ssl_certs/
     ssl_certificate ${SSL_CERT_FILE};
     ssl_certificate_key ${SSL_KEY_FILE};
     ssl_protocols TLSv1.2 TLSv1.3;
@@ -438,8 +434,7 @@ server {
     ssl_session_timeout 10m;
 
     # ===================================================
-    # UPSTREAM SSL SETTINGS (Flask serves HTTPS with self-signed certs)
-    # Applied at server level for all proxied locations to Flask
+    # UPSTREAM SSL SETTINGS (Flask serves HTTPS)
     # ===================================================
     proxy_ssl_verify off;
     proxy_ssl_server_name on;
@@ -452,7 +447,6 @@ server {
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
 EOF
 
-        # Add Content-Security-Policy header (optional, for medical data security)
         if [[ -n "$ENABLE_CSP_HEADER" ]]; then
             cat >> "$SPEECH_SITE" << 'EOF'
     add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self';" always;
@@ -469,9 +463,17 @@ EOF
     send_timeout 600s;
 
     # ===================================================
+    # LOGOS STATIC FILES (/logos/)
+    # ===================================================
+    location ^~ /logos/ {
+        alias ${LOGOS_PATH}/;
+        expires 30d;
+        add_header Cache-Control "public, immutable";
+        try_files $uri =404;
+    }
+
+    # ===================================================
     # REACT FRONTEND (/app/) - PROXY TO DOCKER CONTAINER
-    # React container serves HTTP on port ${REACT_PORT}
-    # nginx terminates SSL, forwards plain HTTP to container
     # ===================================================
     location ^~ /app/ {
         limit_req zone=api burst=50 nodelay;
@@ -526,7 +528,7 @@ EOF
     }
 
     # ===================================================
-    # RECORDING TRANSCRIBE (/transcribe_recording) - PROXY TO FLASK VIA HTTPS
+    # RECORDING TRANSCRIBE (/transcribe_recording) - PROXY TO FLASK
     # ===================================================
     location /transcribe_recording {
         proxy_pass https://speech_anonymizer/transcribe_recording;
@@ -542,7 +544,7 @@ EOF
     }
 
     # ===================================================
-    # DOWNLOAD ENDPOINTS (/download/) - PROXY TO FLASK VIA HTTPS
+    # DOWNLOAD ENDPOINTS (/download/) - PROXY TO FLASK
     # ===================================================
     location /download/ {
         proxy_pass https://speech_anonymizer/download/;
@@ -552,7 +554,7 @@ EOF
     }
 
     # ===================================================
-    # API ENDPOINTS (ALL OTHER PATHS) - PROXY TO FLASK VIA HTTPS
+    # API ENDPOINTS (ALL OTHER PATHS) - PROXY TO FLASK
     # ===================================================
     location / {
         limit_req zone=api burst=20 nodelay;
@@ -716,6 +718,24 @@ verify_changes() {
         print_warning "Rate limiting zone NOT DEFINED"
     fi
     
+    # Check logos route exists
+    if grep -q "location.*^~ /logos/" "$SPEECH_SITE"; then
+        print_success "/logos/ route for static logo files: configured (verified)"
+    else
+        print_error "/logos/ route NOT FOUND - logos will not load!"
+        all_ok=false
+    fi
+    
+    # Check logos path exists
+    if [[ -d "$LOGOS_PATH" ]]; then
+        print_success "Logos directory exists: $LOGOS_PATH"
+        local logo_count=$(ls -1 "$LOGOS_PATH"/*.svg 2>/dev/null | wc -l)
+        print_info "Logos found: $logo_count"
+    else
+        print_warning "Logos directory NOT FOUND: $LOGOS_PATH"
+        print_info "Run 'npm run build' in frontend folder first"
+    fi
+    
     if [[ "$all_ok" == "true" ]]; then
         print_success "All configurations verified successfully!"
     else
@@ -732,6 +752,8 @@ show_summary() {
     echo "  • React frontend URL:  https://transcriber.cloud.cci.charite.de/app/"
     echo "  • React container port: ${REACT_PORT}:80 (HTTP, nginx terminates SSL)"
     echo "  • Backend protocol:     ${FLASK_PROTOCOL} (Flask on port ${FLASK_PORT})"
+    echo "  • Logos URL:            https://transcriber.cloud.cci.charite.de/logos/"
+    echo "  • Logos directory:      ${LOGOS_PATH}"
     echo "  • Max upload size:      ${MAX_BODY_SIZE}"
     echo "  • Rate limiting:        api:10m (10 req/s)"
     echo "  • External SSL certs:   ${SSL_CERT_FILE}"
@@ -749,32 +771,41 @@ show_summary() {
     if [[ "${USE_HTTPS:-true}" == "true" ]]; then
         echo "  • React frontend:  https://transcriber.cloud.cci.charite.de/app/"
         echo "  • Backend API:     https://transcriber.cloud.cci.charite.de/"
+        echo "  • Logos:           https://transcriber.cloud.cci.charite.de/logos/"
         echo "  • Health check:    https://transcriber.cloud.cci.charite.de/health"
         echo "  • Local React:     http://localhost:8080/app/"
         echo "  • Local backend:   https://localhost:5001/"
     else
         echo "  • React frontend:  http://transcriber.cloud.cci.charite.de/app/"
         echo "  • Backend API:     http://transcriber.cloud.cci.charite.de/"
+        echo "  • Logos:           http://transcriber.cloud.cci.charite.de/logos/"
         echo "  • Local React:     http://localhost:8080/app/"
         echo "  • Local backend:   http://localhost:5001/"
     fi
     echo ""
     
     echo -e "${YELLOW}Next Steps:${NC}"
-    echo "  1. Ensure Flask is running with HTTPS:"
+    echo "  1. Ensure frontend is built:"
+    echo "     cd frontend && npm run build"
+    echo "     # Verify logos exist: ls dist/logos/"
+    echo ""
+    echo "  2. Ensure Flask is running with HTTPS:"
     echo "     conda activate whisperx"
     echo "     python interactive_app/app.py"
     echo "     # Verify: curl -k https://localhost:5001/health"
     echo ""
-    echo "  2. Start Docker containers:"
+    echo "  3. Start Docker containers:"
     echo "     cd $ATA_PROJECT_ROOT"
     echo "     docker compose up -d frontend"
     echo "     docker ps -a"
     echo ""
-    echo "  3. Test React frontend:"
+    echo "  4. Test React frontend:"
     echo "     curl -k https://localhost/app/ -L"
     echo ""
-    echo "  4. Check nginx logs for errors:"
+    echo "  5. Test logos:"
+    echo "     curl -k https://localhost/logos/VERANDA_LOGO.svg"
+    echo ""
+    echo "  6. Check nginx logs for errors:"
     echo "     tail -f /var/log/nginx/error.log"
     echo ""
     echo -e "${GREEN}✅ Nginx configuration is ready with end-to-end SSL!${NC}"
@@ -870,6 +901,9 @@ case "${1:-setup}" in
             echo ""
             echo "Routes configured:"
             grep "location" "$SPEECH_SITE" | head -10
+            echo ""
+            echo "Logos directory status:"
+            ls -la "$LOGOS_PATH" 2>/dev/null || print_warning "Logos directory not found: $LOGOS_PATH"
         else
             print_warning "No site configuration found"
         fi

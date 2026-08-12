@@ -4,8 +4,9 @@
 # Features:
 #   - Auto-detects SSL certificates from ssl_certs/ directory
 #   - Compatible with setup_ssl.sh certificate management
-#   - Routes /app/ to React frontend (Docker port 8080)
-#   - Routes / to Flask backend (HTTPS port 5001)
+#   - Routes /app/ to React frontend (Docker port 8080, HTTP)
+#   - Routes / to Flask backend (HTTPS port 5001, end-to-end SSL)
+#   - Routes /logos/ to static logo files (frontend/dist/logos)
 #   - Includes backups and rollback support
 #===============================================================================
 
@@ -20,6 +21,12 @@ SPEECH_SITE="/etc/nginx/sites-enabled/speech-anonymizer"
 SPEECH_SITE_BACKUP="/etc/nginx/backups/speech-anonymizer.$(date +%Y%m%d_%H%M%S).bak"
 MAIN_CONF_BACKUP="/etc/nginx/backups/nginx.conf.$(date +%Y%m%d_%H%M%S).bak"
 
+if [[ -f "config.sh" ]]; then
+    source config.sh
+fi
+
+ENABLE_CSP_HEADER="true"
+
 MAX_BODY_SIZE="5G"
 PROXY_READ_TIMEOUT="600s"
 PROXY_SEND_TIMEOUT="600s"
@@ -32,10 +39,11 @@ SSL_CERT_DIR="${ATA_PROJECT_ROOT}/ssl_certs"
 SSL_CERT_FILE="${SSL_CERT_DIR}/server.crt"
 SSL_KEY_FILE="${SSL_CERT_DIR}/server.key"
 STATIC_FILES_PATH="${ATA_PROJECT_ROOT}/interactive_app/static"
+LOGOS_PATH="${ATA_PROJECT_ROOT}/frontend/dist/logos"
 
 # Ports (MUST match your services)
-REACT_PORT=8080          # React frontend (Docker container)
-FLASK_PORT=5002          # Flask backend (HTTPS)
+REACT_PORT=8080          # React frontend (Docker container, HTTP)
+FLASK_PORT=5001          # Flask backend (HTTPS — end-to-end SSL)
 FLASK_PROTOCOL="https"   # Flask runs with SSL enabled
 FLASK_APP="app.py"       # Flask app filename
 
@@ -83,26 +91,133 @@ check_nginx() {
 check_ssl_certificates() {
     print_info "Checking for SSL certificates..."
     
+    # ==========================================================
+    # PRIORITY 1: Let's Encrypt / Certbot (Production Preferred)
+    # ==========================================================
+    CERTBOT_CERT="/etc/letsencrypt/live/transcriber.cloud.cci.charite.de/fullchain.pem"
+    CERTBOT_KEY="/etc/letsencrypt/live/transcriber.cloud.cci.charite.de/privkey.pem"
+    
+    if [[ -f "$CERTBOT_CERT" && -f "$CERTBOT_KEY" ]]; then
+        print_success "Certbot/Let's Encrypt certificates detected!"
+        print_info "Using: $CERTBOT_CERT"
+        
+        export SSL_CERT_FILE="$CERTBOT_CERT"
+        export SSL_KEY_FILE="$CERTBOT_KEY"
+        
+        # Detect key type and extract modulus accordingly
+        local cert_modulus
+        local key_modulus
+        
+        cert_modulus=$(openssl x509 -noout -modulus -in "$CERTBOT_CERT" 2>/dev/null | openssl md5 | awk '{print $NF}')
+        
+        if openssl rsa -noout -modulus -in "$CERTBOT_KEY" 2>/dev/null | grep -q "Modulus"; then
+            key_modulus=$(openssl rsa -noout -modulus -in "$CERTBOT_KEY" 2>/dev/null | openssl md5 | awk '{print $NF}')
+            print_info "Key type: RSA"
+        elif openssl ec -noout -modulus -in "$CERTBOT_KEY" 2>/dev/null | grep -q "Modulus"; then
+            key_modulus=$(openssl ec -noout -modulus -in "$CERTBOT_KEY" 2>/dev/null | openssl md5 | awk '{print $NF}')
+            print_info "Key type: ECDSA"
+        else
+            print_warning "Unable to determine key type - skipping modulus validation"
+            print_warning "Assuming Let's Encrypt validation is sufficient."
+            key_modulus=""
+        fi
+        
+        if [[ -n "$cert_modulus" && -n "$key_modulus" ]]; then
+            if [[ "$cert_modulus" != "$key_modulus" ]]; then
+                print_error "Let's Encrypt certificate and key do not match!"
+                print_info "Cert MD5: $cert_modulus"
+                print_info "Key MD5:  $key_modulus"
+                return 1
+            else
+                print_success "Certificate and key modulus match"
+            fi
+        elif [[ -z "$cert_modulus" && -z "$key_modulus" ]]; then
+            print_warning "Unable to extract modulus from cert/key - skipping validation"
+        fi
+        
+        local expiry_date=$(openssl x509 -enddate -noout -in "$CERTBOT_CERT" 2>/dev/null | cut -d= -f2)
+        local expiry_epoch=$(date -d "$expiry_date" +%s 2>/dev/null)
+        local now_epoch=$(date +%s)
+        local days_left=$(( (expiry_epoch - now_epoch) / 86400 ))
+        
+        print_success "Certificate expires: $expiry_date ($days_left days remaining)"
+        
+        if [[ "$days_left" -lt 14 ]]; then
+            print_warning "Certificate expires in less than 14 days! Run: sudo certbot renew"
+        fi
+        
+        return 0
+    fi
+    
+    # ==========================================================
+    # PRIORITY 2: Self-Signed from ATA/ssl_certs/ (Development)
+    # ==========================================================
     if [[ -f "$SSL_CERT_FILE" && -f "$SSL_KEY_FILE" ]]; then
-        print_success "Certificates found: $SSL_CERT_DIR"
+        print_success "Self-signed certificates found: $SSL_CERT_DIR"
+        print_info "Using: $SSL_CERT_FILE"
+        
+        local cert_modulus
+        local key_modulus
+        
+        cert_modulus=$(openssl x509 -noout -modulus -in "$SSL_CERT_FILE" 2>/dev/null | openssl md5 | awk '{print $NF}')
+        
+        if openssl rsa -noout -modulus -in "$SSL_KEY_FILE" 2>/dev/null | grep -q "Modulus"; then
+            key_modulus=$(openssl rsa -noout -modulus -in "$SSL_KEY_FILE" 2>/dev/null | openssl md5 | awk '{print $NF}')
+            print_info "Key type: RSA"
+        elif openssl ec -noout -modulus -in "$SSL_KEY_FILE" 2>/dev/null | grep -q "Modulus"; then
+            key_modulus=$(openssl ec -noout -modulus -in "$SSL_KEY_FILE" 2>/dev/null | openssl md5 | awk '{print $NF}')
+            print_info "Key type: ECDSA"
+        else
+            print_warning "Unable to determine key type - skipping modulus validation"
+            key_modulus=""
+        fi
+        
+        if [[ -n "$cert_modulus" && -n "$key_modulus" ]]; then
+            if [[ "$cert_modulus" != "$key_modulus" ]]; then
+                print_error "Self-signed certificate and key do not match!"
+                print_info "Cert MD5: $cert_modulus"
+                print_info "Key MD5:  $key_modulus"
+                return 1
+            else
+                print_success "Certificate and key modulus match"
+            fi
+        fi
+        
+        local expiry_date=$(openssl x509 -enddate -noout -in "$SSL_CERT_FILE" 2>/dev/null | cut -d= -f2)
+        local expiry_epoch=$(date -d "$expiry_date" +%s 2>/dev/null)
+        local now_epoch=$(date +%s)
+        local days_left=$(( (expiry_epoch - now_epoch) / 86400 ))
+        
+        print_info "Certificate expires: $expiry_date ($days_left days remaining)"
+        
+        return 0
+    fi
+    
+    # ==========================================================
+    # NO CERTIFICATES FOUND - Error Out
+    # ==========================================================
+    print_error "No SSL certificates found!"
+    echo ""
+    echo "Options:"
+    echo "  1. Install Certbot and request a Let's Encrypt certificate:"
+    echo "     sudo apt install certbot python3-certbot-nginx"
+    echo "     sudo certbot --nginx -d transcriber.cloud.cci.charite.de"
+    echo ""
+    echo "  2. Generate self-signed certificates using ATA script:"
+    echo "     ./ssl_certs/setup_ssl.sh"
+    echo ""
+    echo "  3. Continue with HTTP only (NOT recommended for medical data):"
+    read -p "Continue with HTTP only? [y/N] " -n 1 -r
+    echo
+    
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        export USE_HTTPS=false
+        print_warning "WARNING: Running without SSL/TLS encryption!"
+        print_warning "Medical data will be transmitted in plain text."
         return 0
     else
-        print_warning "No certificates found in $SSL_CERT_DIR!"
-        echo ""
-        echo -e "${YELLOW}Please run the SSL certificate setup script first:${NC}"
-        echo "  cd $ATA_PROJECT_ROOT"
-        echo "  ./ssl_certs/setup_ssl.sh"
-        echo ""
-        echo "Or continue without SSL (HTTP only):"
-        read -p "Continue with HTTP only? [y/N] " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            export USE_HTTPS=false
-            return 0
-        else
-            print_error "Aborted - SSL certificates are required for HTTPS"
-            exit 1
-        fi
+        print_error "Aborted - SSL certificates are required for secure operation"
+        exit 1
     fi
 }
 
@@ -147,11 +262,28 @@ fix_malformed_site_configs() {
 }
 
 #-------------------------------------------------------------------------------
-# CREATE NGINX SITES CONFIG (UPDATED WITH /app/ ROUTE)
+# CREATE NGINX SITES CONFIG
 #-------------------------------------------------------------------------------
 
 create_site_config() {
     print_info "Creating nginx site configuration..."
+    
+    # ============================================
+    # CERTIFICATE PRIORITY: LET'S ENCRYPT > SELF-SIGNED
+    # ============================================
+    if [[ -z "$SSL_CERT_FILE" || -z "$SSL_KEY_FILE" ]]; then
+        print_error "SSL_CERT_FILE or SSL_KEY_FILE not set!"
+        exit 1
+    fi
+    
+    # Determine certificate type for logging
+    if [[ "$SSL_CERT_FILE" == "/etc/letsencrypt"* ]]; then
+        print_success "Using Let's Encrypt certificates."
+        USE_LETSENCRYPT=true
+    else
+        print_info "Using self-signed certificates."
+        USE_LETSENCRYPT=false
+    fi
     
     # ============================================
     # UPSTREAM AND RATE LIMITING
@@ -161,11 +293,13 @@ create_site_config() {
 # Nginx Reverse Proxy Configuration for Speech Anonymizer
 # Generated by setup_nginx.sh
 # Compatible with ssl_certs/setup_ssl.sh certificate management
-# UPDATED: Added /app/ route for React frontend (port 8080)
-# FIXED: Connects to Flask backend via HTTPS (port 5001)
+# Architecture:
+#   - nginx terminates external SSL (port 443)
+#   - Flask backend serves HTTPS on port 5001 (end-to-end SSL)
+#   - React frontend container serves HTTP on port 8080 (nginx terminates SSL)
 # ============================================================================
 
-# Upstream definition (Flask app - running with SSL)
+# Upstream definition (Flask app — running with SSL on port 5001)
 upstream speech_anonymizer {
     server 127.0.0.1:5001;
     keepalive 32;
@@ -194,7 +328,7 @@ server {
 NGINX_HTTP
     else
         cat >> "$SPEECH_SITE" << 'NGINX_HTTP_ONLY'
-# HTTP Server Only (No SSL)
+# HTTP Server Only (No SSL — NOT recommended for medical data)
 server {
     listen 80;
     listen [::]:80;
@@ -205,12 +339,22 @@ server {
     send_timeout 600s;
 
     # ===================================================
+    # LOGOS STATIC FILES (/logos/)
+    # ===================================================
+    location ^~ /logos/ {
+        alias ${LOGOS_PATH}/;
+        expires 30d;
+        add_header Cache-Control "public, immutable";
+        try_files $uri =404;
+    }
+
+    # ===================================================
     # REACT FRONTEND (/app/) - PROXY TO DOCKER CONTAINER
     # ===================================================
     location ^~ /app/ {
         limit_req zone=api burst=50 nodelay;
 
-        proxy_pass https://127.0.0.1:8080;
+        proxy_pass http://127.0.0.1:8080;
         proxy_http_version 1.1;
 
         proxy_set_header Host $host;
@@ -228,17 +372,17 @@ server {
     # STATIC FILES (/static/)
     # ===================================================
     location /static/ {
-        alias /mnt/Data_Mount/VERANDA_DataMount/ATA/interactive_app/static/;
+        alias /mnt/Data_Mount/VERANDA_DataMount/Experimental/ATA/interactive_app/static/;
         expires 30d;
         add_header Cache-Control "public, immutable";
         try_files $uri $uri/ =404;
     }
 
     # ===================================================
-    # HEALTH CHECK (/health)
+    # HEALTH CHECK (/health) - PROXY TO FLASK (HTTP)
     # ===================================================
     location /health {
-        proxy_pass https://127.0.0.1:5001/health;
+        proxy_pass http://127.0.0.1:5001/health;
         access_log off;
         limit_req zone=api burst=100 nodelay;
     }
@@ -249,7 +393,7 @@ server {
     location / {
         limit_req zone=api burst=20 nodelay;
 
-        proxy_pass https://127.0.0.1:5001;
+        proxy_pass http://127.0.0.1:5001;
         proxy_http_version 1.1;
 
         proxy_set_header Host $host;
@@ -280,7 +424,7 @@ server {
     
     server_name transcriber.cloud.cci.charite.de localhost 127.0.0.1 _;
 
-    # SSL Configuration (from ssl_certs/ directory)
+    # SSL Configuration (external termination)
     ssl_certificate ${SSL_CERT_FILE};
     ssl_certificate_key ${SSL_KEY_FILE};
     ssl_protocols TLSv1.2 TLSv1.3;
@@ -289,11 +433,27 @@ server {
     ssl_session_cache shared:SSL:10m;
     ssl_session_timeout 10m;
 
+    # ===================================================
+    # UPSTREAM SSL SETTINGS (Flask serves HTTPS)
+    # ===================================================
+    proxy_ssl_verify off;
+    proxy_ssl_server_name on;
+    proxy_ssl_protocols TLSv1.2 TLSv1.3;
+
     # Security headers
     add_header X-Frame-Options "SAMEORIGIN" always;
     add_header X-Content-Type-Options "nosniff" always;
     add_header X-XSS-Protection "1; mode=block" always;
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+EOF
+
+        if [[ -n "$ENABLE_CSP_HEADER" ]]; then
+            cat >> "$SPEECH_SITE" << 'EOF'
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self';" always;
+EOF
+        fi
+
+        cat >> "$SPEECH_SITE" << EOF
 
     # Large upload settings
     client_max_body_size 5G;
@@ -303,12 +463,22 @@ server {
     send_timeout 600s;
 
     # ===================================================
+    # LOGOS STATIC FILES (/logos/)
+    # ===================================================
+    location ^~ /logos/ {
+        alias ${LOGOS_PATH}/;
+        expires 30d;
+        add_header Cache-Control "public, immutable";
+        try_files $uri =404;
+    }
+
+    # ===================================================
     # REACT FRONTEND (/app/) - PROXY TO DOCKER CONTAINER
     # ===================================================
     location ^~ /app/ {
         limit_req zone=api burst=50 nodelay;
 
-        proxy_pass https://127.0.0.1:${REACT_PORT};
+        proxy_pass http://127.0.0.1:${REACT_PORT};
         proxy_http_version 1.1;
 
         proxy_set_header Host \$host;
@@ -333,23 +503,19 @@ server {
     }
 
     # ===================================================
-    # HEALTH CHECK (/health)
+    # HEALTH CHECK (/health) - PROXY TO FLASK VIA HTTPS
     # ===================================================
     location /health {
-        proxy_pass http://speech_anonymizer/health;
-        proxy_ssl_verify off;
-        proxy_ssl_server_name on;
+        proxy_pass https://speech_anonymizer/health;
         access_log off;
         limit_req zone=api burst=100 nodelay;
     }
 
     # ===================================================
-    # UPLOAD ENDPOINT (/upload)
+    # UPLOAD ENDPOINT (/upload) - PROXY TO FLASK VIA HTTPS
     # ===================================================
     location /upload {
-        proxy_pass http://speech_anonymizer/upload;
-        proxy_ssl_verify off;
-        proxy_ssl_server_name on;
+        proxy_pass https://speech_anonymizer/upload;
 
         client_max_body_size 5G;
         client_body_timeout 600s;
@@ -362,12 +528,10 @@ server {
     }
 
     # ===================================================
-    # RECORDING TRANSCRIBE (/transcribe_recording)
+    # RECORDING TRANSCRIBE (/transcribe_recording) - PROXY TO FLASK
     # ===================================================
     location /transcribe_recording {
-        proxy_pass http://speech_anonymizer/transcribe_recording;
-        proxy_ssl_verify off;
-        proxy_ssl_server_name on;
+        proxy_pass https://speech_anonymizer/transcribe_recording;
 
         client_max_body_size 5G;
         client_body_timeout 600s;
@@ -380,12 +544,10 @@ server {
     }
 
     # ===================================================
-    # DOWNLOAD ENDPOINTS (/download/)
+    # DOWNLOAD ENDPOINTS (/download/) - PROXY TO FLASK
     # ===================================================
     location /download/ {
-        proxy_pass http://speech_anonymizer/download/;
-        proxy_ssl_verify off;
-        proxy_ssl_server_name on;
+        proxy_pass https://speech_anonymizer/download/;
 
         proxy_http_version 1.1;
         proxy_read_timeout 300s;
@@ -397,12 +559,8 @@ server {
     location / {
         limit_req zone=api burst=20 nodelay;
 
-        proxy_pass http://speech_anonymizer;
+        proxy_pass https://speech_anonymizer;
         proxy_http_version 1.1;
-
-        proxy_ssl_verify off;
-        proxy_ssl_server_name on;
-        proxy_ssl_session_reuse on;
 
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
@@ -522,28 +680,35 @@ verify_changes() {
         all_ok=false
     fi
     
-    # Check React port
-    if grep -q "proxy_pass https://127.0.0.1:${REACT_PORT}" "$SPEECH_SITE"; then
-        print_success "React proxy port: ${REACT_PORT} (verified)"
+    # Check React port uses HTTP
+    if grep -q "proxy_pass http://127.0.0.1:${REACT_PORT}" "$SPEECH_SITE"; then
+        print_success "React proxy port: ${REACT_PORT} (HTTP - correct)"
     else
-        print_error "React proxy port NOT configured!"
+        print_error "React proxy port NOT configured correctly!"
         all_ok=false
     fi
     
-    # Check backend port
-    if grep -q "proxy_pass http://127.0.0.1:5001;" "$SPEECH_SITE" || grep -q "proxy_pass http://127.0.0.1:${FLASK_PORT}" "$SPEECH_SITE"; then
-        print_success "Backend proxy: Flask on port ${FLASK_PORT} (verified)"
+    # Check backend port uses HTTPS
+    if grep -q "proxy_pass https://speech_anonymizer" "$SPEECH_SITE"; then
+        print_success "Backend proxy: Flask on port ${FLASK_PORT} (HTTPS - end-to-end SSL verified)"
     else
-        print_error "Backend proxy NOT configured!"
+        print_error "Backend proxy NOT configured for HTTPS!"
         all_ok=false
     fi
     
     # Check SSL paths
     if grep -q "ssl_certificate ${SSL_CERT_FILE}" "$SPEECH_SITE"; then
-        print_success "SSL certificate path configured (verified)"
+        print_success "External SSL certificate path configured (verified)"
     else
         print_error "SSL certificate path not configured!"
         all_ok=false
+    fi
+    
+    # Check proxy_ssl settings for Flask upstream
+    if grep -q "proxy_ssl_verify off" "$SPEECH_SITE"; then
+        print_success "Upstream SSL verification disabled (expected for self-signed Flask certs)"
+    else
+        print_warning "proxy_ssl_verify not explicitly set - may default to strict"
     fi
     
     # Check rate limiting
@@ -551,6 +716,24 @@ verify_changes() {
         print_success "Rate limiting zone defined (verified)"
     else
         print_warning "Rate limiting zone NOT DEFINED"
+    fi
+    
+    # Check logos route exists
+    if grep -q "location.*^~ /logos/" "$SPEECH_SITE"; then
+        print_success "/logos/ route for static logo files: configured (verified)"
+    else
+        print_error "/logos/ route NOT FOUND - logos will not load!"
+        all_ok=false
+    fi
+    
+    # Check logos path exists
+    if [[ -d "$LOGOS_PATH" ]]; then
+        print_success "Logos directory exists: $LOGOS_PATH"
+        local logo_count=$(ls -1 "$LOGOS_PATH"/*.svg 2>/dev/null | wc -l)
+        print_info "Logos found: $logo_count"
+    else
+        print_warning "Logos directory NOT FOUND: $LOGOS_PATH"
+        print_info "Run 'npm run build' in frontend folder first"
     fi
     
     if [[ "$all_ok" == "true" ]]; then
@@ -567,44 +750,65 @@ show_summary() {
     
     echo -e "${GREEN}Configuration Summary:${NC}"
     echo "  • React frontend URL:  https://transcriber.cloud.cci.charite.de/app/"
-    echo "  • React container port: ${REACT_PORT}:80"
-    echo "  • Backend protocol:     ${FLASK_PROTOCOL} (to Flask on port ${FLASK_PORT})"
+    echo "  • React container port: ${REACT_PORT}:80 (HTTP, nginx terminates SSL)"
+    echo "  • Backend protocol:     ${FLASK_PROTOCOL} (Flask on port ${FLASK_PORT})"
+    echo "  • Logos URL:            https://transcriber.cloud.cci.charite.de/logos/"
+    echo "  • Logos directory:      ${LOGOS_PATH}"
     echo "  • Max upload size:      ${MAX_BODY_SIZE}"
     echo "  • Rate limiting:        api:10m (10 req/s)"
-    echo "  • SSL certificates:     ${SSL_CERT_DIR}"
+    echo "  • External SSL certs:   ${SSL_CERT_FILE}"
+    echo "  • Upstream SSL:         Enabled for Flask (self-signed certs)"
     echo "  • Site config:          ${SPEECH_SITE}"
+    echo ""
+    
+    echo -e "${YELLOW}Security Architecture:${NC}"
+    echo "  1. Client → nginx: HTTPS (external SSL termination)"
+    echo "  2. nginx → React:  HTTP  (container serves plain HTTP)"
+    echo "  3. nginx → Flask:  HTTPS (end-to-end SSL with self-signed certs)"
     echo ""
     
     echo -e "${YELLOW}Access URLs:${NC}"
     if [[ "${USE_HTTPS:-true}" == "true" ]]; then
         echo "  • React frontend:  https://transcriber.cloud.cci.charite.de/app/"
         echo "  • Backend API:     https://transcriber.cloud.cci.charite.de/"
+        echo "  • Logos:           https://transcriber.cloud.cci.charite.de/logos/"
         echo "  • Health check:    https://transcriber.cloud.cci.charite.de/health"
-        echo "  • Local React:     https://localhost:8080/app/"
+        echo "  • Local React:     http://localhost:8080/app/"
         echo "  • Local backend:   https://localhost:5001/"
     else
         echo "  • React frontend:  http://transcriber.cloud.cci.charite.de/app/"
         echo "  • Backend API:     http://transcriber.cloud.cci.charite.de/"
+        echo "  • Logos:           http://transcriber.cloud.cci.charite.de/logos/"
         echo "  • Local React:     http://localhost:8080/app/"
         echo "  • Local backend:   http://localhost:5001/"
     fi
     echo ""
     
     echo -e "${YELLOW}Next Steps:${NC}"
-    echo "  1. Start Docker containers:"
+    echo "  1. Ensure frontend is built:"
+    echo "     cd frontend && npm run build"
+    echo "     # Verify logos exist: ls dist/logos/"
+    echo ""
+    echo "  2. Ensure Flask is running with HTTPS:"
+    echo "     conda activate whisperx"
+    echo "     python interactive_app/app.py"
+    echo "     # Verify: curl -k https://localhost:5001/health"
+    echo ""
+    echo "  3. Start Docker containers:"
     echo "     cd $ATA_PROJECT_ROOT"
     echo "     docker compose up -d frontend"
-    echo ""
-    echo "  2. Verify containers are running:"
     echo "     docker ps -a"
     echo ""
-    echo "  3. Test React frontend:"
-    echo "     curl -k https://localhost/app/"
+    echo "  4. Test React frontend:"
+    echo "     curl -k https://localhost/app/ -L"
     echo ""
-    echo "  4. Check nginx logs for errors:"
+    echo "  5. Test logos:"
+    echo "     curl -k https://localhost/logos/VERANDA_LOGO.svg"
+    echo ""
+    echo "  6. Check nginx logs for errors:"
     echo "     tail -f /var/log/nginx/error.log"
     echo ""
-    echo -e "${GREEN}✅ Nginx configuration is ready!${NC}"
+    echo -e "${GREEN}✅ Nginx configuration is ready with end-to-end SSL!${NC}"
     echo ""
 }
 
@@ -625,7 +829,7 @@ rollback() {
         print_success "Main config restored"
     fi
     
-    if nginx -t 2>/dev/null; then
+    if nginx -t 2>&1 >/dev/null; then
         nginx -s reload 2>/dev/null || systemctl reload nginx 2>/dev/null || true
         print_success "Nginx reloaded after rollback"
     fi
@@ -697,6 +901,9 @@ case "${1:-setup}" in
             echo ""
             echo "Routes configured:"
             grep "location" "$SPEECH_SITE" | head -10
+            echo ""
+            echo "Logos directory status:"
+            ls -la "$LOGOS_PATH" 2>/dev/null || print_warning "Logos directory not found: $LOGOS_PATH"
         else
             print_warning "No site configuration found"
         fi
