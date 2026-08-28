@@ -26,6 +26,33 @@
         h1 { text-align: center; color: #003754; margin-bottom: 10px; font-size: 2.8em; font-weight: 600; text-shadow: 0 2px 4px rgba(0, 55, 84, 0.1); }
         .subtitle { text-align: center; color: #009AA9; margin-bottom: 40px; font-size: 1.2em; font-weight: 500; }
 
+        /* === SIDEBAR ANNOTATION BOXES === */
+        .annotation-box {
+            background: linear-gradient(135deg, #E8F7F8 0%, #F0FBFC 100%);
+            border-left: 4px solid #009AA9;
+            padding: 15px 20px;
+            margin: 10px 0 20px 0;
+            border-radius: 8px;
+            font-size: 13px;
+            color: #003754;
+            box-shadow: 0 2px 6px rgba(0, 55, 84, 0.1);
+        }
+        .annotation-box strong { color: #009AA9; display: block; margin-bottom: 5px; }
+        .annotation-box p { line-height: 1.5; margin: 0; }
+
+        /* Section with annotation - flexible layout */
+        .section-with-annotation {
+            display: flex; gap: 25px; margin-bottom: 30px; align-items: flex-start;
+        }
+        .section-main { flex: 1; }
+        .section-annotation {
+            width: 280px; flex-shrink: 0;
+        }
+        @media (max-width: 900px) {
+            .section-with-annotation { flex-direction: column; }
+            .section-annotation { width: 100%; }
+        }
+
         .section {
             margin-bottom: 30px; padding: 25px; border-radius: 15px;
             background: linear-gradient(135deg, #FFFAF9 0%, #FFF5F4 100%);
@@ -131,7 +158,7 @@
         .level-selector select {
             padding: 12px 16px; border: 2px solid #FFB0AC; border-radius: 10px;
             font-size: 15px; background: #FFFFFF; color: #003754; font-weight: 500;
-            transition: all 0.3s ease;
+            transition: all 0.2s ease;
         }
         .level-selector select:focus {
             outline: none; border-color: #009AA9; box-shadow: 0 0 8px rgba(0, 154, 169, 0.3);
@@ -162,7 +189,44 @@
         .icon { font-size: 20px; }
         .hidden { display: none; }
 
-        /* PII Tag Selection Flat Grid - Human Readable Terms */
+        /* === EXPANDING PII TAG MENU === */
+        .pii-tag-toggle-container {
+            margin-bottom: 15px;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .pii-tag-toggle-btn {
+            background: #F5FCF8;
+            border: 2px solid #009A54;
+            color: #003754;
+            padding: 8px 20px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.2s ease;
+        }
+        .pii-tag-toggle-btn:hover {
+            background: #009A54;
+            color: #FFFFFF;
+            border-color: #009A54;
+        }
+        .pii-tag-toggle-btn::after {
+            content: " ▼";
+            font-size: 10px;
+            transition: transform 0.2s ease;
+        }
+        .pii-tag-toggle-btn.collapsed::after {
+            content: " ▶";
+            transform: rotate(-90deg);
+        }
+        .pii-tag-expand-wrapper {
+            overflow: hidden;
+            max-height: 500px;
+            transition: max-height 0.3s ease-out;
+        }
+        .pii-tag-expand-wrapper.collapsed {
+            max-height: 0;
+        }
         .pii-tag-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
@@ -213,6 +277,123 @@
             gap: 15px; margin-top: 15px;
         }
         .download-btn { width: 100%; justify-content: center; }
+
+        /* === SURVEY MODAL POPUP === */
+        .modal-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0, 55, 84, 0.7);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 10000;
+        }
+        .modal-overlay.active {
+            display: flex;
+            animation: fadeIn 0.3s ease;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        .modal-content {
+            background: #FFFFFF;
+            border-radius: 20px;
+            padding: 40px;
+            max-width: 550px;
+            width: 90%;
+            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.3);
+            position: relative;
+            animation: slideUp 0.4s ease;
+        }
+        @keyframes slideUp {
+            from { transform: translateY(50px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        .modal-close {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            background: #F5F5F5;
+            border: none;
+            width: 35px;
+            height: 35px;
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 22px;
+            color: #003754;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+        }
+        .modal-close:hover {
+            background: #EA5451;
+            color: #FFFFFF;
+            transform: rotate(90deg);
+        }
+        .modal-header {
+            text-align: center;
+            margin-bottom: 25px;
+        }
+        .modal-header h2 {
+            color: #003754;
+            font-size: 1.8em;
+            margin-bottom: 10px;
+        }
+        .modal-header .modal-icon {
+            font-size: 3em;
+            margin-bottom: 15px;
+        }
+        .modal-body {
+            color: #003754;
+            line-height: 1.7;
+            font-size: 15px;
+            margin-bottom: 30px;
+        }
+        .modal-body p {
+            margin-bottom: 15px;
+        }
+        .modal-body a {
+            color: #009AA9;
+            text-decoration: underline;
+            font-weight: 600;
+        }
+        .modal-body a:hover {
+            color: #EA5451;
+        }
+        .modal-footer {
+            text-align: center;
+        }
+        .modal-cta-btn {
+            background: linear-gradient(135deg, #009AA9 0%, #003754 100%);
+            color: #FFFFFF;
+            border: none;
+            padding: 15px 40px;
+            border-radius: 30px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            text-decoration: none;
+            display: inline-block;
+            transition: all 0.3s ease;
+        }
+        .modal-cta-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(0, 154, 169, 0.4);
+        }
+        .modal-dismiss-link {
+            display: block;
+            text-align: center;
+            margin-top: 20px;
+            color: #009AA9;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .modal-dismiss-link:hover {
+            color: #EA5451;
+            text-decoration: underline;
+        }
     </style>
 </head>
 <body>
@@ -233,53 +414,73 @@
         <div class="loader" id="loader"></div>
         <div id="status" class="status"></div>
 
-        <!-- 1. Transcription Settings -->
-        <div class="section">
-            <h3>Transcription Settings</h3>
-            <div class="language-selector">
-                <label for="transcription-language">Transcription Language:</label>
-                <select id="transcription-language">
-                    <option value="auto" selected>Auto-Detect (Default)</option>
-                    <option value="AR">Arabic (AR)</option>
-                    <option value="DE">German (DE)</option>
-                    <option value="EN">English (EN)</option>
-                    <option value="FI">Finnish (FI)</option>
-                    <option value="FR">French (FR)</option>
-                    <option value="HI">Hindi (HI)</option>
-                    <option value="IT">Italian (IT)</option>
-                    <option value="PL">Polish (PL)</option>
-                    <option value="PT">Portuguese (PT)</option>
-                    <option value="ES">Spanish (ES)</option>
-                    <option value="TR">Turkish (TR)</option>
-                </select>
+        <!-- 1. Transcription Settings (WITH ANNOTATION) -->
+        <div class="section-with-annotation">
+            <div class="section-main">
+                <div class="section">
+                    <h3>Transcription Settings</h3>
+                    <div class="language-selector">
+                        <label for="transcription-language">Transcription Language:</label>
+                        <select id="transcription-language">
+                            <option value="auto" selected>Auto-Detect (Default)</option>
+                            <option value="AR">Arabic (AR)</option>
+                            <option value="DE">German (DE)</option>
+                            <option value="EN">English (EN)</option>
+                            <option value="FI">Finnish (FI)</option>
+                            <option value="FR">French (FR)</option>
+                            <option value="HI">Hindi (HI)</option>
+                            <option value="IT">Italian (IT)</option>
+                            <option value="PL">Polish (PL)</option>
+                            <option value="PT">Portuguese (PT)</option>
+                            <option value="ES">Spanish (ES)</option>
+                            <option value="TR">Turkish (TR)</option>
+                        </select>
+                    </div>
+                    <div class="level-selector" style="margin-top: 15px;">
+                        <label for="whisper-model-select">Whisper Model:</label>
+                        <select id="whisper-model-select"></select>
+                    </div>
+                </div>
             </div>
-            <div class="level-selector" style="margin-top: 15px;">
-                <label for="whisper-model-select">Whisper Model:</label>
-                <select id="whisper-model-select"></select>
+            <div class="section-annotation">
+                <div class="annotation-box">
+                    <strong>ℹ️ Model & Language</strong>
+                    <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam.</p>
+                </div>
             </div>
         </div>
 
-        <!-- 2. Input Audio -->
-        <div class="section">
-            <h3>Input Audio</h3>
-            <div class="controls">
-                <button id="record-btn" class="button">
-                    <span class="icon" id="record-icon">🎤 Start </span>Recording
-                </button>
-                <div id="timer" class="timer">00:00</div>
-                <div class="separator">OR</div>
-                <div class="file-input">
-                    <input type="file" id="file-input" accept="audio/*" />
-                    <label for="file-input" id="upload-label">
-                        <span class="icon">📁</span> Click to Upload Audio
-                    </label>
+        <!-- 2. Input Audio (WITH ANNOTATION) -->
+        <div class="section-with-annotation">
+            <div class="section-main">
+                <div class="section">
+                    <h3>Input Audio</h3>
+                    <div class="controls">
+                        <button id="record-btn" class="button">
+                            <span class="icon" id="record-icon">🎤 Start </span>Recording
+                        </button>
+                        <div id="timer" class="timer">00:00</div>
+                        <div class="separator">OR</div>
+                        <div class="file-input">
+                            <input type="file" id="file-input" accept="audio/*" />
+                            <label for="file-input" id="upload-label">
+                                <span class="icon">📁</span> Click to Upload Audio
+                            </label>
+                        </div>
+                    </div>
+                    <div id="filename-display" style="margin-top: 10px; color: #003754; font-weight: 500; text-align: center;"></div>
+                    <div class="button-wrapper">
+                        <button id="transcribe-btn" class="button" disabled>
+                            <span class="icon">▶️</span> Transcribe
+                        </button>
+                    </div>
                 </div>
             </div>
-            <div id="filename-display" style="margin-top: 10px; color: #003754; font-weight: 500; text-align: center;"></div>
-            <div class="button-wrapper">
-                <button id="transcribe-btn" class="button" disabled>
-                    <span class="icon">▶️</span> Transcribe
-                </button>
+            <div class="section-annotation">
+                <div class="annotation-box">
+                    <strong>ℹ️ Recording & Upload</strong>
+                    <p>Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident.</p>
+                </div>
             </div>
         </div>
 
@@ -322,46 +523,81 @@
             <div id="batch-status" class="status" style="margin-top: 15px;"></div>
         </div>
 
-        <!-- 4. Transcribed Text -->
-        <div class="section">
-            <h3>Transcribed Text</h3>
-            <textarea id="transcribed-text" class="text-area" placeholder="Transcription will appear here..."></textarea>
-            <div class="button-wrapper" style="display: flex; gap: 10px; justify-content: center; margin-top: 15px;">
-                <button id="save-edit-btn" class="button secondary">
-                    <span class="icon">💾</span> Save Edit
-                </button>
-                <button id="anonymize-btn" class="button" disabled>
-                    <span class="icon">🔒</span> Anonymize Text
-                </button>
+        <!-- 4. Transcribed Text (WITH ANNOTATION) -->
+        <div class="section-with-annotation">
+            <div class="section-main">
+                <div class="section">
+                    <h3>Transcribed Text</h3>
+                    <textarea id="transcribed-text" class="text-area" placeholder="Transcription will appear here..."></textarea>
+                    <div class="button-wrapper" style="display: flex; gap: 10px; justify-content: center; margin-top: 15px;">
+                        <button id="save-edit-btn" class="button secondary">
+                            <span class="icon">💾</span> Save Edit
+                        </button>
+                        <button id="anonymize-btn" class="button" disabled>
+                            <span class="icon">🔒</span> Anonymize Text
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="section-annotation">
+                <div class="annotation-box">
+                    <strong>ℹ️ Transcription Output</strong>
+                    <p>Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam.</p>
+                </div>
             </div>
         </div>
 
-        <!-- 5. PII Tag Selection (Flat - Human Readable Terms) -->
-        <div class="section">
-            <h3>PII Tag Selection</h3>
-            <p style="color: #009AA9; margin-bottom: 15px; font-size: 0.95em;">
-                Select which categories of personally identifiable information to anonymize. All are enabled by default.
-            </p>
-            <div id="pii-tag-grid" class="pii-tag-grid">
-                <p style="color: #009AA9; font-size: 0.9em; grid-column: 1/-1;">Loading available tags...</p>
+        <!-- 5. PII Tag Selection (EXPANDING MENU WITH ANNOTATION) -->
+        <div class="section-with-annotation">
+            <div class="section-main">
+                <div class="section">
+                    <h3>PII Tag Selection</h3>
+                    <p style="color: #009AA9; margin-bottom: 15px; font-size: 0.95em;">
+                        Select which categories of personally identifiable information to anonymize. All are enabled by default.
+                    </p>
+                    <div class="pii-tag-toggle-container">
+                        <button id="pii-toggle-btn" class="pii-tag-toggle-btn">Hide Tags</button>
+                    </div>
+                    <div id="pii-tag-expand-wrapper" class="pii-tag-expand-wrapper">
+                        <div id="pii-tag-grid" class="pii-tag-grid">
+                            <p style="color: #009AA9; font-size: 0.9em; grid-column: 1/-1;">Loading available tags...</p>
+                        </div>
+                    </div>
+                    <div class="pii-tag-actions">
+                        <button id="pii-select-all">Select All</button>
+                        <button id="pii-clear-all">Clear All</button>
+                    </div>
+                </div>
             </div>
-            <div class="pii-tag-actions">
-                <button id="pii-select-all">Select All</button>
-                <button id="pii-clear-all">Clear All</button>
+            <div class="section-annotation">
+                <div class="annotation-box">
+                    <strong>ℹ️ PII Categories</strong>
+                    <p>Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit, sed quia consequuntur magni dolores.</p>
+                </div>
             </div>
         </div>
 
-        <!-- 6. Anonymized Text -->
-        <div class="section">
-            <h3>Anonymized Text</h3>
-            <textarea id="anonymized-text" class="text-area" placeholder="Anonymized text will appear here..." readonly></textarea>
-            <div id="tts-container" class="hidden" style="display: flex; gap: 10px; justify-content: center; margin-top: 15px;">
-                 <button id="surrogate-btn" class="button">Surrogate</button>
-                 <button id="rephrase-btn" class="button">Rephrase</button>
-                 <button id="generate-speech-btn" class="button">Synthetic Audio</button>
-                 <button id="process-org-audio-btn" class="button">Process Audio</button>
+        <!-- 6. Anonymized Text (WITH ANNOTATION) -->
+        <div class="section-with-annotation">
+            <div class="section-main">
+                <div class="section">
+                    <h3>Anonymized Text</h3>
+                    <textarea id="anonymized-text" class="text-area" placeholder="Anonymized text will appear here..." readonly></textarea>
+                    <div id="tts-container" class="hidden" style="display: flex; gap: 10px; justify-content: center; margin-top: 15px;">
+                         <button id="surrogate-btn" class="button">Surrogate</button>
+                         <button id="rephrase-btn" class="button">Rephrase</button>
+                         <button id="generate-speech-btn" class="button">Synthetic Audio</button>
+                         <button id="process-org-audio-btn" class="button">Process Audio</button>
+                    </div>
+                    <audio id="audio-player" controls class="hidden"></audio>
+                </div>
             </div>
-            <audio id="audio-player" controls class="hidden"></audio>
+            <div class="section-annotation">
+                <div class="annotation-box">
+                    <strong>ℹ️ Anonymization Output</strong>
+                    <p>Neque porro quisquam est, qui dolorem ipsum quia dolor sit amet, consectetur, adipisci velit, sed quia non numquam eius modi tempora.</p>
+                </div>
+            </div>
         </div>
 
         <!-- 7. Download Results -->
@@ -385,9 +621,74 @@
         </div>
     </div>
 
+    <!-- SURVEY MODAL -->
+    <div id="survey-modal" class="modal-overlay">
+        <div class="modal-content">
+            <button id="modal-close-btn" class="modal-close">×</button>
+            <div class="modal-header">
+                <div class="modal-icon">📋</div>
+                <h2>Participate in Our Study!</h2>
+            </div>
+            <div class="modal-body">
+                <p><strong>Lorem ipsum dolor sit amet</strong>, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
+                <p>Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.</p>
+                <p>We invite you to participate in our <strong>user study</strong> about speech anonymization. Your feedback helps us improve the system.</p>
+                <p>Estimated time: <strong>10-15 minutes</strong>. Compensation provided upon completion.</p>
+                <p>Click below to access the survey:</p>
+            </div>
+            <div class="modal-footer">
+                <a href="https://example.com/survey" target="_blank" class="modal-cta-btn" id="survey-link">Take Survey →</a>
+                <span class="modal-dismiss-link" id="modal-dismiss-link">Maybe later</span>
+            </div>
+        </div>
+    </div>
+
     <script>
     document.addEventListener('DOMContentLoaded', () => {
-        // --- DOM Elements ---
+        // === MODAL VARIABLES ===
+        const surveyModal = document.getElementById('survey-modal');
+        const modalCloseBtn = document.getElementById('modal-close-btn');
+        const modalDismissLink = document.getElementById('modal-dismiss-link');
+        let surveyTimer = null;
+
+        // === MODAL FUNCTIONS ===
+        function showSurveyModal() {
+            if (surveyModal && !surveyModal.classList.contains('active')) {
+                surveyModal.classList.add('active');
+            }
+        }
+
+        function hideSurveyModal() {
+            if (surveyModal && surveyModal.classList.contains('active')) {
+                surveyModal.classList.remove('active');
+            }
+        }
+
+        function scheduleSurveyModal() {
+            // Schedule modal to appear 20 seconds after anonymization
+            if (surveyTimer) clearTimeout(surveyTimer);
+            surveyTimer = setTimeout(() => {
+                showSurveyModal();
+            }, 20000); // 20 seconds
+        }
+
+        // Modal event listeners
+        if (modalCloseBtn) {
+            modalCloseBtn.addEventListener('click', hideSurveyModal);
+        }
+        if (modalDismissLink) {
+            modalDismissLink.addEventListener('click', hideSurveyModal);
+        }
+        // Close on overlay click
+        if (surveyModal) {
+            surveyModal.addEventListener('click', (e) => {
+                if (e.target === surveyModal) {
+                    hideSurveyModal();
+                }
+            });
+        }
+
+        // === DOM Elements ===
         const recordBtn = document.getElementById('record-btn');
         const recordIcon = document.getElementById('record-icon');
         const timerDiv = document.getElementById('timer');
@@ -425,6 +726,8 @@
 
         // PII Tag Selection
         const piiTagGrid = document.getElementById('pii-tag-grid');
+        const piiToggleBtn = document.getElementById('pii-toggle-btn');
+        const piiExpandWrapper = document.getElementById('pii-tag-expand-wrapper');
         const piiSelectAllBtn = document.getElementById('pii-select-all');
         const piiClearAllBtn = document.getElementById('pii-clear-all');
         let availablePiiTags = [];
@@ -452,7 +755,16 @@
             'MISC': { label: 'Miscellaneous', desc: 'Other identifiable information' }
         };
 
-        // --- State Variables ---
+        // === PII Toggle Button Logic ===
+        if (piiToggleBtn && piiExpandWrapper) {
+            piiToggleBtn.addEventListener('click', () => {
+                piiExpandWrapper.classList.toggle('collapsed');
+                piiToggleBtn.classList.toggle('collapsed');
+                piiToggleBtn.textContent = piiExpandWrapper.classList.contains('collapsed') ? 'Show Tags' : 'Hide Tags';
+            });
+        }
+
+        // === State Variables ===
         let mediaRecorder;
         let audioChunks = [];
         let timerInterval;
@@ -461,7 +773,7 @@
         let audioBlob = null;
         let uploadedFile = null;
 
-        // --- Core Functions ---
+        // === Core Functions ===
         function updateStatus(message, isError = false) {
             statusDiv.textContent = message;
             statusDiv.className = `status ${isError ? 'error' : 'success'}`;
@@ -478,7 +790,7 @@
 
         function showLoader(show) { loader.style.display = show ? 'block' : 'none'; }
 
-        // --- PII Tag Loading ---
+        // === PII Tag Loading ===
         async function loadPiiTags() {
             try {
                 const resp = await fetch('/available_tags');
@@ -544,7 +856,7 @@
             piiTagGrid.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
         });
 
-        // --- Model Loading ---
+        // === Model Loading ===
         async function loadModels() {
             try {
                 const whisperSelect = document.getElementById('whisper-model-select');
@@ -570,7 +882,7 @@
             }
         }
 
-        // --- Recording ---
+        // === Recording ===
         async function toggleRecording() {
             if (isRecording) { stopRecording(); } else { await startRecording(); }
         }
@@ -722,7 +1034,7 @@
         // Auto-refresh batches on page load
         refreshBatches();
                 
-        // --- API Calls ---
+        // === API Calls ===
         async function transcribe() {
             if (!audioBlob && !uploadedFile) {
                 updateStatus("No audio to transcribe. Record or upload first.", true); return;
@@ -817,6 +1129,9 @@
                     ttsContainer.classList.remove('hidden');
                     downloadBertBtn.disabled = false;
                     updateStatus("Anonymization successful!", false);
+                    
+                    // === SCHEDULE SURVEY MODAL (20 seconds) ===
+                    scheduleSurveyModal();
                 } else {
                     throw new Error(result.error || result.details || "Anonymization failed.");
                 }
@@ -969,7 +1284,7 @@
             } finally { showLoader(false); }
         }
 
-        // --- Event Listeners ---
+        // === Event Listeners ===
         recordBtn.addEventListener('click', toggleRecording);
         fileInput.addEventListener('change', handleFileUpload);
         transcribeBtn.addEventListener('click', transcribe);
