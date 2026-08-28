@@ -581,7 +581,6 @@
     <!-- ROW 7: Download Results (no annotation) -->
     <div class="section-row">
         <div></div>
-        <div class="section-cell">
             <div class="section sec-download">
                 <h3>Download Results</h3>
                 <p style="color: #009AA9; margin-bottom: 15px; font-size: 0.95em;">
@@ -696,24 +695,24 @@
         const piiClearAllBtn = document.getElementById('pii-clear-all');
 
         const piiTagMapping = {
-            'PERSON': { label: 'Names', desc: 'Person names and identities' },
-            'PERSON_EMAIL': { label: 'Email Addresses', desc: 'Email addresses' },
-            'PERSON_SOCIAL_RELATION': { label: 'Social Relations', desc: 'Family members, relatives' },
-            'ORG': { label: 'Organizations', desc: 'Companies, institutions, organizations' },
-            'LOC_CITY': { label: 'Cities', desc: 'City names' },
-            'LOC_COUNTRY': { label: 'Countries', desc: 'Country names' },
-            'LOC_STREET': { label: 'Street Addresses', desc: 'Street names and numbers' },
+            'PERSON': { label: 'Name', desc: 'Person names and identities' },
+            'PERSON_EMAIL': { label: 'Email Address', desc: 'Email addresses' },
+            'PERSON_SOCIAL_RELATION': { label: 'Social Relation', desc: 'Family members, relatives' },
+            'ORG': { label: 'Organization', desc: 'Companies, institutions, organizations' },
+            'LOC_CITY': { label: 'City', desc: 'City names' },
+            'LOC_COUNTRY': { label: 'Country', desc: 'Country names' },
+            'LOC_STREET': { label: 'Street Address', desc: 'Street names and numbers' },
             'LOC_ZIP': { label: 'Postal Codes', desc: 'ZIP/postal codes' },
-            'LOC_HOUSENUMBER': { label: 'House Numbers', desc: 'Building/house numbers' },
+            'LOC_HOUSENUMBER': { label: 'House Number', desc: 'Building/house numbers' },
             'LOC_OTHER': { label: 'Other Locations', desc: 'Geographic locations' },
-            'DATETIME': { label: 'Dates & Times', desc: 'Dates, times, timestamps' },
-            'DATETIME_AGE': { label: 'Ages', desc: 'Age information' },
-            'CODE': { label: 'Codes', desc: 'Identifiers and codes' },
-            'CODE_PHONE': { label: 'Phone Numbers', desc: 'Telephone numbers' },
+            'DATETIME': { label: 'Date & Time', desc: 'Dates, times, timestamps' },
+            'DATETIME_AGE': { label: 'Age', desc: 'Age information' },
+            'CODE': { label: 'Code', desc: 'Identifiers and codes' },
+            'CODE_PHONE': { label: 'Phone Number', desc: 'Telephone numbers' },
             'CODE_URL': { label: 'URLs & Links', desc: 'Web addresses and URLs' },
-            'PROFESSION': { label: 'Professions', desc: 'Occupations and job titles' },
-            'PRODUCT': { label: 'Products', desc: 'Commercial products' },
-            'QUANTITY': { label: 'Quantities', desc: 'Measurements and amounts' },
+            'PROFESSION': { label: 'Profession', desc: 'Occupations and job titles' },
+            'PRODUCT': { label: 'Product', desc: 'Commercial products' },
+            'QUANTITY': { label: 'Quantity', desc: 'Measurements and amounts' },
             'MISC': { label: 'Miscellaneous', desc: 'Other identifiable information' }
         };
 
