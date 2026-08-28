@@ -8,7 +8,9 @@ import subprocess
 import io
 import wave
 import logging
+import random
 from pathlib import Path
+from collections import defaultdict
 
 logger = logging.getLogger(__name__)
 
@@ -62,16 +64,51 @@ def get_speaker_voice(speaker_id: str) -> str:
     voices = _load_available_voices()
     return voices[0] if voices else SPEAKER_VOICE_MAP['DEFAULT']
 
+def extract_unique_speakers(word_offsets: list) -> tuple:
+    """
+    Extract unique speakers from WhisperX diarization segments.
+    
+    Returns:
+        tuple: (speaker_count, list_of_speaker_ids)
+    """
+    speakers = set()
+    for seg in word_offsets:
+        speaker = seg.get('speaker', 'SPEAKER_00')
+        speakers.add(speaker)
+    speaker_list = sorted(list(speakers))
+    return len(speaker_list), speaker_list
+
+def assign_randomized_voices(speaker_list: list) -> dict:
+    """
+    Assign random voices to speakers from available pool.
+    
+    Returns:
+        dict: speaker_id -> voice_name mapping
+    """
+    available_voices = _load_available_voices()
+    
+    if len(available_voices) < len(speaker_list):
+        logger.warning(f"Not enough voices available ({len(available_voices)}) for {len(speaker_list)} speakers. Using cycling fallback.")
+        voice_pool = available_voices if available_voices else ['en_US-amy-medium']
+    else:
+        voice_pool = available_voices[:len(speaker_list)]
+    
+    # Randomize
+    random.shuffle(voice_pool)
+    
+    speaker_to_voice = {}
+    for i, speaker in enumerate(speaker_list):
+        if i < len(voice_pool):
+            speaker_to_voice[speaker] = voice_pool[i]
+        else:
+            speaker_to_voice[speaker] = voice_pool[0]
+    
+    logger.info(f"Assigned voices: {speaker_to_voice}")
+    return speaker_to_voice
+
 def generate_speech(text: str, language: str = 'en', voice_id: str = None,
                     speaker: str = None, return_bytes: bool = False):
-    """Generate speech using Piper TTS (fully offline).
-    
-    Primary: Python Piper API (direct inference)
-    Fallback: Piper CLI (subprocess) if Python API fails
-    
-    SECURITY NOTE: No network calls are made. All processing is local.
-    Suitable for PHI/medical data handling.
-    """
+    """Generate speech using Piper TTS (fully offline)."""
     if not TTS_ENABLED:
         return None
 
@@ -97,11 +134,7 @@ def generate_speech(text: str, language: str = 'en', voice_id: str = None,
     return None
 
 def _generate_speech_piper_python(text: str, voice_id: str) -> io.BytesIO | None:
-    """Generate speech using the piper-tts Python package directly.
-    
-    Fully offline — no subprocess, no network calls.
-    Uses ONNX Runtime locally on the VM.
-    """
+    """Generate speech using the piper-tts Python package directly."""
     try:
         from piper import PiperVoice
     except ImportError:
@@ -121,7 +154,6 @@ def _generate_speech_piper_python(text: str, voice_id: str) -> io.BytesIO | None
             logger.error("PiperVoice.synthesize() returned no chunks")
             return None
 
-        # Build WAV in memory
         buffer = io.BytesIO()
         sample_rate = 22050
         sample_width = chunks[0].sample_width
@@ -142,11 +174,7 @@ def _generate_speech_piper_python(text: str, voice_id: str) -> io.BytesIO | None
         return None
 
 def _generate_speech_piper_cli(text: str, voice_id: str) -> io.BytesIO | None:
-    """Generate speech via the Piper CLI (subprocess fallback).
-    
-    Sent text via stdin — works with both native Piper binary
-    and the Python wrapper script.
-    """
+    """Generate speech via the Piper CLI (subprocess fallback)."""
     if not PIPER_EXECUTABLE.exists():
         logger.error(f"Piper executable not found: {PIPER_EXECUTABLE}")
         return None
@@ -203,6 +231,108 @@ def _generate_speech_piper_cli(text: str, voice_id: str) -> io.BytesIO | None:
         logger.error(f"Piper CLI error: {e}", exc_info=True)
         return None
 
+def generate_multi_speaker_tts(transcript_text: str, word_offsets: list = None, 
+                                audio_source_path: str = None) -> tuple:
+    """
+    Generate multi-speaker TTS with randomized voice assignments.
+    
+    Args:
+        transcript_text: Full transcript with SPEAKER_X labels
+        word_offsets: WhisperX diarization segments (optional)
+        audio_source_path: Original audio file path (optional, for naming output)
+    
+    Returns:
+        tuple: (output_audio_path, voice_mapping_dict)
+    """
+    if not TTS_ENABLED:
+        logger.warning("TTS not enabled. Skipping multi-speaker TTS generation.")
+        return None, {}
+    
+    # Detect speakers from offsets or parse transcript
+    if word_offsets:
+        speaker_count, speaker_list = extract_unique_speakers(word_offsets)
+    else:
+        import re
+        speaker_matches = re.findall(r'SPEAKER_(\d+)', transcript_text)
+        unique_speakers = set(speaker_matches)
+        speaker_list = sorted([f'SPEAKER_{i}' for i in unique_speakers])
+        speaker_count = len(speaker_list)
+    
+    logger.info(f"Detected {speaker_count} speakers: {speaker_list}")
+    
+    # Assign randomized voices
+    speaker_to_voice = assign_randomized_voices(speaker_list)
+    
+    # Split transcript into speaker segments
+    lines = transcript_text.strip().split('\n')
+    segments_by_speaker = defaultdict(list)
+    
+    for line in lines:
+        import re
+        match = re.match(r'^(SPEAKER_\d+):\s*(.*)$', line.strip())
+        if match:
+            speaker = match.group(1)
+            text = match.group(2)
+            if text.strip():
+                segments_by_speaker[speaker].append(text.strip())
+    
+    # Merge consecutive same-speaker segments
+    merged_segments = []
+    current_speaker = None
+    current_text = []
+    
+    for speaker in sorted(segments_by_speaker.keys()):
+        voice_id = speaker_to_voice.get(speaker, SPEAKER_VOICE_MAP['DEFAULT'])
+        
+        for segment_text in segments_by_speaker[speaker]:
+            merged_segments.append({
+                'speaker': speaker,
+                'voice': voice_id,
+                'text': segment_text
+            })
+    
+    # Generate audio for each segment
+    import tempfile
+    from pathlib import Path
+    
+    base_name = Path(audio_source_path).stem if audio_source_path else 'multi_speaker_tts'
+    final_output = Path(TTS_DIR) / f"{base_name}_final.wav"
+    
+    # Create merged WAV
+    merged_buffer = io.BytesIO()
+    sample_rate = 22050
+    sample_width = 2
+    channels = 1
+    
+    with wave.open(merged_buffer, 'wb') as wav:
+        wav.setnchannels(channels)
+        wav.setsampwidth(sample_width)
+        wav.setframerate(sample_rate)
+        
+        for segment in merged_segments:
+            logger.info(f"Generating TTS for {segment['speaker']} using voice: {segment['voice']}")
+            
+            audio_buffer = generate_speech(
+                text=segment['text'],
+                voice_id=segment['voice'],
+                return_bytes=True
+            )
+            
+            if audio_buffer:
+                with wave.open(audio_buffer, 'rb') as src_wav:
+                    wav.writeframes(src_wav.readframes(src_wav.getnframes()))
+                
+                # Add small pause between segments (100ms)
+                silence = b'\x00' * (sample_rate * sample_width * channels // 10)
+                wav.writeframes(silence)
+    
+    merged_buffer.seek(0)
+    Path(final_output).parent.mkdir(parents=True, exist_ok=True)
+    final_output.write_bytes(merged_buffer.read())
+    
+    logger.info(f"Multi-speaker TTS output saved to: {final_output}")
+    return str(final_output), speaker_to_voice
+
 def synthesize_segment(text: str, speaker: str = 'SPEAKER_00', emotion: str = None):
     """Synthesize a single speaker segment."""
     import re
@@ -230,5 +360,6 @@ def get_available_tts_voices(language: str = 'en'):
 __all__ = [
     'TTS_BACKEND', 'TTS_ENABLED', 'SPEAKER_VOICE_MAP',
     'get_tts_status', 'get_available_tts_voices',
-    'get_speaker_voice', 'generate_speech', 'synthesize_segment'
+    'get_speaker_voice', 'generate_speech', 'synthesize_segment',
+    'extract_unique_speakers', 'assign_randomized_voices', 'generate_multi_speaker_tts'
 ]

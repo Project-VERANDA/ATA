@@ -571,16 +571,19 @@ def anonymize():
     try:
         data = request.get_json()
         transcript_text = data.get('transcript', '')
+        include_tags = data.get('include_tags', None)
         
         if not transcript_text:
             logger.warning("No transcript provided to /anonymize")
             return jsonify({'error': 'No transcript provided'}), 400
         
-        # IMPORTANT: Unpack the tuple correctly
-        result_text, success, msg = anonymize_text_locally(transcript_text)
+        # Pass include_tags to anonymization engine
+        result_text, success, msg = anonymize_text_locally(
+            transcript_text, 
+            include_tags=include_tagsn
+        )
         
-        # Log what we actually got
-        logger.info(f"Anonymization result: success={success}, text_len={len(result_text) if result_text else 0}, msg={msg}")
+        logger.info(f"Anonymization result: success={success}, text_len={len(result_text) if result_text else 0}, tags={include_tags}")
         
         if not success or result_text is None:
             logger.error(f"Anonymization FAILED: {msg}")
@@ -590,7 +593,6 @@ def anonymize():
                 'original_length': len(transcript_text)
             }), 500
         
-        # SUCCESS - return proper structure
         logger.info(f"Anonymization SUCCESS: {len(transcript_text)} → {len(result_text)} chars")
         return jsonify({
             'status': 'success',
@@ -601,7 +603,6 @@ def anonymize():
         })
         
     except TypeError as e:
-        # Catch tuple unpacking errors specifically
         logger.error(f"TUPLE UNPACKING ERROR - check anonymize_text_locally return type: {e}")
         import traceback
         logger.error(traceback.format_exc())
@@ -705,6 +706,44 @@ def get_transcription_models():
         'whisper_models': list(WHISPER_MODELS.items()),
         'default_whisper_model': 'base'
     })
+
+@app.route('/available_tags')
+def get_available_pii_tags():
+    """Return all available PII tag categories."""
+    try:
+        from process import AVAILABLE_TAGS
+        
+        # Human-readable label mapping
+        pii_tag_mapping = {
+            'PERSON': { 'label': 'Names', 'desc': 'Person names and identities' },
+            'PERSON_EMAIL': { 'label': 'Email Addresses', 'desc': 'Email addresses' },
+            'PERSON_SOCIAL_RELATION': { 'label': 'Social Relations', 'desc': 'Family members, relatives' },
+            'ORG': { 'label': 'Organizations', 'desc': 'Companies, institutions, organizations' },
+            'LOC_CITY': { 'label': 'Cities', 'desc': 'City names' },
+            'LOC_COUNTRY': { 'label': 'Countries', 'desc': 'Country names' },
+            'LOC_STREET': { 'label': 'Street Addresses', 'desc': 'Street names and numbers' },
+            'LOC_ZIP': { 'label': 'Postal Codes', 'desc': 'ZIP/postal codes' },
+            'LOC_HOUSENUMBER': { 'label': 'House Numbers', 'desc': 'Building/house numbers' },
+            'LOC_OTHER': { 'label': 'Other Locations', 'desc': 'Geographic locations' },
+            'DATETIME': { 'label': 'Dates & Times', 'desc': 'Dates, times, timestamps' },
+            'DATETIME_AGE': { 'label': 'Ages', 'desc': 'Age information' },
+            'CODE': { 'label': 'Codes', 'desc': 'Identifiers and codes' },
+            'CODE_PHONE': { 'label': 'Phone Numbers', 'desc': 'Telephone numbers' },
+            'CODE_URL': { 'label': 'URLs & Links', 'desc': 'Web addresses and URLs' },
+            'PROFESSION': { 'label': 'Professions', 'desc': 'Occupations and job titles' },
+            'PRODUCT': { 'label': 'Products', 'desc': 'Commercial products' },
+            'QUANTITY': { 'label': 'Quantities', 'desc': 'Measurements and amounts' },
+            'MISC': { 'label': 'Miscellaneous', 'desc': 'Other identifiable information' }
+        }
+        
+        return jsonify({
+            'tags': AVAILABLE_TAGS,
+            'tag_labels': pii_tag_mapping
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting PII tags: {e}")
+        return jsonify({'error': f'Error loading tags: {str(e)}'}), 500
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
@@ -932,41 +971,36 @@ def generate_org_audio_route():
 
 @app.route('/generate_speech', methods=['POST'])
 def generate_speech_api():
-    """Generate speech from text with optional speaker assignment."""
+    """Generate speech from text with optional multi-speaker randomization."""
     try:
+        from pipeline.tts.tts_engine import generate_multi_speaker_tts
+        
         data = request.get_json()
         text = data.get('text', '').strip()
         lang = data.get('lang', 'en')
-        speaker = data.get('speaker', 'SPEAKER_00')  # NEW: speaker parameter
+        randomize_voices = data.get('randomize_voices', True)  # Always randomize per spec
         
         if not text:
             return jsonify({'error': 'No text provided'}), 400
         
-        logger.info(f"🎵 Speech request: {len(text)} chars, speaker={speaker}")
+        logger.info(f"🎵 Speech request: {len(text)} chars, multi-speaker=True")
         
-        from pipeline.tts.tts_engine import generate_speech as tts_generate
-        
-        audio_buffer = tts_generate(
-            text=text,
-            language=lang,
-            speaker=speaker,  # Pass speaker for voice mapping
-            return_bytes=True
+        # Generate multi-speaker TTS
+        output_path, voice_mapping = generate_multi_speaker_tts(
+            transcript_text=text,
+            word_offsets=[],  # Would pass from earlier transcription if available
+            audio_source_path=None
         )
         
-        if audio_buffer is None:
+        if output_path is None:
             logger.error("Speech generation failed")
             return jsonify({'error': 'Speech generation failed'}), 500
         
-        # Create temporary file
-        temp_file = tempfile.NamedTemporaryFile(suffix='.wav', delete=False)
-        temp_file.write(audio_buffer.getvalue())
-        temp_file.close()
-        
         return send_file(
-            temp_file.name,
+            output_path,
             mimetype='audio/wav',
             as_attachment=True,
-            download_name=f'speech_{speaker}_{int(time.time())}.wav'
+            download_name=f'multi_speaker_tts_{int(time.time())}.wav'
         )
         
     except Exception as e:

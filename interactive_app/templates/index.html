@@ -5,466 +5,229 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Speech Anonymizer</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
 
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #003366 0%, #0066cc 50%, #4da6ff 100%);
+            background: linear-gradient(135deg, #003754 0%, #009AA9 50%, #EA5451 100%);
             min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
+            display: flex; align-items: center; justify-content: center;
             padding: 20px;
         }
 
         .container {
-            background: white;
+            background: #FFFFFF;
             border-radius: 20px;
-            box-shadow: 0 25px 50px rgba(0, 51, 102, 0.2);
-            padding: 40px;
-            max-width: 900px;
-            width: 100%;
-            border: 3px solid #0066cc;
+            box-shadow: 0 25px 50px rgba(0, 55, 84, 0.2);
+            padding: 40px; max-width: 950px; width: 100%;
+            border: 3px solid #EA5451;
         }
 
-        h1 {
-            text-align: center;
-            color: #003366;
-            margin-bottom: 10px;
-            font-size: 2.8em;
-            font-weight: 600;
-            text-shadow: 0 2px 4px rgba(0, 51, 102, 0.1);
-        }
-
-        .subtitle {
-            text-align: center;
-            color: #0066cc;
-            margin-bottom: 40px;
-            font-size: 1.2em;
-            font-weight: 500;
-        }
+        h1 { text-align: center; color: #003754; margin-bottom: 10px; font-size: 2.8em; font-weight: 600; text-shadow: 0 2px 4px rgba(0, 55, 84, 0.1); }
+        .subtitle { text-align: center; color: #009AA9; margin-bottom: 40px; font-size: 1.2em; font-weight: 500; }
 
         .section {
-            margin-bottom: 30px;
-            padding: 25px;
-            border-radius: 15px;
-            background: linear-gradient(135deg, #f8fbff 0%, #e6f3ff 100%);
-            border: 2px solid #b3d9ff;
-            box-shadow: 0 4px 8px rgba(0, 51, 102, 0.1);
+            margin-bottom: 30px; padding: 25px; border-radius: 15px;
+            background: linear-gradient(135deg, #FFFAF9 0%, #FFF5F4 100%);
+            border: 2px solid #FFB0AC;
+            box-shadow: 0 4px 8px rgba(0, 55, 84, 0.1);
         }
 
         .section h3 {
-            color: #003366;
-            margin-bottom: 20px;
-            font-size: 1.4em;
-            display: flex;
-            align-items: center;
-            font-weight: 600;
+            color: #003754; margin-bottom: 20px; font-size: 1.4em;
+            display: flex; align-items: center; font-weight: 600;
         }
 
         .section h3:before {
-            content: "🎙️";
-            margin-right: 12px;
-            font-size: 1.3em;
-            background: #0066cc;
-            padding: 8px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            width: 40px;
-            height: 40px;
+            content: "🎙️"; margin-right: 12px; font-size: 1.3em;
+            background: #EA5451; padding: 8px; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            width: 40px; height: 40px;
         }
+
+        /* Icon rotation for sections */
+        .section:nth-child(3) h3:before { content: "📝"; }
+        .section:nth-child(4) h3:before { content: "📂"; }
+        .section:nth-child(5) h3:before { content: "🏷️"; }
+        .section:nth-child(6) h3:before { content: "🔒"; }
+        .section:nth-child(7) h3:before { content: "📥"; }
 
         .language-selector {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            margin-bottom: 20px;
-            padding: 10px;
-            background-color: #e6f3ff;
-            border-radius: 10px;
-            border: 1px solid #b3d9ff;
+            display: flex; align-items: center; gap: 10px; margin-bottom: 20px;
+            padding: 10px; background-color: #FFF5F4; border-radius: 10px;
+            border: 1px solid #FFB0AC;
         }
-
-        .language-selector label {
-            font-weight: 600;
-            color: #003366;
-        }
-
+        .language-selector label { font-weight: 600; color: #003754; }
         .language-selector select {
-            padding: 8px 12px;
-            border-radius: 8px;
-            border: 2px solid #b3d9ff;
-            background: white;
-            color: #003366;
-            font-size: 15px;
+            padding: 8px 12px; border-radius: 8px; border: 2px solid #FFB0AC;
+            background: #FFFFFF; color: #003754; font-size: 15px;
         }
 
-        .section:nth-child(3) h3:before {
-            content: "📝";
-        }
-
-        .section:nth-child(4) h3:before {
-            content: "🔒";
-        }
-
-        .section:nth-child(5) h3:before {
-            content: "🔊";
-        }
-        .section:nth-child(6) h3:before {
-            content: "✨";
-        }
-        .section:nth-child(7) h3:before {
-            content: "📂";
-        }
-        .section:nth-child(8) h3:before {
-            content: "📥";
-        }  
-        .llm-controls {
-        display: flex;
-        gap: 15px;
-        align-items: center;
-        margin: 20px 0;
-        flex-wrap: wrap;
-        background: #eef7ff;
-        padding: 15px;
-        border-radius: 10px;
-        border: 1px solid #b3d9ff;
-        }
-
-         .llm-toggle {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        font-weight: 600;
-        color: #003366;
-         }
-
-         .llm-toggle input[type="checkbox"] {
-        width: 18px;
-        height: 18px;
-        cursor: pointer;
-        }
-
-       .llm-model-select {
-        flex-grow: 1;
-          }
-
-    .llm-model-select select {
-        width: 100%;
-        padding: 10px;
-        border: 2px solid #b3d9ff;
-        border-radius: 8px;
-        background: white;
-        color: #003366;
-        font-size: 14px;
-    }
         .button {
-            background: linear-gradient(135deg, #003366 0%, #0066cc 100%);
-            color: white;
-            border: none;
-            padding: 14px 28px;
-            border-radius: 30px;
-            cursor: pointer;
-            font-size: 16px;
-            font-weight: 600;
-            transition: all 0.3s ease;
-            display: inline-flex;
-            align-items: center;
-            gap: 10px;
-            margin: 5px;
-            box-shadow: 0 4px 12px rgba(0, 51, 102, 0.3);
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
+            background: linear-gradient(135deg, #003754 0%, #009AA9 100%);
+            color: #FFFFFF; border: none; padding: 14px 28px; border-radius: 30px;
+            cursor: pointer; font-size: 16px; font-weight: 600;
+            transition: all 0.3s ease; display: inline-flex; align-items: center;
+            gap: 10px; margin: 5px; box-shadow: 0 4px 12px rgba(0, 55, 84, 0.3);
+            text-transform: uppercase; letter-spacing: 0.5px;
         }
-
         .button:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 8px 20px rgba(0, 51, 102, 0.4);
-            background: linear-gradient(135deg, #004080 0%, #0080ff 100%);
+            transform: translateY(-3px); box-shadow: 0 8px 20px rgba(0, 55, 84, 0.4);
+            background: linear-gradient(135deg, #002D44 0%, #EA5451 100%);
         }
+        .button:disabled { background: #ccc; cursor: not-allowed; transform: none; box-shadow: none; }
+        .button.secondary { background: linear-gradient(135deg, #009AA9 0%, #003754 100%); }
 
-        .button:disabled {
-            background: #ccc;
-            cursor: not-allowed;
-            transform: none;
-            box-shadow: none;
-        }
-
-        .button.secondary {
-            background: linear-gradient(135deg, #0066cc 0%, #004080 100%);
-        }
-
-        .file-input {
-            margin: 10px 0;
-        }
-
-        .file-input input[type="file"] {
-            display: none;
-        }
-
+        .file-input { margin: 10px 0; }
+        .file-input input[type="file"] { display: none; }
         .file-input label {
-            background: linear-gradient(135deg, #f0f8ff 0%, #e6f3ff 100%);
-            border: 3px dashed #0066cc;
-            border-radius: 15px;
-            padding: 25px;
-            text-align: center;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            display: block;
-            color: #003366;
-            font-weight: 500;
+            background: linear-gradient(135deg, #FFF5F4 0%, #FFFAF9 100%);
+            border: 3px dashed #EA5451; border-radius: 15px; padding: 25px;
+            text-align: center; cursor: pointer; transition: all 0.3s ease;
+            display: block; color: #003754; font-weight: 500;
         }
-
         .file-input label:hover {
-            border-color: #003366;
-            background: linear-gradient(135deg, #e6f3ff 0%, #cce6ff 100%);
-            transform: translateY(-2px);
-            box-shadow: 0 6px 15px rgba(0, 51, 102, 0.2);
+            border-color: #003754;
+            background: linear-gradient(135deg, #FFFAF9 0%, #FFD0CD 100%);
+            transform: translateY(-2px); box-shadow: 0 6px 15px rgba(0, 55, 84, 0.2);
         }
 
-        .controls {
-            display: flex;
-            gap: 15px;
-            align-items: center;
-            justify-content: center;
-            flex-wrap: wrap;
-        }
-
-        .separator {
-            display: flex;
-            align-items: center;
-            text-align: center;
-            color: #0066cc;
-            font-weight: 600;
-            margin: 0 10px;
-        }
-
-        .separator::before, .separator::after {
-            content: '';
-            flex: 1;
-            border-bottom: 2px solid #b3d9ff;
-        }
-
-        .separator:not(:empty)::before {
-            margin-right: .5em;
-        }
-
-        .separator:not(:empty)::after {
-            margin-left: .5em;
-        }
-
-        .button-wrapper {
-            text-align: center;
-            margin-top: 20px;
-        }
+        .controls { display: flex; gap: 15px; align-items: center; justify-content: center; flex-wrap: wrap; }
+        .separator { display: flex; align-items: center; text-align: center; color: #009AA9; font-weight: 600; margin: 0 10px; }
+        .separator::before, .separator::after { content: ''; flex: 1; border-bottom: 2px solid #FFB0AC; }
+        .separator:not(:empty)::before { margin-right: .5em; }
+        .separator:not(:empty)::after { margin-left: .5em; }
+        .button-wrapper { text-align: center; margin-top: 20px; }
 
         .timer {
-            background: linear-gradient(135deg, #003366 0%, #0066cc 100%);
-            color: white;
-            padding: 10px 20px;
-            border-radius: 25px;
-            font-family: monospace;
-            font-size: 18px;
-            font-weight: bold;
-            box-shadow: 0 4px 8px rgba(0, 51, 102, 0.3);
+            background: linear-gradient(135deg, #003754 0%, #009AA9 100%);
+            color: #FFFFFF; padding: 10px 20px; border-radius: 25px;
+            font-family: monospace; font-size: 18px; font-weight: bold;
+            box-shadow: 0 4px 8px rgba(0, 55, 84, 0.3);
         }
-
-        .recording {
-            animation: pulse 1.5s infinite;
-        }
-
+        .recording { animation: pulse 1.5s infinite; }
         @keyframes pulse {
-            0% { 
-                background: linear-gradient(135deg, #003366 0%, #0066cc 100%);
-                transform: scale(1);
-            }
-            50% { 
-                background: linear-gradient(135deg, #cc0000 0%, #ff3333 100%);
-                transform: scale(1.05);
-            }
-            100% { 
-                background: linear-gradient(135deg, #003366 0%, #0066cc 100%);
-                transform: scale(1);
-            }
+            0% { background: linear-gradient(135deg, #003754 0%, #009AA9 100%); transform: scale(1); }
+            50% { background: linear-gradient(135deg, #AF1821 0%, #EA5451 100%); transform: scale(1.05); }
+            100% { background: linear-gradient(135deg, #003754 0%, #009AA9 100%); transform: scale(1); }
         }
 
         .text-area {
-            width: 100%;
-            min-height: 150px;
-            padding: 20px;
-            border: 2px solid #b3d9ff;
-            border-radius: 15px;
-            font-size: 15px;
-            font-family: inherit;
-            resize: vertical;
-            margin: 15px 0;
-            background: #f8fbff;
-            color: #003366;
-            transition: all 0.3s ease;
+            width: 100%; min-height: 150px; padding: 20px;
+            border: 2px solid #FFB0AC; border-radius: 15px; font-size: 15px;
+            font-family: inherit; resize: vertical; margin: 15px 0;
+            background: #FFFAF9; color: #003754; transition: all 0.3s ease;
         }
-
         .text-area:focus {
-            outline: none;
-            border-color: #0066cc;
-            box-shadow: 0 0 10px rgba(0, 102, 204, 0.3);
-            background: white;
+            outline: none; border-color: #009AA9;
+            box-shadow: 0 0 10px rgba(0, 154, 169, 0.3); background: #FFFFFF;
         }
 
         .anonymization-controls, .tts-controls {
-            display: flex;
-            gap: 20px;
-            align-items: center;
-            margin: 20px 0;
-            flex-wrap: wrap;
+            display: flex; gap: 20px; align-items: center; margin: 20px 0; flex-wrap: wrap;
         }
-
-        .level-selector {
-            display: flex;
-            gap: 15px;
-            align-items: center;
-        }
-
-        #anonymization-level-radios label {
-            margin-right: 15px;
-        }
-
-        .level-selector label {
-            font-weight: 600;
-            color: #003366;
-            font-size: 16px;
-        }
-
+        .level-selector { display: flex; gap: 15px; align-items: center; }
+        .level-selector label { font-weight: 600; color: #003754; font-size: 16px; }
         .level-selector select {
-            padding: 12px 16px;
-            border: 2px solid #b3d9ff;
-            border-radius: 10px;
-            font-size: 15px;
-            background: white;
-            color: #003366;
-            font-weight: 500;
+            padding: 12px 16px; border: 2px solid #FFB0AC; border-radius: 10px;
+            font-size: 15px; background: #FFFFFF; color: #003754; font-weight: 500;
             transition: all 0.3s ease;
         }
-
         .level-selector select:focus {
-            outline: none;
-            border-color: #0066cc;
-            box-shadow: 0 0 8px rgba(0, 102, 204, 0.3);
+            outline: none; border-color: #009AA9; box-shadow: 0 0 8px rgba(0, 154, 169, 0.3);
         }
 
         .status {
-            padding: 18px;
-            border-radius: 15px;
-            margin: 20px 0;
-            font-size: 16px;
-            background: #e6f3ff;
-            border: 2px solid #b3d9ff;
-            color: #003366;
-            display: none;
-            transition: all 0.3s ease;
-            box-shadow: 0 4px 8px rgba(0, 51, 102, 0.1);
+            padding: 18px; border-radius: 15px; margin: 20px 0; font-size: 16px;
+            background: #FFF5F4; border: 2px solid #FFB0AC; color: #003754;
+            display: none; transition: all 0.3s ease; box-shadow: 0 4px 8px rgba(0, 55, 84, 0.1);
         }
-
-        .status.error {
-            background-color: #ffcccc;
-            border-color: #cc3333;
-            color: #990000;
-        }
-
-        .status.success {
-            background-color: #ccffcc;
-            border-color: #339966;
-            color: #006633;
-        }
+        .status.error { background-color: #FFEBE9; border-color: #AF1821; color: #AF1821; }
+        .status.success { background-color: #E8F7F8; border-color: #009AA9; color: #006670; }
 
         .loader {
-            border: 5px solid #f3f3f3;
-            border-top: 5px solid #0066cc;
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
-            margin: 20px auto;
-            display: none;
+            border: 5px solid #F5F5F5; border-top: 5px solid #EA5451;
+            border-radius: 50%; width: 40px; height: 40px;
+            animation: spin 1s linear infinite; margin: 20px auto; display: none;
         }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
-        #tts-container {
-            margin-top: 20px;
-        }
-
+        #tts-container { margin-top: 20px; }
         #audio-player {
-            width: 100%;
-            margin-top: 10px;
-            background: linear-gradient(135deg, #f8fbff 0%, #e6f3ff 100%);
-            border-radius: 50px;
-            box-shadow: 0 4px 12px rgba(0, 51, 102, 0.2);
-            padding: 5px;
+            width: 100%; margin-top: 10px;
+            background: linear-gradient(135deg, #FFFAF9 0%, #FFF5F4 100%);
+            border-radius: 50px; box-shadow: 0 4px 12px rgba(0, 55, 84, 0.2); padding: 5px;
         }
 
-        .icon {
-            font-size: 20px;
-        }
+        .icon { font-size: 20px; }
+        .hidden { display: none; }
 
-        .hidden {
-            display: none;
-        }
-        #llm-output-section {
-        animation: fadeIn 0.5s;
-        }
-
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(-10px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-        
-        .download-grid {
+        /* PII Tag Selection Flat Grid - Human Readable Terms */
+        .pii-tag-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 15px;
+            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+            gap: 12px;
             margin-top: 15px;
         }
-        
-        .download-btn {
-            width: 100%;
-            justify-content: center;
+        .pii-tag-item {
+            display: flex; align-items: center; gap: 10px;
+            padding: 10px 12px;
+            border: 1px solid #FFB0AC;
+            border-radius: 10px;
+            background: #FFFAF9;
+            cursor: pointer;
+            transition: all 0.2s ease;
         }
+        .pii-tag-item:hover {
+            background: #FFF5F4;
+            border-color: #EA5451;
+            transform: translateY(-1px);
+        }
+        .pii-tag-item input[type="checkbox"] {
+            width: 18px; height: 18px; cursor: pointer; accent-color: #EA5451;
+        }
+        .pii-tag-label {
+            font-size: 14px; color: #003754; font-weight: 500;
+        }
+        .pii-tag-description {
+            font-size: 11px; color: #7876B6; margin-top: 2px;
+        }
+        .pii-tag-actions {
+            display: flex; gap: 10px; margin-top: 15px; justify-content: flex-end;
+        }
+        .pii-tag-actions button {
+            padding: 8px 20px; border-radius: 20px; border: 2px solid #FFB0AC;
+            background: #FFF5F4; color: #003754; cursor: pointer; font-size: 14px;
+            font-weight: 600; transition: all 0.2s ease;
+        }
+        .pii-tag-actions button:hover { background: #EA5451; color: #FFFFFF; border-color: #EA5451; }
+
+        .download-grid {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px; margin-top: 15px;
+        }
+        .download-btn { width: 100%; justify-content: center; }
     </style>
 </head>
 <body>
     <div class="container">
+        <!-- Branding Header -->
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; width: 100%;">
-            <img src="{{ url_for('static', filename='dfki_Logo_sz.svg') }}" 
-                 alt="DFKI Logo" 
-                 style="max-height: 100px; width: auto; object-fit: contain;">
-            <img src="{{ url_for('static', filename='Online_251121A_BIH_Logo_RGB_BIH_Logo_StandardClaim_ENG_BlauKorall.svg') }}" 
-                 alt="BIH Logo" 
-                 style="max-height: 100px; width: auto; object-fit: contain;">
-            <img src="{{ url_for('static', filename='tu-berlin-logo-long-red.svg') }}" 
-                 alt="TUB Logo" 
-                 style="max-height: 100px; width: auto; object-fit: contain;">
+            <img src="{{ url_for('static', filename='dfki_Logo_sz.svg') }}" alt="DFKI Logo" style="max-height: 100px; width: auto; object-fit: contain;">
+            <img src="{{ url_for('static', filename='Online_251121A_BIH_Logo_RGB_BIH_Logo_StandardClaim_ENG_BlauKorall.svg') }}" alt="BIH Logo" style="max-height: 100px; width: auto; object-fit: contain;">
+            <img src="{{ url_for('static', filename='tu-berlin-logo-long-red.svg') }}" alt="TUB Logo" style="max-height: 100px; width: auto; object-fit: contain;">
+        </div>
+        <div style="text-align: center; margin-bottom: 30px;">
+            <img src="{{ url_for('static', filename='VERANDA_LOGO.svg') }}" alt="VERANDA Logo" style="max-height: 40px; width: auto; object-fit: contain;">
         </div>
 
-        <div style="text-align: center; margin-bottom: 30px;">
-            <img src="{{ url_for('static', filename='VERANDA_LOGO.svg') }}" 
-                 alt="Additional Logo" 
-                 style="max-height: 40px; width: auto; object-fit: contain;">
-        </div>
         <h1>Speech Anonymizer</h1>
         <p class="subtitle">Record, upload, transcribe, edit, and anonymize speech with advanced AI models.</p>
 
         <div class="loader" id="loader"></div>
         <div id="status" class="status"></div>
 
+        <!-- 1. Transcription Settings -->
         <div class="section">
             <h3>Transcription Settings</h3>
             <div class="language-selector">
@@ -486,12 +249,11 @@
             </div>
             <div class="level-selector" style="margin-top: 15px;">
                 <label for="whisper-model-select">Whisper Model:</label>
-                <select id="whisper-model-select">
-                    <!-- Loaded via JS -->
-                </select>
+                <select id="whisper-model-select"></select>
             </div>
         </div>
 
+        <!-- 2. Input Audio -->
         <div class="section">
             <h3>Input Audio</h3>
             <div class="controls">
@@ -507,7 +269,7 @@
                     </label>
                 </div>
             </div>
-            <div id="filename-display" style="margin-top: 10px; color: #003366; font-weight: 500; text-align: center;"></div>
+            <div id="filename-display" style="margin-top: 10px; color: #003754; font-weight: 500; text-align: center;"></div>
             <div class="button-wrapper">
                 <button id="transcribe-btn" class="button" disabled>
                     <span class="icon">▶️</span> Transcribe
@@ -515,9 +277,10 @@
             </div>
         </div>
 
+        <!-- 3. Bulk Upload -->
         <div class="section">
             <h3>Bulk Upload (Audio/Text Files)</h3>
-            <p style="color: #0066cc; margin-bottom: 15px; font-size: 0.95em;">
+            <p style="color: #009AA9; margin-bottom: 15px; font-size: 0.95em;">
                 Upload multiple audio files, text files, or a ZIP folder containing them.
             </p>
             <div class="file-input">
@@ -526,7 +289,7 @@
                     <span class="icon">📂</span> Select Multiple Files or Folder
                 </label>
             </div>
-            <div id="bulk-status" style="margin-top: 10px; color: #003366; font-weight: 500; text-align: center;"></div>
+            <div id="bulk-status" style="margin-top: 10px; color: #003754; font-weight: 500; text-align: center;"></div>
             <div class="button-wrapper">
                 <button id="process-bulk-btn" class="button" disabled>
                     <span class="icon">⚡</span> Process Bulk Upload
@@ -534,10 +297,10 @@
             </div>
         </div>
 
+        <!-- 4. Transcribed Text -->
         <div class="section">
             <h3>Transcribed Text</h3>
             <textarea id="transcribed-text" class="text-area" placeholder="Transcription will appear here..."></textarea>
-            
             <div class="button-wrapper" style="display: flex; gap: 10px; justify-content: center; margin-top: 15px;">
                 <button id="save-edit-btn" class="button secondary">
                     <span class="icon">💾</span> Save Edit
@@ -548,6 +311,22 @@
             </div>
         </div>
 
+        <!-- 5. PII Tag Selection (Flat - Human Readable Terms) -->
+        <div class="section">
+            <h3>PII Tag Selection</h3>
+            <p style="color: #009AA9; margin-bottom: 15px; font-size: 0.95em;">
+                Select which categories of personally identifiable information to anonymize. All are enabled by default.
+            </p>
+            <div id="pii-tag-grid" class="pii-tag-grid">
+                <p style="color: #009AA9; font-size: 0.9em; grid-column: 1/-1;">Loading available tags...</p>
+            </div>
+            <div class="pii-tag-actions">
+                <button id="pii-select-all">Select All</button>
+                <button id="pii-clear-all">Clear All</button>
+            </div>
+        </div>
+
+        <!-- 6. Anonymized Text -->
         <div class="section">
             <h3>Anonymized Text</h3>
             <textarea id="anonymized-text" class="text-area" placeholder="Anonymized text will appear here..." readonly></textarea>
@@ -559,44 +338,11 @@
             </div>
             <audio id="audio-player" controls class="hidden"></audio>
         </div>
-        
-        <div class="section">
-            <h3>Remove Indirect Identifiers (LLM)</h3>
-            <p style="color: #0066cc; margin-bottom: 15px; font-size: 0.95em;">
-                Uses an advanced LLM to generalize specific details (job titles, rare locations, unique dates) that BERT might miss.
-            </p>
-            
-            <div class="llm-controls">
-                <div class="llm-toggle">
-                    <input type="checkbox" id="llm-enabled" checked>
-                    <label for="llm-enabled">Enable LLM Rewriting</label>
-                </div>
-                
-                <div class="llm-model-select">
-                    <label for="llm-model-select" style="font-weight: 600; color: #003366; margin-right: 10px;">Model:</label>
-                    <select id="llm-model-select">
-                        <!-- Populated via JS -->
-                    </select>
-                </div>
-            </div>
 
-            <div class="button-wrapper">
-                <button id="llm-rewrite-btn" class="button" disabled>
-                    <span class="icon">✨</span> Rewrite with LLM
-                </button>
-            </div>
-
-            <div id="llm-output-section" style="margin-top: 20px; display: none;">
-                <h4 style="color: #003366; margin-bottom: 10px;">LLM Rewritten Output:</h4>
-                <textarea id="llm-rewritten-text" class="text-area" placeholder="LLM rewritten text will appear here..." readonly></textarea>
-            </div>
-            
-            <div id="llm-status" class="status" style="margin-top: 15px;"></div>
-        </div>
-
+        <!-- 7. Download Results -->
         <div class="section">
             <h3>Download Results</h3>
-            <p style="color: #0066cc; margin-bottom: 15px; font-size: 0.95em;">
+            <p style="color: #009AA9; margin-bottom: 15px; font-size: 0.95em;">
                 Download the generated outputs.
             </p>
             <div class="download-grid">
@@ -606,9 +352,6 @@
                 <button id="download-bert-btn" class="button download-btn" disabled>
                     <span class="icon">🔒</span> BERT-Anonymized
                 </button>
-                <button id="download-llm-btn" class="button download-btn" disabled>
-                    <span class="icon">✨</span> LLM-Rewritten
-                </button>
                 <button id="download-speech-btn" class="button download-btn" disabled>
                     <span class="icon">🔊</span> Generated Speech
                 </button>
@@ -616,676 +359,541 @@
             <div id="download-status" class="status" style="margin-top: 15px;"></div>
         </div>
     </div>
-        
 
-        <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            // --- DOM Elements ---
-            const recordBtn = document.getElementById('record-btn');
-            const recordIcon = document.getElementById('record-icon');
-            const timerDiv = document.getElementById('timer');
-            const fileInput = document.getElementById('file-input');
-            const uploadLabel = document.getElementById('upload-label');
-            const filenameDisplay = document.getElementById('filename-display');
-            const transcribeBtn = document.getElementById('transcribe-btn');
-            const transcribedText = document.getElementById('transcribed-text');
-            const whisperModelSelect = document.getElementById('whisper-model-select');
-            const transcriptionLanguageSelect = document.getElementById('transcription-language');
-            
-            let offsetData = null;
-            let audioName = null;
-            
-            const anonymizeBtn = document.getElementById('anonymize-btn');
-            const anonymizedText = document.getElementById('anonymized-text');
-            
-            const ttsContainer = document.getElementById('tts-container');
-            const surrogateBtn = document.getElementById('surrogate-btn');
-            const rephraseBtn = document.getElementById('rephrase-btn');
-            const generateSpeechBtn = document.getElementById('generate-speech-btn');
-            const processOrgAudioBtn = document.getElementById('process-org-audio-btn');
-            const audioPlayer = document.getElementById('audio-player');
-            const statusDiv = document.getElementById('status');
-            const loader = document.getElementById('loader');
+    <script>
+    document.addEventListener('DOMContentLoaded', () => {
+        // --- DOM Elements ---
+        const recordBtn = document.getElementById('record-btn');
+        const recordIcon = document.getElementById('record-icon');
+        const timerDiv = document.getElementById('timer');
+        const fileInput = document.getElementById('file-input');
+        const uploadLabel = document.getElementById('upload-label');
+        const filenameDisplay = document.getElementById('filename-display');
+        const transcribeBtn = document.getElementById('transcribe-btn');
+        const transcribedText = document.getElementById('transcribed-text');
+        const whisperModelSelect = document.getElementById('whisper-model-select');
+        const transcriptionLanguageSelect = document.getElementById('transcription-language');
 
-            const llmEnabledCheckbox = document.getElementById('llm-enabled');
-            const llmModelSelect = document.getElementById('llm-model-select');
-            const llmRewriteBtn = document.getElementById('llm-rewrite-btn');
-            const llmStatusDiv = document.getElementById('llm-status');
-            const llmOutputSection = document.getElementById('llm-output-section');
-            const llmRewrittenText = document.getElementById('llm-rewritten-text');
+        let offsetData = null;
+        let audioName = null;
 
-            const saveEditBtn = document.getElementById('save-edit-btn');
-            const bulkFileInput = document.getElementById('bulk-file-input');
-            const bulkUploadLabel = document.getElementById('bulk-upload-label');
-            const bulkStatus = document.getElementById('bulk-status');
-            const processBulkBtn = document.getElementById('process-bulk-btn');
-            const downloadOriginalBtn = document.getElementById('download-original-btn');
-            const downloadBertBtn = document.getElementById('download-bert-btn');
-            const downloadLlmBtn = document.getElementById('download-llm-btn');
-            const downloadSpeechBtn = document.getElementById('download-speech-btn');
-            const downloadStatus = document.getElementById('download-status');
+        const anonymizeBtn = document.getElementById('anonymize-btn');
+        const anonymizedText = document.getElementById('anonymized-text');
+        const ttsContainer = document.getElementById('tts-container');
+        const surrogateBtn = document.getElementById('surrogate-btn');
+        const rephraseBtn = document.getElementById('rephrase-btn');
+        const generateSpeechBtn = document.getElementById('generate-speech-btn');
+        const processOrgAudioBtn = document.getElementById('process-org-audio-btn');
+        const audioPlayer = document.getElementById('audio-player');
+        const statusDiv = document.getElementById('status');
+        const loader = document.getElementById('loader');
 
-            // --- State Variables ---
-            let mediaRecorder;
-            let audioChunks = [];
-            let timerInterval;
-            let seconds = 0;
-            let isRecording = false;
-            let audioBlob = null;
-            let uploadedFile = null;
+        const saveEditBtn = document.getElementById('save-edit-btn');
+        const bulkFileInput = document.getElementById('bulk-file-input');
+        const bulkUploadLabel = document.getElementById('bulk-upload-label');
+        const bulkStatus = document.getElementById('bulk-status');
+        const processBulkBtn = document.getElementById('process-bulk-btn');
+        const downloadOriginalBtn = document.getElementById('download-original-btn');
+        const downloadBertBtn = document.getElementById('download-bert-btn');
+        const downloadSpeechBtn = document.getElementById('download-speech-btn');
+        const downloadStatus = document.getElementById('download-status');
 
-            // --- Core Functions ---
+        // PII Tag Selection
+        const piiTagGrid = document.getElementById('pii-tag-grid');
+        const piiSelectAllBtn = document.getElementById('pii-select-all');
+        const piiClearAllBtn = document.getElementById('pii-clear-all');
+        let availablePiiTags = [];
 
-            function updateStatus(message, isError = false) {
-                statusDiv.textContent = message;
-                statusDiv.className = `status ${isError ? 'error' : 'success'}`;
-                statusDiv.style.display = 'block';
-                setTimeout(() => {
-                    statusDiv.style.display = 'none';
-                }, 5000);
-            }
+        // PII Tag Mapping - Backend Tags → Human Readable Labels
+        const piiTagMapping = {
+            'PERSON': { label: 'Names', desc: 'Person names and identities' },
+            'PERSON_EMAIL': { label: 'Email Addresses', desc: 'Email addresses' },
+            'PERSON_SOCIAL_RELATION': { label: 'Social Relations', desc: 'Family members, relatives' },
+            'ORG': { label: 'Organizations', desc: 'Companies, institutions, organizations' },
+            'LOC_CITY': { label: 'Cities', desc: 'City names' },
+            'LOC_COUNTRY': { label: 'Countries', desc: 'Country names' },
+            'LOC_STREET': { label: 'Street Addresses', desc: 'Street names and numbers' },
+            'LOC_ZIP': { label: 'Postal Codes', desc: 'ZIP/postal codes' },
+            'LOC_HOUSENUMBER': { label: 'House Numbers', desc: 'Building/house numbers' },
+            'LOC_OTHER': { label: 'Other Locations', desc: 'Geographic locations' },
+            'DATETIME': { label: 'Dates & Times', desc: 'Dates, times, timestamps' },
+            'DATETIME_AGE': { label: 'Ages', desc: 'Age information' },
+            'CODE': { label: 'Codes', desc: 'Identifiers and codes' },
+            'CODE_PHONE': { label: 'Phone Numbers', desc: 'Telephone numbers' },
+            'CODE_URL': { label: 'URLs & Links', desc: 'Web addresses and URLs' },
+            'PROFESSION': { label: 'Professions', desc: 'Occupations and job titles' },
+            'PRODUCT': { label: 'Products', desc: 'Commercial products' },
+            'QUANTITY': { label: 'Quantities', desc: 'Measurements and amounts' },
+            'MISC': { label: 'Miscellaneous', desc: 'Other identifiable information' }
+        };
 
-            function updateDownloadStatus(message, isError = false) {
-                downloadStatus.textContent = message;
-                downloadStatus.className = `status ${isError ? 'error' : 'success'}`;
-                downloadStatus.style.display = 'block';
-                setTimeout(() => {
-                    downloadStatus.style.display = 'none';
-                }, 5000);
-            }
+        // --- State Variables ---
+        let mediaRecorder;
+        let audioChunks = [];
+        let timerInterval;
+        let seconds = 0;
+        let isRecording = false;
+        let audioBlob = null;
+        let uploadedFile = null;
 
-            function showLoader(show) {
-                loader.style.display = show ? 'block' : 'none';
-            }
+        // --- Core Functions ---
+        function updateStatus(message, isError = false) {
+            statusDiv.textContent = message;
+            statusDiv.className = `status ${isError ? 'error' : 'success'}`;
+            statusDiv.style.display = 'block';
+            setTimeout(() => { statusDiv.style.display = 'none'; }, 5000);
+        }
 
-            async function loadModels() {
-                console.log(">>> [DEBUG] loadModels() called <<<");
-                
-                try {
-                    const whisperSelect = document.getElementById('whisper-model-select');
-                    const llmSelect = document.getElementById('llm-model-select');
-                    
-                    console.log(">>> [DEBUG] Elements found:", {
-                        whisper: !!whisperSelect,
-                        llm: !!llmSelect
-                    });
+        function updateDownloadStatus(message, isError = false) {
+            downloadStatus.textContent = message;
+            downloadStatus.className = `status ${isError ? 'error' : 'success'}`;
+            downloadStatus.style.display = 'block';
+            setTimeout(() => { downloadStatus.style.display = 'none'; }, 5000);
+        }
 
-                    if (!whisperSelect) {
-                        console.error(">>> [DEBUG] ERROR: whisper-model-select NOT FOUND!");
-                        return;
-                    }
+        function showLoader(show) { loader.style.display = show ? 'block' : 'none'; }
 
-                    const baseUrl = window.location.origin;
-                    console.log(`>>> [DEBUG] Fetching from: ${baseUrl}/transcription_models`);
-                    
-                    const transResp = await fetch(baseUrl + '/transcription_models');
-                    console.log(`>>> [DEBUG] Response Status: ${transResp.status}`);
-                    
-                    if (!transResp.ok) {
-                        throw new Error(`HTTP error! status: ${transResp.status}`);
-                    }
-                    
-                    const transData = await transResp.json();
-                    console.log(">>> [DEBUG] Received Data:", transData);
-                    
-                    if (transData.whisper_models && Array.isArray(transData.whisper_models)) {
-                        whisperSelect.innerHTML = '';
-                        console.log(`>>> [DEBUG] Populating ${transData.whisper_models.length} options...`);
-                        
-                        transData.whisper_models.forEach(([value, label]) => {
-                            const option = document.createElement('option');
-                            option.value = value;
-                            option.textContent = label;
-                            if (value === transData.default_whisper_model) {
-                                option.selected = true;
-                            }
-                            whisperSelect.appendChild(option);
-                        });
-                        console.log(`>>> [DEBUG] Done! Options count: ${whisperSelect.options.length}`);
-                    } else {
-                        console.error(">>> [DEBUG] Invalid data format:", transData);
-                    }
+        // --- PII Tag Loading ---
+        async function loadPiiTags() {
+            try {
+                const resp = await fetch('/available_tags');
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                const data = await resp.json();
 
-                    if (llmSelect) {
-                        const llmResp = await fetch(baseUrl + '/models');
-                        if (llmResp.ok) {
-                            const llmData = await llmResp.json();
-                            if (llmData.llm_models) {
-                                llmSelect.innerHTML = '';
-                                Object.entries(llmData.llm_models).forEach(([key, label]) => {
-                                    const option = document.createElement('option');
-                                    option.value = key;
-                                    option.textContent = label;
-                                    if (key === 'medgemma') option.selected = true;
-                                    llmSelect.appendChild(option);
-                                });
-                            }
+                availablePiiTags = data.tags || [];
+
+                // Render flat tag grid with human-readable labels
+                piiTagGrid.innerHTML = '';
+
+                // Sort tags alphabetically by their backend name
+                const sortedTags = availablePiiTags.sort();
+
+                sortedTags.forEach(tag => {
+                    const mapping = piiTagMapping[tag] || { label: tag, desc: '' };
+
+                    const labelDiv = document.createElement('label');
+                    labelDiv.className = 'pii-tag-item';
+
+                    const checkbox = document.createElement('input');
+                    checkbox.type = 'checkbox';
+                    checkbox.value = tag;
+                    checkbox.checked = true; // Default: all selected
+
+                    const labelText = document.createElement('span');
+                    labelText.className = 'pii-tag-label';
+                    labelText.textContent = mapping.label;
+
+                    const descText = document.createElement('div');
+                    descText.className = 'pii-tag-description';
+                    descText.textContent = mapping.desc;
+
+                    labelDiv.appendChild(checkbox);
+                    labelDiv.appendChild(labelText);
+                    labelDiv.appendChild(descText);
+
+                    // Allow clicking the whole div
+                    labelDiv.addEventListener('click', (e) => {
+                        if (e.target !== checkbox) {
+                            checkbox.checked = !checkbox.checked;
                         }
-                    }
-
-                } catch (error) {
-                    console.error(">>> [DEBUG] CRASH in loadModels:", error);
-                }
-            }
-
-            // --- Recording ---
-            async function toggleRecording() {
-                if (isRecording) {
-                    stopRecording();
-                } else {
-                    await startRecording();
-                }
-            }
-
-            async function startRecording() {
-                try {
-                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                    mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
-                
-                    mediaRecorder.ondataavailable = event => {
-                        if (event.data.size > 0) {
-                            audioChunks.push(event.data);
-                        }
-                    };
-                
-                    mediaRecorder.onstop = () => {
-                        audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-                        audioChunks = [];
-                        updateUIForTranscription();
-                        stream.getTracks().forEach(track => track.stop());
-                    };
-
-                    audioBlob = null;
-                    uploadedFile = null;
-                    filenameDisplay.textContent = '';
-                    audioChunks = [];
-                    mediaRecorder.start();
-                    isRecording = true;
-                    recordBtn.classList.add('recording');
-                    recordIcon.textContent = '⏹️ Stop ';
-                    recordBtn.childNodes[1].nodeValue = "Recording";
-                    
-                    startTimer();
-                } catch (err) {
-                    console.error("Error starting recording:", err);
-                    updateStatus("Microphone access denied or not available. Please check browser permissions.", true);
-                }
-            }
-
-            function stopRecording() {
-                if (mediaRecorder && mediaRecorder.state !== "inactive") {
-                    mediaRecorder.stop();
-                    isRecording = false;
-                    recordBtn.classList.remove('recording');
-                    recordIcon.textContent = '🎤 Start ';
-                    recordBtn.childNodes[1].nodeValue = "Recording";
-                    stopTimer();
-                }
-            }
-
-            // --- Timer ---
-            function startTimer() {
-                seconds = 0;
-                timerDiv.textContent = '00:00';
-                timerInterval = setInterval(() => {
-                    seconds++;
-                    const minutes = Math.floor(seconds / 60);
-                    const displaySeconds = seconds % 60;
-                    timerDiv.textContent = 
-                        `${String(minutes).padStart(2, '0')}:${String(displaySeconds).padStart(2, '0')}`;
-                }, 1000);
-            }
-
-            function stopTimer() {
-                clearInterval(timerInterval);
-            }
-
-            // --- File Handling ---
-            function handleFileUpload() {
-                const file = fileInput.files[0];
-                if (file) {
-                    audioBlob = null;
-                    uploadedFile = file;
-                    filenameDisplay.textContent = `Selected file: ${file.name}`;
-                    updateUIForTranscription();
-                }
-            }
-
-            function updateUIForTranscription() {
-                if (audioBlob || uploadedFile) {
-                    transcribeBtn.disabled = false;
-                    transcribedText.value = '';
-                    anonymizedText.value = '';
-                    anonymizeBtn.disabled = true;
-                    ttsContainer.classList.add('hidden');
-                    downloadOriginalBtn.disabled = true;
-                    downloadBertBtn.disabled = true;
-                    downloadLlmBtn.disabled = true;
-                    downloadSpeechBtn.disabled = true;
-                }
-            }
-            
-            // --- API Calls ---
-
-            async function transcribe() {
-                if (!audioBlob && !uploadedFile) {
-                    updateStatus("No audio to transcribe. Please record or upload an audio file.", true);
-                    return;
-                }
-
-                showLoader(true);
-                transcribeBtn.disabled = true;
-                recordBtn.disabled = true;
-                fileInput.disabled = true;
-                whisperModelSelect.disabled = true;
-                transcriptionLanguageSelect.disabled = true;
-                updateStatus("Transcription in progress...", false);
-
-                const formData = new FormData();
-                const fileToTranscribe = audioBlob || uploadedFile;
-                const fileName = audioBlob ? 'recording.webm' : uploadedFile.name;
-
-                formData.append('audio', fileToTranscribe, fileName);
-
-                const modelSize = whisperModelSelect.value;
-                formData.append('model_size', modelSize);
-
-                const selectedLang = transcriptionLanguageSelect.value;
-                if (selectedLang !== 'auto') {
-                    const langCode = selectedLang.toLowerCase();
-                    formData.append('language', langCode);
-                }
-
-                try {
-                    const endpoint = audioBlob ? '/transcribe_recording' : '/upload';
-                    const response = await fetch(endpoint, {
-                        method: 'POST',
-                        body: formData
                     });
 
-                    const contentType = response.headers.get('content-type');
-                    if (!contentType || !contentType.includes('application/json')) {
-                        const text = await response.text();
-                        console.error('Non-JSON response received:', text.substring(0, 200));
-                        throw new Error(`Server returned ${response.status} with non-JSON content`);
-                    }
-
-                    const result = await response.json();
-
-                    if (response.ok && result.success) {
-                        // ✅ COMPLETE CODE - NO "..." ALLOWED
-                        transcribedText.value = result.transcription || "";
-                        offsetData = result.offsets || [];
-                        audioName = result.audio_name;
-
-                        updateStatus("Transcription successful!", false);
-                        downloadOriginalBtn.disabled = false;
-                        anonymizeBtn.disabled = false;
-                        ttsContainer.classList.add('hidden');
-                        downloadBertBtn.disabled = true;
-                        downloadLlmBtn.disabled = true;
-                        downloadSpeechBtn.disabled = true;
-
-                        // Store values for later use
-                        window.lastTranscriptionData = {
-                            text: result.transcription,
-                            offsets: result.offsets,
-                            audio_name: result.audio_name
-                        };
-                    } else {
-                        throw new Error(result.error || "An unknown error occurred during transcription.");
-                    }
-                } catch (error) {
-                    console.error('Transcription error:', error);
-                    updateStatus(`Transcription failed: ${error.message}`, true);
-                } finally {
-                    showLoader(false);
-                    transcribeBtn.disabled = false;  // ✅ Fixed: should NOT be disabled
-                    recordBtn.disabled = false;
-                    fileInput.disabled = false;
-                    whisperModelSelect.disabled = false;
-                    transcriptionLanguageSelect.disabled = false;
-                }
+                    piiTagGrid.appendChild(labelDiv);
+                });
+            } catch (error) {
+                console.error('Failed to load PII tags:', error);
+                piiTagGrid.innerHTML = '<p style="color:#AF1821;font-size:0.9em;grid-column:1/-1;">Failed to load PII tags.</p>';
             }
+        }
 
-            async function saveEdit() {
-                const text = transcribedText.value;
-                if (!text.trim()) {
-                    updateStatus("Nothing to save.", true);
-                    return;
-                }
-                
-                showLoader(true);
-                try {
-                    const response = await fetch('/save_transcription', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ text: text })
-                    });
-                    
-                    const result = await response.json();
-                    if (response.ok && result.success) {
-                        updateStatus("Transcription saved successfully!", false);
-                    } else {
-                        throw new Error(result.error || "Failed to save.");
-                    }
-                } catch (error) {
-                    updateStatus(`Save failed: ${error.message}`, true);
-                } finally {
-                    showLoader(false);
-                }
-            }
+        function getSelectedPiiTags() {
+            const checkboxes = piiTagGrid.querySelectorAll('input[type="checkbox"]:checked');
+            return Array.from(checkboxes).map(cb => cb.value);
+        }
 
-            async function anonymizeText() {
-                const text = transcribedText.value;
-                if (!text.trim()) {
-                    updateStatus("No text to anonymize.", true);
-                    return;
-                }
-                
-                showLoader(true);
-                anonymizeBtn.disabled = true;
-                updateStatus("Anonymization in progress...", false);
-
-                try {
-                    const response = await fetch('/anonymize', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ 
-                            transcript: text,
-                            lang: transcriptionLanguageSelect.value
-                        })
-                    });
-                    
-                    const result = await response.json();
-                    
-                    // ✅ FIXED: Check 'status' field instead of 'success'
-                    if (response.ok && result.status === 'success') {
-                        // ✅ FIXED: Use 'anonymized' field that backend returns
-                        anonymizedText.value = result.anonymized || result.text || '';
-                        anonymizedText.dispatchEvent(new Event('input'));
-                        ttsContainer.classList.remove('hidden');
-                        downloadBertBtn.disabled = false;
-                        updateStatus("Anonymization successful!", false);
-                    } else {
-                        throw new Error(result.error || result.details || "Anonymization failed.");
-                    }
-                } catch (error) {
-                    console.error('Anonymization error:', error);
-                    updateStatus(`Anonymization failed: ${error.message}`, true);
-                } finally {
-                    showLoader(false);
-                    anonymizeBtn.disabled = false;
-                }
-            }
-            
-            async function processOrgAudio() {
-                const text = anonymizedText.value;
-                
-                if (!text.trim()) {
-                    updateStatus("No text to generate speech from.", true);
-                    return;
-                }
-                
-                showLoader(true);
-                try {
-                    const response = await fetch('/generate_org_audio', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ text: text, offSet: offsetData, audioName: audioName })
-                    });
-                    
-                    const result = await response.json();
-                    
-                    if (response.ok && result.success) {
-                        audioPlayer.src = result.audio_url;
-                        audioPlayer.classList.remove('hidden');
-                        downloadSpeechBtn.disabled = false;
-                        updateStatus("Speech generated successfully!", false);
-                    } else {
-                        throw new Error(result.error || "Speech generation failed.");
-                    }
-                } catch (error) {
-                    updateStatus(`Speech generation failed: ${error.message}`, true);
-                } finally {
-                    showLoader(false);
-                }
-            }
-
-            async function surrogateText() {
-                const text = anonymizedText.value;
-                if (!text.trim()) {
-                    updateStatus("No text to generate a surrogate.", true);
-                    return;
-                }
-                
-                showLoader(true);
-                try {
-                    const response = await fetch('/surrogate_text', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ text: text, lang: transcriptionLanguageSelect.value })
-                    });
-                    
-                    const result = await response.json();
-                    
-                    if (response.ok && result.success) {
-                        anonymizedText.value = result.surrogated_text;
-                        anonymizedText.dispatchEvent(new Event('input'));
-                        ttsContainer.classList.remove('hidden');
-                        downloadBertBtn.disabled = false;
-                        updateStatus("Surrogation successful!", false);
-                    } else {
-                        throw new Error(result.error || "Surrogation failed.");
-                    }
-                } catch (error) {
-                    console.error('Surrogation error:', error);
-                    updateStatus(`Surrogation failed: ${error.message}`, true);
-                } finally {
-                    showLoader(false);
-                    anonymizeBtn.disabled = false;
-                }
-            }
-            
-            async function rephraseText() {
-                const text = anonymizedText.value;
-                if (!text.trim()) {
-                    updateStatus("No text to rephrase.", true);
-                    return;
-                }
-                
-                showLoader(true);
-                try {
-                    const response = await fetch('/rephrase_text', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ text: text, lang: transcriptionLanguageSelect.value })
-                    });
-                    
-                    const result = await response.json();
-                    
-                    if (response.ok && result.success) {
-                        anonymizedText.value = result.rephrased_text;
-                        anonymizedText.dispatchEvent(new Event('input'));
-                        ttsContainer.classList.remove('hidden');
-                        downloadBertBtn.disabled = false;
-                        updateStatus("Rephrase successful!", false);
-                    } else {
-                        throw new Error(result.error || "Rephrase failed.");
-                    }
-                } catch (error) {
-                    console.error('Rephrase error:', error);
-                    updateStatus(`Rephrase failed: ${error.message}`, true);
-                } finally {
-                    showLoader(false);
-                    anonymizeBtn.disabled = false;
-                }
-            }
-            
-            async function generateSpeech() {
-                const text = anonymizedText.value;
-                if (!text.trim()) {
-                    updateStatus("No text to generate speech from.", true);
-                    return;
-                }
-                
-                showLoader(true);
-                generateSpeechBtn.disabled = true;
-                
-                try {
-                    const response = await fetch('/generate_speech', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ 
-                            text: text, 
-                            lang: transcriptionLanguageSelect.value 
-                        })
-                    });
-                    
-                    // ✅ Handle AUDIO BLOB directly (not JSON!)
-                    if (!response.ok) {
-                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                    }
-                    
-                    // Read as blob
-                    const audioBlob = await response.blob();
-                    console.log("✅ Received audio blob:", audioBlob.type, audioBlob.size, "bytes");
-                    
-                    if (audioBlob.size < 100) {
-                        throw new Error("Generated audio too small - likely an error occurred");
-                    }
-                    
-                    // Create object URL and show player
-                    const audioUrl = URL.createObjectURL(audioBlob);
-                    audioPlayer.src = audioUrl;
-                    audioPlayer.classList.remove('hidden');
-                    audioPlayer.load();  // Important: reload the audio element
-                    
-                    downloadSpeechBtn.disabled = false;
-                    updateStatus("Speech generated successfully! Click ▶ to play.", false);
-                    
-                } catch (error) {
-                    console.error("❌ Speech generation error:", error);
-                    updateStatus(`Speech generation failed: ${error.message}`, true);
-                } finally {
-                    showLoader(false);
-                    generateSpeechBtn.disabled = false;
-                }
-            }
-
-            async function llmRewrite() {
-                // CHANGE: Read from anonymized-text instead of transcribed-text
-                const text = anonymizedText.value; 
-                
-                if (!text.trim()) {
-                    updateStatus("No anonymized text to rewrite. Please run Anonymization first.", true);
-                    return;
-                }
-                
-                showLoader(true);
-                llmRewriteBtn.disabled = true;
-                updateStatus("LLM Rewriting anonymized text...", false);
-
-                try {
-                    const response = await fetch('/llm_rewrite', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ 
-                            text: text,
-                            model: llmModelSelect.value,
-                            enabled: llmEnabledCheckbox.checked
-                        })
-                    });
-                    
-                    const result = await response.json();
-                    
-                    if (response.ok && result.success) {
-                        // Display result in the LLM output box
-                        llmOutputSection.style.display = 'block';
-                        llmRewrittenText.value = result.rewritten_text;
-                        downloadLlmBtn.disabled = false;
-                        updateStatus("LLM rewrite successful!", false);
-                    } else {
-                        throw new Error(result.error || "LLM rewrite failed.");
-                    }
-                } catch (error) {
-                    updateStatus(`LLM rewrite failed: ${error.message}`, true);
-                } finally {
-                    showLoader(false);
-                    llmRewriteBtn.disabled = false;
-                }
-            }
-
-            async function processBulk() {
-                if (bulkFileInput.files.length === 0) return;
-                
-                showLoader(true);
-                const formData = new FormData();
-                for (let file of bulkFileInput.files) {
-                    formData.append('files', file);
-                }
-                
-                try {
-                    const response = await fetch('/upload_bulk', {
-                        method: 'POST',
-                        body: formData
-                    });
-                    
-                    const result = await response.json();
-                    
-                    if (response.ok && result.success) {
-                        bulkStatus.textContent = `Processed ${result.processed_count} files`;
-                        updateStatus("Bulk upload processed!", false);
-                    } else {
-                        throw new Error(result.error || "Bulk upload failed.");
-                    }
-                } catch (error) {
-                    updateStatus(`Bulk upload failed: ${error.message}`, true);
-                } finally {
-                    showLoader(false);
-                }
-            }
-
-            // --- Event Listeners ---
-            recordBtn.addEventListener('click', toggleRecording);
-            fileInput.addEventListener('change', handleFileUpload);
-            transcribeBtn.addEventListener('click', transcribe);
-            saveEditBtn.addEventListener('click', saveEdit);
-            anonymizeBtn.addEventListener('click', anonymizeText);
-            surrogateBtn.addEventListener('click', surrogateText);
-            rephraseBtn.addEventListener('click', rephraseText);
-            generateSpeechBtn.addEventListener('click', generateSpeech);
-            processOrgAudioBtn.addEventListener('click', processOrgAudio);
-            anonymizedText.addEventListener('input', () => {
-                const hasAnonymizedText = anonymizedText.value.trim().length > 0;
-                llmRewriteBtn.disabled = !hasAnonymizedText;
-                
-                // Also enable the LLM download button if text exists
-                if (hasAnonymizedText) {
-                    downloadLlmBtn.disabled = false;
-                }
-            });
-            llmRewriteBtn.addEventListener('click', llmRewrite);
-            processBulkBtn.addEventListener('click', processBulk);
-            
-            bulkFileInput.addEventListener('change', () => {
-                if (bulkFileInput.files.length > 0) {
-                    bulkStatus.textContent = `${bulkFileInput.files.length} file(s) selected`;
-                    processBulkBtn.disabled = false;
-                }
-            });
-
-            downloadOriginalBtn.addEventListener('click', () => window.open('/download_text/original/transcription.txt'));
-            downloadBertBtn.addEventListener('click', () => window.open('/download_text/bert/anonymized.txt'));
-            downloadLlmBtn.addEventListener('click', () => window.open('/download_text/llm/rewritten.txt'));
-            downloadSpeechBtn.addEventListener('click', () => {
-                if (audioPlayer.src) window.open(audioPlayer.src);
-            });
-
-            // Initialize
-            console.log(">>> [DEBUG] Calling loadModels()...");
-            loadModels();
+        piiSelectAllBtn.addEventListener('click', () => {
+            piiTagGrid.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = true);
         });
+
+        piiClearAllBtn.addEventListener('click', () => {
+            piiTagGrid.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
+        });
+
+        // --- Model Loading ---
+        async function loadModels() {
+            try {
+                const whisperSelect = document.getElementById('whisper-model-select');
+                if (!whisperSelect) return;
+
+                const baseUrl = window.location.origin;
+                const transResp = await fetch(baseUrl + '/transcription_models');
+                if (!transResp.ok) throw new Error(`HTTP error! status: ${transResp.status}`);
+                const transData = await transResp.json();
+
+                if (transData.whisper_models && Array.isArray(transData.whisper_models)) {
+                    whisperSelect.innerHTML = '';
+                    transData.whisper_models.forEach(([value, label]) => {
+                        const option = document.createElement('option');
+                        option.value = value;
+                        option.textContent = label;
+                        if (value === transData.default_whisper_model) option.selected = true;
+                        whisperSelect.appendChild(option);
+                    });
+                }
+            } catch (error) {
+                console.error("Error in loadModels:", error);
+            }
+        }
+
+        // --- Recording ---
+        async function toggleRecording() {
+            if (isRecording) { stopRecording(); } else { await startRecording(); }
+        }
+
+        async function startRecording() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+                mediaRecorder.ondataavailable = event => { if (event.data.size > 0) audioChunks.push(event.data); };
+                mediaRecorder.onstop = () => {
+                    audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                    audioChunks = [];
+                    updateUIForTranscription();
+                    stream.getTracks().forEach(track => track.stop());
+                };
+                audioBlob = null; uploadedFile = null; filenameDisplay.textContent = '';
+                audioChunks = []; mediaRecorder.start(); isRecording = true;
+                recordBtn.classList.add('recording');
+                recordIcon.textContent = '⏹️ Stop ';
+                recordBtn.childNodes[1].nodeValue = "Recording";
+                startTimer();
+            } catch (err) {
+                console.error("Error starting recording:", err);
+                updateStatus("Microphone access denied. Check browser permissions.", true);
+            }
+        }
+
+        function stopRecording() {
+            if (mediaRecorder && mediaRecorder.state !== "inactive") {
+                mediaRecorder.stop(); isRecording = false;
+                recordBtn.classList.remove('recording');
+                recordIcon.textContent = '🎤 Start ';
+                recordBtn.childNodes[1].nodeValue = "Recording";
+                stopTimer();
+            }
+        }
+
+        function startTimer() {
+            seconds = 0; timerDiv.textContent = '00:00';
+            timerInterval = setInterval(() => {
+                seconds++;
+                const minutes = Math.floor(seconds / 60);
+                const displaySeconds = seconds % 60;
+                timerDiv.textContent = `${String(minutes).padStart(2, '0')}:${String(displaySeconds).padStart(2, '0')}`;
+            }, 1000);
+        }
+
+        function stopTimer() { clearInterval(timerInterval); }
+
+        function handleFileUpload() {
+            const file = fileInput.files[0];
+            if (file) {
+                audioBlob = null; uploadedFile = file;
+                filenameDisplay.textContent = `Selected file: ${file.name}`;
+                updateUIForTranscription();
+            }
+        }
+
+        function updateUIForTranscription() {
+            if (audioBlob || uploadedFile) {
+                transcribeBtn.disabled = false;
+                transcribedText.value = ''; anonymizedText.value = '';
+                anonymizeBtn.disabled = true;
+                ttsContainer.classList.add('hidden');
+                downloadOriginalBtn.disabled = true;
+                downloadBertBtn.disabled = true; downloadSpeechBtn.disabled = true;
+            }
+        }
+
+        // --- API Calls ---
+        async function transcribe() {
+            if (!audioBlob && !uploadedFile) {
+                updateStatus("No audio to transcribe. Record or upload first.", true); return;
+            }
+            showLoader(true); transcribeBtn.disabled = true; recordBtn.disabled = true;
+            fileInput.disabled = true; whisperModelSelect.disabled = true;
+            transcriptionLanguageSelect.disabled = true;
+            updateStatus("Transcription in progress...", false);
+
+            const formData = new FormData();
+            const fileToTranscribe = audioBlob || uploadedFile;
+            const fileName = audioBlob ? 'recording.webm' : uploadedFile.name;
+            formData.append('audio', fileToTranscribe, fileName);
+            formData.append('model_size', whisperModelSelect.value);
+            const selectedLang = transcriptionLanguageSelect.value;
+            if (selectedLang !== 'auto') formData.append('language', selectedLang.toLowerCase());
+
+            try {
+                const endpoint = audioBlob ? '/transcribe_recording' : '/upload';
+                const response = await fetch(endpoint, { method: 'POST', body: formData });
+                const result = await response.json();
+
+                if (response.ok && result.success) {
+                    transcribedText.value = result.transcription || "";
+                    offsetData = result.offsets || [];
+                    audioName = result.audio_name;
+                    updateStatus("Transcription successful!", false);
+                    downloadOriginalBtn.disabled = false;
+                    anonymizeBtn.disabled = false;
+                    ttsContainer.classList.add('hidden');
+                    downloadBertBtn.disabled = true; downloadSpeechBtn.disabled = true;
+                    window.lastTranscriptionData = {
+                        text: result.transcription,
+                        offsets: result.offsets,
+                        audio_name: result.audio_name
+                    };
+                } else {
+                    throw new Error(result.error || "Transcription failed.");
+                }
+            } catch (error) {
+                console.error('Transcription error:', error);
+                updateStatus(`Transcription failed: ${error.message}`, true);
+            } finally {
+                showLoader(false);
+                transcribeBtn.disabled = false; recordBtn.disabled = false;
+                fileInput.disabled = false; whisperModelSelect.disabled = false;
+                transcriptionLanguageSelect.disabled = false;
+            }
+        }
+
+        async function saveEdit() {
+            const text = transcribedText.value;
+            if (!text.trim()) { updateStatus("Nothing to save.", true); return; }
+            showLoader(true);
+            try {
+                const response = await fetch('/save_transcription', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: text })
+                });
+                const result = await response.json();
+                if (response.ok && result.success) {
+                    updateStatus("Transcription saved successfully!", false);
+                } else {
+                    throw new Error(result.error || "Failed to save.");
+                }
+            } catch (error) {
+                updateStatus(`Save failed: ${error.message}`, true);
+            } finally { showLoader(false); }
+        }
+
+        async function anonymizeText() {
+            const text = transcribedText.value;
+            if (!text.trim()) { updateStatus("No text to anonymize.", true); return; }
+            const selectedTags = getSelectedPiiTags();
+            showLoader(true); anonymizeBtn.disabled = true;
+            updateStatus("Anonymization in progress...", false);
+
+            try {
+                const response = await fetch('/anonymize', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        transcript: text,
+                        lang: transcriptionLanguageSelect.value,
+                        include_tags: selectedTags.length > 0 ? selectedTags : undefined
+                    })
+                });
+                const result = await response.json();
+
+                if (response.ok && result.status === 'success') {
+                    anonymizedText.value = result.anonymized || result.text || '';
+                    anonymizedText.dispatchEvent(new Event('input'));
+                    ttsContainer.classList.remove('hidden');
+                    downloadBertBtn.disabled = false;
+                    updateStatus("Anonymization successful!", false);
+                } else {
+                    throw new Error(result.error || result.details || "Anonymization failed.");
+                }
+            } catch (error) {
+                console.error('Anonymization error:', error);
+                updateStatus(`Anonymization failed: ${error.message}`, true);
+            } finally {
+                showLoader(false); anonymizeBtn.disabled = false;
+            }
+        }
+
+        async function processOrgAudio() {
+            const text = anonymizedText.value;
+            if (!text.trim()) { updateStatus("No text to generate speech from.", true); return; }
+            showLoader(true);
+            try {
+                const response = await fetch('/generate_org_audio', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: text, offSet: offsetData, audioName: audioName })
+                });
+                const result = await response.json();
+
+                if (response.ok && result.success) {
+                    audioPlayer.src = result.audio_url;
+                    audioPlayer.classList.remove('hidden');
+                    downloadSpeechBtn.disabled = false;
+                    updateStatus("Speech generated successfully!", false);
+                } else {
+                    throw new Error(result.error || "Speech generation failed.");
+                }
+            } catch (error) {
+                updateStatus(`Speech generation failed: ${error.message}`, true);
+            } finally { showLoader(false); }
+        }
+
+        async function surrogateText() {
+            const text = anonymizedText.value;
+            if (!text.trim()) { updateStatus("No text to generate a surrogate.", true); return; }
+            showLoader(true);
+            try {
+                const response = await fetch('/surrogate_text', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: text, lang: transcriptionLanguageSelect.value })
+                });
+                const result = await response.json();
+
+                if (response.ok && result.success) {
+                    anonymizedText.value = result.surrogated_text;
+                    anonymizedText.dispatchEvent(new Event('input'));
+                    ttsContainer.classList.remove('hidden');
+                    downloadBertBtn.disabled = false;
+                    updateStatus("Surrogation successful!", false);
+                } else {
+                    throw new Error(result.error || "Surrogation failed.");
+                }
+            } catch (error) {
+                console.error('Surrogation error:', error);
+                updateStatus(`Surrogation failed: ${error.message}`, true);
+            } finally { showLoader(false); }
+        }
+
+        async function rephraseText() {
+            const text = anonymizedText.value;
+            if (!text.trim()) { updateStatus("No text to rephrase.", true); return; }
+            showLoader(true);
+            try {
+                const response = await fetch('/rephrase_text', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: text, lang: transcriptionLanguageSelect.value })
+                });
+                const result = await response.json();
+
+                if (response.ok && result.success) {
+                    anonymizedText.value = result.rephrased_text;
+                    anonymizedText.dispatchEvent(new Event('input'));
+                    ttsContainer.classList.remove('hidden');
+                    downloadBertBtn.disabled = false;
+                    updateStatus("Rephrase successful!", false);
+                } else {
+                    throw new Error(result.error || "Rephrase failed.");
+                }
+            } catch (error) {
+                console.error('Rephrase error:', error);
+                updateStatus(`Rephrase failed: ${error.message}`, true);
+            } finally { showLoader(false); }
+        }
+
+        async function generateSpeech() {
+            const text = anonymizedText.value;
+            if (!text.trim()) { updateStatus("No text to generate speech from.", true); return; }
+            showLoader(true); generateSpeechBtn.disabled = true;
+
+            try {
+                const response = await fetch('/generate_speech', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        text: text, 
+                        lang: transcriptionLanguageSelect.value,
+                        randomize_voices: true
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                const audioBlob = await response.blob();
+                console.log("✅ Received audio blob:", audioBlob.type, audioBlob.size, "bytes");
+
+                if (audioBlob.size < 100) {
+                    throw new Error("Generated audio too small - likely an error occurred");
+                }
+
+                const audioUrl = URL.createObjectURL(audioBlob);
+                audioPlayer.src = audioUrl;
+                audioPlayer.classList.remove('hidden');
+                audioPlayer.load();
+                downloadSpeechBtn.disabled = false;
+                updateStatus("Speech generated successfully! Click ▶ to play.", false);
+
+            } catch (error) {
+                console.error("❌ Speech generation error:", error);
+                updateStatus(`Speech generation failed: ${error.message}`, true);
+            } finally {
+                showLoader(false); generateSpeechBtn.disabled = false;
+            }
+        }
+
+        async function processBulk() {
+            if (bulkFileInput.files.length === 0) return;
+            showLoader(true);
+            const formData = new FormData();
+            for (let file of bulkFileInput.files) {
+                formData.append('files', file);
+            }
+            try {
+                const response = await fetch('/upload_bulk', {
+                    method: 'POST', body: formData
+                });
+                const result = await response.json();
+
+                if (response.ok && result.success) {
+                    bulkStatus.textContent = `Processed ${result.processed_count} files`;
+                    updateStatus("Bulk upload processed!", false);
+                } else {
+                    throw new Error(result.error || "Bulk upload failed.");
+                }
+            } catch (error) {
+                updateStatus(`Bulk upload failed: ${error.message}`, true);
+            } finally { showLoader(false); }
+        }
+
+        // --- Event Listeners ---
+        recordBtn.addEventListener('click', toggleRecording);
+        fileInput.addEventListener('change', handleFileUpload);
+        transcribeBtn.addEventListener('click', transcribe);
+        saveEditBtn.addEventListener('click', saveEdit);
+        anonymizeBtn.addEventListener('click', anonymizeText);
+        surrogateBtn.addEventListener('click', surrogateText);
+        rephraseBtn.addEventListener('click', rephraseText);
+        generateSpeechBtn.addEventListener('click', generateSpeech);
+        processOrgAudioBtn.addEventListener('click', processOrgAudio);
+        anonymizedText.addEventListener('input', () => {
+            const hasText = anonymizedText.value.trim().length > 0;
+            downloadBertBtn.disabled = !hasText;
+            downloadSpeechBtn.disabled = !hasText;
+        });
+        processBulkBtn.addEventListener('click', processBulk);
+        bulkFileInput.addEventListener('change', () => {
+            if (bulkFileInput.files.length > 0) {
+                bulkStatus.textContent = `${bulkFileInput.files.length} file(s) selected`;
+                processBulkBtn.disabled = false;
+            }
+        });
+        downloadOriginalBtn.addEventListener('click', () => window.open('/download_text/original/transcription.txt'));
+        downloadBertBtn.addEventListener('click', () => window.open('/download_text/bert/anonymized.txt'));
+        downloadSpeechBtn.addEventListener('click', () => {
+            if (audioPlayer.src) window.open(audioPlayer.src);
+        });
+
+        // Initialize
+        loadModels();
+        loadPiiTags();
+    });
     </script>
 </body>
 </html>

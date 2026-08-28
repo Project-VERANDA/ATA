@@ -37,8 +37,8 @@ from openai import OpenAI
 import torch
 
 # Disable cuDNN to avoid CUDNN_STATUS_NOT_INITIALIZED with WhisperX + Pyannote
-torch.backends.cudnn.enabled = False
-torch.backends.cudnn.benchmark = False
+torch.backends.cudnn.enabled = True
+torch.backends.cudnn.benchmark = True
 
 # Re-enable TF-32 for better performance on A40 (Ampere architecture)
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -52,6 +52,10 @@ import whisperx
 # =============================================================================
 # LOCAL PROJECT IMPORTS
 # =============================================================================
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from pipeline.tts.tts_engine import (
     generate_speech,
     synthesize_segment,
@@ -1850,13 +1854,14 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
         "llm_failed": llm_failed_count
     }
 
-def anonymize_text_locally(text):
+def anonymize_text_locally(text, include_tags=None):
     """Wrapper function to anonymize text using the local BERT model."""
     try:
         engine = AnonymizationEngine(
             method="local_mmbert", 
             level="standard", 
-            model_path=MODEL_FOLDER / "multilingual_DialogPII_NER"
+            model_path=MODEL_FOLDER / "multilingual_DialogPII_NER",
+            include_tags=include_tags
         )
         
         if not engine.method:
@@ -1925,6 +1930,9 @@ Examples:
                              f"Example: --exclude-tags PROFESSION QUANTITY")
     parser.add_argument('--file', type=str, help='Process a single file')
     parser.add_argument('--files', nargs='+', help='Process multiple files')
+    parser.add_argument('--enable-tts', action='store_true',
+                    help='Enable multi-speaker TTS generation after transcription. '
+                         'Voice count is derived from diarization; assignments are randomized.')
     
     args = parser.parse_args()
     
