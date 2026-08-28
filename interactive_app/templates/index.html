@@ -11,29 +11,40 @@
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: linear-gradient(135deg, #003754 0%, #009AA9 50%, #EA5451 100%);
             min-height: 100vh;
-            display: flex; align-items: center; justify-content: center;
             padding: 20px;
+        }
+
+        .page-wrapper {
+            display: flex;
+            max-width: 1600px;
+            margin: 0 auto;
+            gap: 60px;
+            align-items: flex-start;
+        }
+
+        .main-content {
+            flex: 1;
+            max-width: 950px;
         }
 
         .container {
             background: #FFFFFF;
             border-radius: 20px;
             box-shadow: 0 25px 50px rgba(0, 55, 84, 0.2);
-            padding: 40px; max-width: 950px; width: 100%;
+            padding: 40px;
             border: 3px solid #009AA9;
-            position: relative;
-            z-index: 10;
         }
 
         h1 { text-align: center; color: #003754; margin-bottom: 10px; font-size: 2.8em; font-weight: 600; text-shadow: 0 2px 4px rgba(0, 55, 84, 0.1); }
         .subtitle { text-align: center; color: #009AA9; margin-bottom: 40px; font-size: 1.2em; font-weight: 500; }
 
-        /* === SIDE ANNOTATION BOXES (Outside Container) === */
-        .side-annotation {
-            position: fixed;
-            top: 50%;
-            transform: translateY(-50%);
+        /* === SIDE ANNOTATION PANEL === */
+        .side-panel {
             width: 320px;
+            flex-shrink: 0;
+        }
+
+        .side-annotation {
             background: linear-gradient(135deg, #E8F7F8 0%, #F0FBFC 100%);
             border-left: 4px solid #009AA9;
             padding: 20px;
@@ -41,19 +52,24 @@
             font-size: 13px;
             color: #003754;
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-            z-index: 20;
-            transition: opacity 0.3s ease;
+            opacity: 0;
+            transform: translateX(20px);
+            transition: opacity 0.3s ease, transform 0.3s ease;
+            position: sticky;
+            top: 40px;
         }
+
+        .side-annotation.visible {
+            opacity: 1;
+            transform: translateX(0);
+        }
+
         .side-annotation strong { color: #009AA9; display: block; margin-bottom: 8px; font-size: 14px; }
         .side-annotation p { line-height: 1.6; margin: 0; }
 
-        /* Position annotations left/right based on section */
-        .annot-left { left: calc(50vw - 500px); }
-        .annot-right { right: calc(50vw - 500px); }
-
-        /* Hide annotations on mobile/narrow screens */
-        @media (max-width: 1400px) {
-            .side-annotation { display: none; }
+        .section-anchor {
+            height: 1px;
+            margin: 30px 0;
         }
 
         .section {
@@ -75,7 +91,6 @@
             width: 40px; height: 40px;
         }
 
-        /* Icon rotation for sections */
         .section:nth-child(3) h3:before { content: "📝"; }
         .section:nth-child(4) h3:before { content: "📂"; }
         .section:nth-child(5) h3:before { content: "🏷️"; }
@@ -192,7 +207,6 @@
         .icon { font-size: 20px; }
         .hidden { display: none; }
 
-        /* === EXPANDING PII TAG MENU === */
         .pii-tag-toggle-container {
             margin-bottom: 15px;
             display: flex; justify-content: space-between; align-items: center;
@@ -281,7 +295,6 @@
         }
         .download-btn { width: 100%; justify-content: center; }
 
-        /* === SURVEY MODAL POPUP === */
         .modal-overlay {
             position: fixed;
             top: 0; left: 0; right: 0; bottom: 0;
@@ -397,202 +410,222 @@
             color: #EA5451;
             text-decoration: underline;
         }
+
+        @media (max-width: 1200px) {
+            .page-wrapper {
+                flex-direction: column;
+            }
+            .side-panel {
+                display: none;
+            }
+        }
     </style>
 </head>
 <body>
-    <!-- === SIDE ANNOTATIONS (Floating in Gradient Space) === -->
-    <div class="side-annotation annot-left" id="annot-1">
-        <strong>ℹ️ Model & Language</strong>
-        <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
-    </div>
-    <div class="side-annotation annot-left" id="annot-2">
-        <strong>ℹ️ Recording & Upload</strong>
-        <p>Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.</p>
-    </div>
-    <div class="side-annotation annot-right" id="annot-4">
-        <strong>ℹ️ Transcription Output</strong>
-        <p>Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium.</p>
-    </div>
-    <div class="side-annotation annot-right" id="annot-5">
-        <strong>ℹ️ PII Categories</strong>
-        <p>Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit.</p>
-    </div>
-    <div class="side-annotation annot-right" id="annot-6">
-        <strong>ℹ️ Anonymization Output</strong>
-        <p>Neque porro quisquam est, qui dolorem ipsum quia dolor sit amet, consectetur.</p>
-    </div>
+    <div class="page-wrapper">
+        <div class="main-content">
+            <div class="container">
+                <!-- Branding Header -->
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; width: 100%;">
+                    <img src="{{ url_for('static', filename='dfki_Logo_sz.svg') }}" alt="DFKI Logo" style="max-height: 100px; width: auto; object-fit: contain;">
+                    <img src="{{ url_for('static', filename='Online_251121A_BIH_Logo_RGB_BIH_Logo_StandardClaim_ENG_BlauKorall.svg') }}" alt="BIH Logo" style="max-height: 100px; width: auto; object-fit: contain;">
+                    <img src="{{ url_for('static', filename='tu-berlin-logo-long-red.svg') }}" alt="TUB Logo" style="max-height: 100px; width: auto; object-fit: contain;">
+                </div>
+                <div style="text-align: center; margin-bottom: 30px;">
+                    <img src="{{ url_for('static', filename='VERANDA_LOGO.svg') }}" alt="VERANDA Logo" style="max-height: 40px; width: auto; object-fit: contain;">
+                </div>
 
-    <div class="container">
-        <!-- Branding Header -->
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; width: 100%;">
-            <img src="{{ url_for('static', filename='dfki_Logo_sz.svg') }}" alt="DFKI Logo" style="max-height: 100px; width: auto; object-fit: contain;">
-            <img src="{{ url_for('static', filename='Online_251121A_BIH_Logo_RGB_BIH_Logo_StandardClaim_ENG_BlauKorall.svg') }}" alt="BIH Logo" style="max-height: 100px; width: auto; object-fit: contain;">
-            <img src="{{ url_for('static', filename='tu-berlin-logo-long-red.svg') }}" alt="TUB Logo" style="max-height: 100px; width: auto; object-fit: contain;">
-        </div>
-        <div style="text-align: center; margin-bottom: 30px;">
-            <img src="{{ url_for('static', filename='VERANDA_LOGO.svg') }}" alt="VERANDA Logo" style="max-height: 40px; width: auto; object-fit: contain;">
-        </div>
+                <h1>Speech Anonymizer</h1>
+                <p class="subtitle">Record, upload, transcribe, edit, and anonymize speech with advanced AI models.</p>
 
-        <h1>Speech Anonymizer</h1>
-        <p class="subtitle">Record, upload, transcribe, edit, and anonymize speech with advanced AI models.</p>
+                <div class="loader" id="loader"></div>
+                <div id="status" class="status"></div>
 
-        <div class="loader" id="loader"></div>
-        <div id="status" class="status"></div>
+                <!-- 1. Transcription Settings -->
+                <div class="section-anchor" id="anchor-1"></div>
+                <div class="section" id="sec-1">
+                    <h3>Transcription Settings</h3>
+                    <div class="language-selector">
+                        <label for="transcription-language">Transcription Language:</label>
+                        <select id="transcription-language">
+                            <option value="auto" selected>Auto-Detect (Default)</option>
+                            <option value="AR">Arabic (AR)</option>
+                            <option value="DE">German (DE)</option>
+                            <option value="EN">English (EN)</option>
+                            <option value="FI">Finnish (FI)</option>
+                            <option value="FR">French (FR)</option>
+                            <option value="HI">Hindi (HI)</option>
+                            <option value="IT">Italian (IT)</option>
+                            <option value="PL">Polish (PL)</option>
+                            <option value="PT">Portuguese (PT)</option>
+                            <option value="ES">Spanish (ES)</option>
+                            <option value="TR">Turkish (TR)</option>
+                        </select>
+                    </div>
+                    <div class="level-selector" style="margin-top: 15px;">
+                        <label for="whisper-model-select">Whisper Model:</label>
+                        <select id="whisper-model-select"></select>
+                    </div>
+                </div>
 
-        <!-- 1. Transcription Settings -->
-        <div class="section" id="sec-1">
-            <h3>Transcription Settings</h3>
-            <div class="language-selector">
-                <label for="transcription-language">Transcription Language:</label>
-                <select id="transcription-language">
-                    <option value="auto" selected>Auto-Detect (Default)</option>
-                    <option value="AR">Arabic (AR)</option>
-                    <option value="DE">German (DE)</option>
-                    <option value="EN">English (EN)</option>
-                    <option value="FI">Finnish (FI)</option>
-                    <option value="FR">French (FR)</option>
-                    <option value="HI">Hindi (HI)</option>
-                    <option value="IT">Italian (IT)</option>
-                    <option value="PL">Polish (PL)</option>
-                    <option value="PT">Portuguese (PT)</option>
-                    <option value="ES">Spanish (ES)</option>
-                    <option value="TR">Turkish (TR)</option>
-                </select>
-            </div>
-            <div class="level-selector" style="margin-top: 15px;">
-                <label for="whisper-model-select">Whisper Model:</label>
-                <select id="whisper-model-select"></select>
-            </div>
-        </div>
+                <!-- 2. Input Audio -->
+                <div class="section-anchor" id="anchor-2"></div>
+                <div class="section" id="sec-2">
+                    <h3>Input Audio</h3>
+                    <div class="controls">
+                        <button id="record-btn" class="button">
+                            <span class="icon" id="record-icon">🎤 Start </span>Recording
+                        </button>
+                        <div id="timer" class="timer">00:00</div>
+                        <div class="separator">OR</div>
+                        <div class="file-input">
+                            <input type="file" id="file-input" accept="audio/*" />
+                            <label for="file-input" id="upload-label">
+                                <span class="icon">📁</span> Click to Upload Audio
+                            </label>
+                        </div>
+                    </div>
+                    <div id="filename-display" style="margin-top: 10px; color: #003754; font-weight: 500; text-align: center;"></div>
+                    <div class="button-wrapper">
+                        <button id="transcribe-btn" class="button" disabled>
+                            <span class="icon">▶️</span> Transcribe
+                        </button>
+                    </div>
+                </div>
 
-        <!-- 2. Input Audio -->
-        <div class="section" id="sec-2">
-            <h3>Input Audio</h3>
-            <div class="controls">
-                <button id="record-btn" class="button">
-                    <span class="icon" id="record-icon">🎤 Start </span>Recording
-                </button>
-                <div id="timer" class="timer">00:00</div>
-                <div class="separator">OR</div>
-                <div class="file-input">
-                    <input type="file" id="file-input" accept="audio/*" />
-                    <label for="file-input" id="upload-label">
-                        <span class="icon">📁</span> Click to Upload Audio
-                    </label>
+                <!-- 3. Bulk Upload -->
+                <div class="section" style="display:none;">
+                    <h3>Bulk Upload (Audio/Text Files)</h3>
+                    <p style="color: #009AA9; margin-bottom: 15px; font-size: 0.95em;">
+                        Upload multiple audio files, text files, or a ZIP folder containing them.
+                    </p>
+                    <div class="file-input">
+                        <input type="file" id="bulk-file-input" multiple accept=".mp3,.wav,.webm,.txt,.zip" />
+                        <label for="bulk-file-input" id="bulk-upload-label">
+                            <span class="icon">📂</span> Select Multiple Files or Folder
+                        </label>
+                    </div>
+                    <div id="bulk-status" style="margin-top: 10px; color: #003754; font-weight: 500; text-align: center;"></div>
+                    <div class="button-wrapper">
+                        <button id="process-bulk-btn" class="button" disabled>
+                            <span class="icon">⚡</span> Process Bulk Upload
+                        </button>
+                    </div>
+                </div>
+
+                <div class="section" style="display:none;">
+                    <h3>Batch Management</h3>
+                    <p style="color: #009AA9; margin-bottom: 15px; font-size: 0.95em;">
+                        Uploaded audio files are stored here. Transcribe them individually or all at once.
+                    </p>
+                    <div id="bulk-batch-list" class="pii-tag-grid">
+                        <p style="color: #009AA9; font-size: 0.9em; grid-column: 1/-1;">No batches uploaded yet.</p>
+                    </div>
+                    <div class="button-wrapper">
+                        <button id="refresh-batches-btn" class="button secondary">
+                            <span class="icon">🔄</span> Refresh Batches
+                        </button>
+                        <button id="transcribe-all-batches-btn" class="button" disabled>
+                            <span class="icon">⚡</span> Transcribe All Batches
+                        </button>
+                    </div>
+                    <div id="batch-status" class="status" style="margin-top: 15px;"></div>
+                </div>
+
+                <!-- 4. Transcribed Text -->
+                <div class="section-anchor" id="anchor-4"></div>
+                <div class="section" id="sec-4">
+                    <h3>Transcribed Text</h3>
+                    <textarea id="transcribed-text" class="text-area" placeholder="Transcription will appear here..."></textarea>
+                    <div class="button-wrapper" style="display: flex; gap: 10px; justify-content: center; margin-top: 15px;">
+                        <button id="save-edit-btn" class="button secondary">
+                            <span class="icon">💾</span> Save Edit
+                        </button>
+                        <button id="anonymize-btn" class="button" disabled>
+                            <span section="Anonymize Text"
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 5. PII Tag Selection -->
+                <div class="section-anchor" id="anchor-5"></div>
+                <div class="section" id="sec-5">
+                    <h3>PII Tag Selection</h3>
+                    <p style="color: #009AA9; margin-bottom: 15px; font-size: 0.95em;">
+                        Select which categories of personally identifiable information to anonymize. All are enabled by default.
+                    </p>
+                    <div class="pii-tag-toggle-container">
+                        <button id="pii-toggle-btn" class="pii-tag-toggle-btn">Hide Tags</button>
+                    </div>
+                    <div id="pii-tag-expand-wrapper" class="pii-tag-expand-wrapper">
+                        <div id="pii-tag-grid" class="pii-tag-grid">
+                            <p style="color: #009AA9; font-size: 0.9em; grid-column: 1/-1;">Loading available tags...</p>
+                        </div>
+                    </div>
+                    <div class="pii-tag-actions">
+                        <button id="pii-select-all">Select All</button>
+                        <button id="pii-clear-all">Clear All</button>
+                    </div>
+                </div>
+
+                <!-- 6. Anonymized Text -->
+                <div class="section-anchor" id="anchor-6"></div>
+                <div class="section" id="sec-6">
+                    <h3>Anonymized Text</h3>
+                    <textarea id="anonymized-text" class="text-area" placeholder="Anonymized text will appear here..." readonly></textarea>
+                    <div id="tts-container" class="hidden" style="display: flex; gap: 10px; justify-content: center; margin-top: 15px;">
+                         <button id="surrogate-btn" class="button">Surrogate</button>
+                         <button id="rephrase-btn" class="button">Rephrase</button>
+                         <button id="generate-speech-btn" class="button">Synthetic Audio</button>
+                         <button id="process-org-audio-btn" class="button">Process Audio</button>
+                    </div>
+                    <audio id="audio-player" controls class="hidden"></audio>
+                </div>
+
+                <!-- 7. Download Results -->
+                <div class="section">
+                    <h3>Download Results</h3>
+                    <p style="color: #009AA9; margin-bottom: 15px; font-size: 0.95em;">
+                        Download the generated outputs.
+                    </p>
+                    <div class="download-grid">
+                        <button id="download-original-btn" class="button download-btn" disabled>
+                            <span class="icon">📄</span> Original Text
+                        </button>
+                        <button id="download-bert-btn" class="button download-btn" disabled>
+                            <span class="icon">🔒</span> BERT-Anonymized
+                        </button>
+                        <button id="download-speech-btn" class="button download-btn" disabled>
+                            <span class="icon">🔊</span> Generated Speech
+                        </button>
+                    </div>
+                    <div id="download-status" class="status" style="margin-top: 15px;"></div>
                 </div>
             </div>
-            <div id="filename-display" style="margin-top: 10px; color: #003754; font-weight: 500; text-align: center;"></div>
-            <div class="button-wrapper">
-                <button id="transcribe-btn" class="button" disabled>
-                    <span class="icon">▶️</span> Transcribe
-                </button>
-            </div>
         </div>
 
-        <!-- 3. Bulk Upload -->
-        <div class="section" style="display:none;">
-            <h3>Bulk Upload (Audio/Text Files)</h3>
-            <p style="color: #009AA9; margin-bottom: 15px; font-size: 0.95em;">
-                Upload multiple audio files, text files, or a ZIP folder containing them.
-            </p>
-            <div class="file-input">
-                <input type="file" id="bulk-file-input" multiple accept=".mp3,.wav,.webm,.txt,.zip" />
-                <label for="bulk-file-input" id="bulk-upload-label">
-                    <span class="icon">📂</span> Select Multiple Files or Folder
-                </label>
+        <!-- === SIDE ANNOTATION PANEL (Scrolls with sections) === -->
+        <div class="side-panel">
+            <div class="side-annotation" id="annot-1" data-section="sec-1">
+                <strong>ℹ️ Model & Language</strong>
+                <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
             </div>
-            <div id="bulk-status" style="margin-top: 10px; color: #003754; font-weight: 500; text-align: center;"></div>
-            <div class="button-wrapper">
-                <button id="process-bulk-btn" class="button" disabled>
-                    <span class="icon">⚡</span> Process Bulk Upload
-                </button>
+            <div class="side-annotation" id="annot-2" data-section="sec-2">
+                <strong>ℹ️ Recording & Upload</strong>
+                <p>Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.</p>
             </div>
-        </div>
-
-        <div class="section" style="display:none;">
-            <h3>Batch Management</h3>
-            <p style="color: #009AA9; margin-bottom: 15px; font-size: 0.95em;">
-                Uploaded audio files are stored here. Transcribe them individually or all at once.
-            </p>
-            <div id="bulk-batch-list" class="pii-tag-grid">
-                <p style="color: #009AA9; font-size: 0.9em; grid-column: 1/-1;">No batches uploaded yet.</p>
+            <div class="side-annotation" id="annot-4" data-section="sec-4">
+                <strong>ℹ️ Transcription Output</strong>
+                <p>Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium.</p>
             </div>
-            <div class="button-wrapper">
-                <button id="refresh-batches-btn" class="button secondary">
-                    <span class="icon">🔄</span> Refresh Batches
-                </button>
-                <button id="transcribe-all-batches-btn" class="button" disabled>
-                    <span class="icon">⚡</span> Transcribe All Batches
-                </button>
+            <div class="side-annotation" id="annot-5" data-section="sec-5">
+                <strong>ℹ️ PII Categories</strong>
+                <p>Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit.</p>
             </div>
-            <div id="batch-status" class="status" style="margin-top: 15px;"></div>
-        </div>
-
-        <!-- 4. Transcribed Text -->
-        <div class="section" id="sec-4">
-            <h3>Transcribed Text</h3>
-            <textarea id="transcribed-text" class="text-area" placeholder="Transcription will appear here..."></textarea>
-            <div class="button-wrapper" style="display: flex; gap: 10px; justify-content: center; margin-top: 15px;">
-                <button id="save-edit-btn" class="button secondary">
-                    <span class="icon">💾</span> Save Edit
-                </button>
-                <button id="anonymize-btn" class="button" disabled>
-                    <span class="icon">🔒</span> Anonymize Text
-                </button>
+            <div class="side-annotation" id="annot-6" data-section="sec-6">
+                <strong>ℹ️ Anonymization Output</strong>
+                <p>Neque porro quisquam est, qui dolorem ipsum quia dolor sit amet, consectetur.</p>
             </div>
-        </div>
-
-        <!-- 5. PII Tag Selection (Expanding Menu) -->
-        <div class="section" id="sec-5">
-            <h3>PII Tag Selection</h3>
-            <p style="color: #009AA9; margin-bottom: 15px; font-size: 0.95em;">
-                Select which categories of personally identifiable information to anonymize. All are enabled by default.
-            </p>
-            <div class="pii-tag-toggle-container">
-                <button id="pii-toggle-btn" class="pii-tag-toggle-btn">Hide Tags</button>
-            </div>
-            <div id="pii-tag-expand-wrapper" class="pii-tag-expand-wrapper">
-                <div id="pii-tag-grid" class="pii-tag-grid">
-                    <p style="color: #009AA9; font-size: 0.9em; grid-column: 1/-1;">Loading available tags...</p>
-                </div>
-            </div>
-            <div class="pii-tag-actions">
-                <button id="pii-select-all">Select All</button>
-                <button id="pii-clear-all">Clear All</button>
-            </div>
-        </div>
-
-        <!-- 6. Anonymized Text -->
-        <div class="section" id="sec-6">
-            <h3>Anonymized Text</h3>
-            <textarea id="anonymized-text" class="text-area" placeholder="Anonymized text will appear here..." readonly></textarea>
-            <div id="tts-container" class="hidden" style="display: flex; gap: 10px; justify-content: center; margin-top: 15px;">
-                 <button id="surrogate-btn" class="button">Surrogate</button>
-                 <button id="rephrase-btn" class="button">Rephrase</button>
-                 <button id="generate-speech-btn" class="button">Synthetic Audio</button>
-                 <button id="process-org-audio-btn" class="button">Process Audio</button>
-            </div>
-            <audio id="audio-player" controls class="hidden"></audio>
-        </div>
-
-        <!-- 7. Download Results -->
-        <div class="section">
-            <h3>Download Results</h3>
-            <p style="color: #009AA9; margin-bottom: 15px; font-size: 0.95em;">
-                Download the generated outputs.
-            </p>
-            <div class="download-grid">
-                <button id="download-original-btn" class="button download-btn" disabled>
-                    <span class="icon">📄</span> Original Text
-                </button>
-                <button id="download-bert-btn" class="button download-btn" disabled>
-                    <span class="icon">🔒</span> BERT-Anonymized
-                </button>
-                <button id="download-speech-btn" class="button download-btn" disabled>
-                    <span class="icon">🔊</span> Generated Speech
-                </button>
-            </div>
-            <div id="download-status" class="status" style="margin-top: 15px;"></div>
         </div>
     </div>
 
@@ -606,7 +639,7 @@
             </div>
             <div class="modal-body">
                 <p><strong>Lorem ipsum dolor sit amet</strong>, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
-                <p>Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.</p>
+                <p>Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.</p>
                 <p>We invite you to participate in our <strong>user study</strong> about speech anonymization. Your feedback helps us improve the system.</p>
                 <p>Estimated time: <strong>10-15 minutes</strong>. Compensation provided upon completion.</p>
                 <p>Click below to access the survey:</p>
@@ -620,13 +653,12 @@
 
     <script>
     document.addEventListener('DOMContentLoaded', () => {
-        // === MODAL VARIABLES ===
+        // === MODAL FUNCTIONS ===
         const surveyModal = document.getElementById('survey-modal');
         const modalCloseBtn = document.getElementById('modal-close-btn');
         const modalDismissLink = document.getElementById('modal-dismiss-link');
         let surveyTimer = null;
 
-        // === MODAL FUNCTIONS ===
         function showSurveyModal() {
             if (surveyModal && !surveyModal.classList.contains('active')) {
                 surveyModal.classList.add('active');
@@ -646,22 +678,15 @@
             }, 20000);
         }
 
-        // Modal event listeners
-        if (modalCloseBtn) {
-            modalCloseBtn.addEventListener('click', hideSurveyModal);
-        }
-        if (modalDismissLink) {
-            modalDismissLink.addEventListener('click', hideSurveyModal);
-        }
+        if (modalCloseBtn) modalCloseBtn.addEventListener('click', hideSurveyModal);
+        if (modalDismissLink) modalDismissLink.addEventListener('click', hideSurveyModal);
         if (surveyModal) {
             surveyModal.addEventListener('click', (e) => {
-                if (e.target === surveyModal) {
-                    hideSurveyModal();
-                }
+                if (e.target === surveyModal) hideSurveyModal();
             });
         }
 
-        // === PII Toggle Button Logic ===
+        // === PII Toggle Button ===
         const piiToggleBtn = document.getElementById('pii-toggle-btn');
         const piiExpandWrapper = document.getElementById('pii-tag-expand-wrapper');
         if (piiToggleBtn && piiExpandWrapper) {
@@ -672,60 +697,43 @@
             });
         }
 
-        // === SCROLL-BASED ANNOTATION VISIBILITY ===
-        // Show/hide side annotations based on which section is in view
-        const sectionsWithAnnots = [
-            { id: 'sec-1', annotId: 'annot-1' },
-            { id: 'sec-2', annotId: 'annot-2' },
-            { id: 'sec-4', annotId: 'annot-4' },
-            { id: 'sec-5', annotId: 'annot-5' },
-            { id: 'sec-6', annotId: 'annot-6' }
-        ];
+        // === SCROLL OBSERVER FOR ANNOTATIONS ===
+        // Shows only the annotation whose section is currently in viewport
+        const annotations = document.querySelectorAll('.side-annotation');
+        const observerOptions = {
+            root: null,
+            rootMargin: '-35% 0px -35% 0px',
+            threshold: 0
+        };
 
-        function updateAnnotationVisibility() {
-            const viewportCenter = window.scrollY + window.innerHeight / 2;
-            
-            sectionsWithAnnots.forEach(({ id, annotId }) => {
-                const section = document.getElementById(id);
-                const annot = document.getElementById(annotId);
-                
-                if (section && annot) {
-                    const rect = section.getBoundingClientRect();
-                    const sectionTop = window.scrollY + rect.top;
-                    const sectionBottom = sectionTop + rect.height;
-                    
-                    // Show annotation if section is within 200px of viewport center
-                    if (Math.abs(viewportCenter - sectionTop) < 300 || 
-                        Math.abs(viewportCenter - sectionBottom) < 300 ||
-                        (viewportCenter > sectionTop && viewportCenter < sectionBottom)) {
-                        annot.style.opacity = '1';
-                    } else {
-                        annot.style.opacity = '0.5';
-                    }
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    // Hide all annotations first
+                    annotations.forEach(a => a.classList.remove('visible'));
+                    // Show only this one
+                    entry.target.classList.add('visible');
                 }
             });
-        }
+        }, observerOptions);
 
-        // Update on scroll
-        window.addEventListener('scroll', updateAnnotationVisibility);
-        // Initial call
-        setTimeout(updateAnnotationVisibility, 100);
+        // Observe anchor elements
+        document.querySelectorAll('.section-anchor').forEach(anchor => {
+            observer.observe(anchor);
+        });
 
         // === DOM Elements ===
         const recordBtn = document.getElementById('record-btn');
         const recordIcon = document.getElementById('record-icon');
         const timerDiv = document.getElementById('timer');
         const fileInput = document.getElementById('file-input');
-        const uploadLabel = document.getElementById('upload-label');
         const filenameDisplay = document.getElementById('filename-display');
         const transcribeBtn = document.getElementById('transcribe-btn');
         const transcribedText = document.getElementById('transcribed-text');
         const whisperModelSelect = document.getElementById('whisper-model-select');
         const transcriptionLanguageSelect = document.getElementById('transcription-language');
-
         let offsetData = null;
         let audioName = null;
-
         const anonymizeBtn = document.getElementById('anonymize-btn');
         const anonymizedText = document.getElementById('anonymized-text');
         const ttsContainer = document.getElementById('tts-container');
@@ -736,21 +744,14 @@
         const audioPlayer = document.getElementById('audio-player');
         const statusDiv = document.getElementById('status');
         const loader = document.getElementById('loader');
-
         const saveEditBtn = document.getElementById('save-edit-btn');
         const bulkFileInput = document.getElementById('bulk-file-input');
-        const bulkUploadLabel = document.getElementById('bulk-upload-label');
-        const bulkStatus = document.getElementById('bulk-status');
-        const processBulkBtn = document.getElementById('process-bulk-btn');
         const downloadOriginalBtn = document.getElementById('download-original-btn');
         const downloadBertBtn = document.getElementById('download-bert-btn');
         const downloadSpeechBtn = document.getElementById('download-speech-btn');
-        const downloadStatus = document.getElementById('download-status');
-
         const piiTagGrid = document.getElementById('pii-tag-grid');
         const piiSelectAllBtn = document.getElementById('pii-select-all');
         const piiClearAllBtn = document.getElementById('pii-clear-all');
-        let availablePiiTags = [];
 
         const piiTagMapping = {
             'PERSON': { label: 'Names', desc: 'Person names and identities' },
@@ -774,16 +775,8 @@
             'MISC': { label: 'Miscellaneous', desc: 'Other identifiable information' }
         };
 
-        // === State Variables ===
-        let mediaRecorder;
-        let audioChunks = [];
-        let timerInterval;
-        let seconds = 0;
-        let isRecording = false;
-        let audioBlob = null;
-        let uploadedFile = null;
+        let mediaRecorder, audioChunks = [], timerInterval, seconds = 0, isRecording = false, audioBlob = null, uploadedFile = null;
 
-        // === Core Functions ===
         function updateStatus(message, isError = false) {
             statusDiv.textContent = message;
             statusDiv.className = `status ${isError ? 'error' : 'success'}`;
@@ -791,26 +784,16 @@
             setTimeout(() => { statusDiv.style.display = 'none'; }, 5000);
         }
 
-        function updateDownloadStatus(message, isError = false) {
-            downloadStatus.textContent = message;
-            downloadStatus.className = `status ${isError ? 'error' : 'success'}`;
-            downloadStatus.style.display = 'block';
-            setTimeout(() => { downloadStatus.style.display = 'none'; }, 5000);
-        }
-
         function showLoader(show) { loader.style.display = show ? 'block' : 'none'; }
 
-        // === PII Tag Loading ===
         async function loadPiiTags() {
             try {
                 const resp = await fetch('/available_tags');
                 if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
                 const data = await resp.json();
-                availablePiiTags = data.tags || [];
+                const availablePiiTags = data.tags || [];
                 piiTagGrid.innerHTML = '';
-                const sortedTags = availablePiiTags.sort();
-
-                sortedTags.forEach(tag => {
+                availablePiiTags.sort().forEach(tag => {
                     const mapping = piiTagMapping[tag] || { label: tag, desc: '' };
                     const labelDiv = document.createElement('label');
                     labelDiv.className = 'pii-tag-item';
@@ -824,11 +807,9 @@
                     const descText = document.createElement('div');
                     descText.className = 'pii-tag-description';
                     descText.textContent = mapping.desc;
-
                     labelDiv.appendChild(checkbox);
                     labelDiv.appendChild(labelText);
                     labelDiv.appendChild(descText);
-
                     labelDiv.addEventListener('click', (e) => {
                         if (e.target !== checkbox) checkbox.checked = !checkbox.checked;
                     });
@@ -841,35 +822,24 @@
         }
 
         function getSelectedPiiTags() {
-            const checkboxes = piiTagGrid.querySelectorAll('input[type="checkbox"]:checked');
-            return Array.from(checkboxes).map(cb => cb.value);
+            return Array.from(piiTagGrid.querySelectorAll('input[type="checkbox"]:checked')).map(cb => cb.value);
         }
 
-        piiSelectAllBtn.addEventListener('click', () => {
-            piiTagGrid.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = true);
-        });
+        piiSelectAllBtn.addEventListener('click', () => piiTagGrid.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = true));
+        piiClearAllBtn.addEventListener('click', () => piiTagGrid.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false));
 
-        piiClearAllBtn.addEventListener('click', () => {
-            piiTagGrid.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
-        });
-
-        // === Model Loading ===
         async function loadModels() {
             try {
-                const whisperSelect = document.getElementById('whisper-model-select');
-                if (!whisperSelect) return;
-                const baseUrl = window.location.origin;
-                const transResp = await fetch(baseUrl + '/transcription_models');
-                if (!transResp.ok) throw new Error(`HTTP error! status: ${transResp.status}`);
+                const transResp = await fetch(window.location.origin + '/transcription_models');
                 const transData = await transResp.json();
-                if (transData.whisper_models && Array.isArray(transData.whisper_models)) {
-                    whisperSelect.innerHTML = '';
+                if (transData.whisper_models) {
+                    whisperModelSelect.innerHTML = '';
                     transData.whisper_models.forEach(([value, label]) => {
                         const option = document.createElement('option');
                         option.value = value;
                         option.textContent = label;
                         if (value === transData.default_whisper_model) option.selected = true;
-                        whisperSelect.appendChild(option);
+                        whisperModelSelect.appendChild(option);
                     });
                 }
             } catch (error) {
@@ -877,14 +847,13 @@
             }
         }
 
-        // === Recording Functions ===
-        async function toggleRecording() { if (isRecording) { stopRecording(); } else { await startRecording(); } }
+        async function toggleRecording() { if (isRecording) stopRecording(); else await startRecording(); }
 
         async function startRecording() {
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
-                mediaRecorder.ondataavailable = event => { if (event.data.size > 0) audioChunks.push(event.data); };
+                mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
                 mediaRecorder.onstop = () => {
                     audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
                     audioChunks = [];
@@ -898,8 +867,7 @@
                 recordBtn.childNodes[1].nodeValue = "Recording";
                 startTimer();
             } catch (err) {
-                console.error("Error starting recording:", err);
-                updateStatus("Microphone access denied. Check browser permissions.", true);
+                updateStatus("Microphone access denied.", true);
             }
         }
 
@@ -920,7 +888,6 @@
                 timerDiv.textContent = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
             }, 1000);
         }
-
         function stopTimer() { clearInterval(timerInterval); }
 
         function handleFileUpload() {
@@ -943,29 +910,19 @@
             }
         }
 
-        // === API Calls ===
         async function transcribe() {
-            if (!audioBlob && !uploadedFile) {
-                updateStatus("No audio to transcribe. Record or upload first.", true); return;
-            }
-            showLoader(true); transcribeBtn.disabled = true; recordBtn.disabled = true;
-            fileInput.disabled = true; whisperModelSelect.disabled = true;
-            transcriptionLanguageSelect.disabled = true;
+            if (!audioBlob && !uploadedFile) { updateStatus("No audio to transcribe.", true); return; }
+            showLoader(true); transcribeBtn.disabled = true;
             updateStatus("Transcription in progress...", false);
-
             const formData = new FormData();
-            const fileToTranscribe = audioBlob || uploadedFile;
-            const fileName = audioBlob ? 'recording.webm' : uploadedFile.name;
-            formData.append('audio', fileToTranscribe, fileName);
+            formData.append('audio', audioBlob || uploadedFile, audioBlob ? 'recording.webm' : uploadedFile.name);
             formData.append('model_size', whisperModelSelect.value);
-            const selectedLang = transcriptionLanguageSelect.value;
-            if (selectedLang !== 'auto') formData.append('language', selectedLang.toLowerCase());
+            if (transcriptionLanguageSelect.value !== 'auto')
+                formData.append('language', transcriptionLanguageSelect.value.toLowerCase());
 
             try {
-                const endpoint = audioBlob ? '/transcribe_recording' : '/upload';
-                const response = await fetch(endpoint, { method: 'POST', body: formData });
+                const response = await fetch(audioBlob ? '/transcribe_recording' : '/upload', { method: 'POST', body: formData });
                 const result = await response.json();
-
                 if (response.ok && result.success) {
                     transcribedText.value = result.transcription || "";
                     offsetData = result.offsets || [];
@@ -973,46 +930,18 @@
                     updateStatus("Transcription successful!", false);
                     downloadOriginalBtn.disabled = false;
                     anonymizeBtn.disabled = false;
-                    ttsContainer.classList.add('hidden');
                     downloadBertBtn.disabled = true; downloadSpeechBtn.disabled = true;
-                } else {
-                    throw new Error(result.error || "Transcription failed.");
-                }
+                } else throw new Error(result.error || "Transcription failed.");
             } catch (error) {
-                console.error('Transcription error:', error);
                 updateStatus(`Transcription failed: ${error.message}`, true);
             } finally {
-                showLoader(false);
-                transcribeBtn.disabled = false; recordBtn.disabled = false;
-                fileInput.disabled = false; whisperModelSelect.disabled = false;
-                transcriptionLanguageSelect.disabled = false;
+                showLoader(false); transcribeBtn.disabled = false;
             }
-        }
-
-        async function saveEdit() {
-            const text = transcribedText.value;
-            if (!text.trim()) { updateStatus("Nothing to save.", true); return; }
-            showLoader(true);
-            try {
-                const response = await fetch('/save_transcription', {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ text: text })
-                });
-                const result = await response.json();
-                if (response.ok && result.success) {
-                    updateStatus("Transcription saved successfully!", false);
-                } else {
-                    throw new Error(result.error || "Failed to save.");
-                }
-            } catch (error) {
-                updateStatus(`Save failed: ${error.message}`, true);
-            } finally { showLoader(false); }
         }
 
         async function anonymizeText() {
             const text = transcribedText.value;
             if (!text.trim()) { updateStatus("No text to anonymize.", true); return; }
-            const selectedTags = getSelectedPiiTags();
             showLoader(true); anonymizeBtn.disabled = true;
             updateStatus("Anonymization in progress...", false);
 
@@ -1022,100 +951,22 @@
                     body: JSON.stringify({ 
                         transcript: text,
                         lang: transcriptionLanguageSelect.value,
-                        include_tags: selectedTags.length > 0 ? selectedTags : undefined
+                        include_tags: getSelectedPiiTags().length > 0 ? getSelectedPiiTags() : undefined
                     })
                 });
                 const result = await response.json();
-
                 if (response.ok && result.status === 'success') {
                     anonymizedText.value = result.anonymized || result.text || '';
-                    anonymizedText.dispatchEvent(new Event('input'));
                     ttsContainer.classList.remove('hidden');
                     downloadBertBtn.disabled = false;
                     updateStatus("Anonymization successful!", false);
                     scheduleSurveyModal();
-                } else {
-                    throw new Error(result.error || result.details || "Anonymization failed.");
-                }
+                } else throw new Error(result.error || "Anonymization failed.");
             } catch (error) {
-                console.error('Anonymization error:', error);
                 updateStatus(`Anonymization failed: ${error.message}`, true);
             } finally {
                 showLoader(false); anonymizeBtn.disabled = false;
             }
-        }
-
-        async function processOrgAudio() {
-            const text = anonymizedText.value;
-            if (!text.trim()) { updateStatus("No text to generate speech from.", true); return; }
-            showLoader(true);
-            try {
-                const response = await fetch('/generate_org_audio', {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ text: text, offSet: offsetData, audioName: audioName })
-                });
-                const result = await response.json();
-                if (response.ok && result.success) {
-                    audioPlayer.src = result.audio_url;
-                    audioPlayer.classList.remove('hidden');
-                    downloadSpeechBtn.disabled = false;
-                    updateStatus("Speech generated successfully!", false);
-                } else {
-                    throw new Error(result.error || "Speech generation failed.");
-                }
-            } catch (error) {
-                updateStatus(`Speech generation failed: ${error.message}`, true);
-            } finally { showLoader(false); }
-        }
-
-        async function surrogateText() {
-            const text = anonymizedText.value;
-            if (!text.trim()) { updateStatus("No text to generate a surrogate.", true); return; }
-            showLoader(true);
-            try {
-                const response = await fetch('/surrogate_text', {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ text: text, lang: transcriptionLanguageSelect.value })
-                });
-                const result = await response.json();
-                if (response.ok && result.success) {
-                    anonymizedText.value = result.surrogated_text;
-                    anonymizedText.dispatchEvent(new Event('input'));
-                    ttsContainer.classList.remove('hidden');
-                    downloadBertBtn.disabled = false;
-                    updateStatus("Surrogation successful!", false);
-                } else {
-                    throw new Error(result.error || "Surrogation failed.");
-                }
-            } catch (error) {
-                console.error('Surrogation error:', error);
-                updateStatus(`Surrogation failed: ${error.message}`, true);
-            } finally { showLoader(false); }
-        }
-
-        async function rephraseText() {
-            const text = anonymizedText.value;
-            if (!text.trim()) { updateStatus("No text to rephrase.", true); return; }
-            showLoader(true);
-            try {
-                const response = await fetch('/rephrase_text', {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ text: text, lang: transcriptionLanguageSelect.value })
-                });
-                const result = await response.json();
-                if (response.ok && result.success) {
-                    anonymizedText.value = result.rephrased_text;
-                    anonymizedText.dispatchEvent(new Event('input'));
-                    ttsContainer.classList.remove('hidden');
-                    downloadBertBtn.disabled = false;
-                    updateStatus("Rephrase successful!", false);
-                } else {
-                    throw new Error(result.error || "Rephrase failed.");
-                }
-            } catch (error) {
-                console.error('Rephrase error:', error);
-                updateStatus(`Rephrase failed: ${error.message}`, true);
-            } finally { showLoader(false); }
         }
 
         async function generateSpeech() {
@@ -1126,58 +977,45 @@
             try {
                 const response = await fetch('/generate_speech', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
-                        text: text, 
-                        lang: transcriptionLanguageSelect.value,
-                        randomize_voices: true
-                    })
+                    body: JSON.stringify({ text, lang: transcriptionLanguageSelect.value, randomize_voices: true })
                 });
-
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                }
-
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 const audioBlob = await response.blob();
-                if (audioBlob.size < 100) {
-                    throw new Error("Generated audio too small - likely an error occurred");
-                }
-
-                const audioUrl = URL.createObjectURL(audioBlob);
-                audioPlayer.src = audioUrl;
+                if (audioBlob.size < 100) throw new Error("Generated audio too small");
+                audioPlayer.src = URL.createObjectURL(audioBlob);
                 audioPlayer.classList.remove('hidden');
                 audioPlayer.load();
                 downloadSpeechBtn.disabled = false;
-                updateStatus("Speech generated successfully! Click ▶ to play.", false);
-
+                updateStatus("Speech generated successfully!", false);
             } catch (error) {
-                console.error("❌ Speech generation error:", error);
                 updateStatus(`Speech generation failed: ${error.message}`, true);
             } finally {
                 showLoader(false); generateSpeechBtn.disabled = false;
             }
         }
 
-        // === Event Listeners ===
         recordBtn.addEventListener('click', toggleRecording);
         fileInput.addEventListener('change', handleFileUpload);
         transcribeBtn.addEventListener('click', transcribe);
-        saveEditBtn.addEventListener('click', saveEdit);
+        saveEditBtn.addEventListener('click', async () => {
+            if (!transcribedText.value.trim()) return;
+            showLoader(true);
+            await fetch('/save_transcription', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text: transcribedText.value })
+            });
+            showLoader(false);
+        });
         anonymizeBtn.addEventListener('click', anonymizeText);
-        surrogateBtn.addEventListener('click', surrogateText);
-        rephraseBtn.addEventListener('click', rephraseText);
         generateSpeechBtn.addEventListener('click', generateSpeech);
-        processOrgAudioBtn.addEventListener('click', processOrgAudio);
         anonymizedText.addEventListener('input', () => {
             downloadBertBtn.disabled = !anonymizedText.value.trim().length;
             downloadSpeechBtn.disabled = !anonymizedText.value.trim().length;
         });
         downloadOriginalBtn.addEventListener('click', () => window.open('/download_text/original/transcription.txt'));
         downloadBertBtn.addEventListener('click', () => window.open('/download_text/bert/anonymized.txt'));
-        downloadSpeechBtn.addEventListener('click', () => {
-            if (audioPlayer.src) window.open(audioPlayer.src);
-        });
+        downloadSpeechBtn.addEventListener('click', () => { if (audioPlayer.src) window.open(audioPlayer.src); });
 
-        // Initialize
         loadModels();
         loadPiiTags();
     });
