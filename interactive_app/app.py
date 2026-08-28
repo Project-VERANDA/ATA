@@ -33,9 +33,6 @@ torch.backends.cudnn.allow_tf32 = True
 CHAT_AI_API_KEY = os.getenv('CHAT_AI_API_KEY')
 CHAT_AI_ENDPOINT = os.getenv('CHAT_AI_ENDPOINT', 'https://llm.cloud.cci.charite.de/v1')
 
-# Store batch metadata
-app.bulk_batches = {}
-
 # --- Path Configuration ---s
 
 load_dotenv()
@@ -182,6 +179,8 @@ app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 5 * 1024 * 1024 * 1024
 app.config['UPLOAD_FOLDER'] = 'uploads'
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+# Store batch metadata
+app.bulk_batches = {}
 
 # --- Model Pre-loading ---
 try:
@@ -583,7 +582,7 @@ def anonymize():
         # Pass include_tags to anonymization engine
         result_text, success, msg = anonymize_text_locally(
             transcript_text, 
-            include_tags=include_tagsn
+            include_tags=include_tags
         )
         
         logger.info(f"Anonymization result: success={success}, text_len={len(result_text) if result_text else 0}, tags={include_tags}")
@@ -1284,7 +1283,6 @@ def upload_bulk():
         logger.error(f"Bulk upload error: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
-# NEW: List all batches
 @app.route('/list_batches', methods=['GET'])
 def list_batches():
     """List all uploaded batches."""
@@ -1301,105 +1299,136 @@ def list_batches():
             })
         return jsonify({'batches': batches})
     except Exception as e:
+        logger.error(f"Error listing batches: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
-# NEW: Process a single batch
-@app.route('/process_batch/<batch_id>', methods=['POST'])
-def process_batch(batch_id):
-    """Transcribe all audio files in a batch."""
+def _transcribe_single_file(audio_file, language=None):
+    """Delegate transcription to process.py - returns dict result."""
+    from process import transcribe_audio_locally
+    
+    try:
+        logger.info(f"Transcribing: {audio_file['filename']}")
+        
+        transcription, wordOffS = transcribe_audio_locally(
+            audio_file['filepath'],
+            language=language
+        )
+        
+        if isinstance(transcription, str) and ("Error:" in transcription or "failed" in transcription.lower()):
+            return {
+                'filename': audio_file['filename'],
+                'status': 'failed',
+                'error': transcription
+            }
+        
+        return {
+            'filename': audio_file['filename'],
+            'status': 'success',
+            'transcription': transcription if transcription else "",
+            'offsets': wordOffS if isinstance(wordOffS, list) else [],
+            'audio_path': audio_file['filepath']
+        }
+    
+    except Exception as e:
+        logger.error(f"Error transcribing {audio_file['filename']}: {e}", exc_info=True)
+        return {
+            'filename': audio_file['filename'],
+            'status': 'failed',
+            'error': f'Transcription error: {str(e)}'
+        }
+
+def _transcribe_batch(batch_id, language=None):
+    """Transcribe all files in a batch using process.py - returns results dict."""
     if batch_id not in app.bulk_batches:
-        return jsonify({'error': 'Batch not found'}), 404
+        return {'error': 'Batch not found'}, 404
     
     batch = app.bulk_batches[batch_id]
-    language = request.form.get('language', 'auto')
-    if language == 'auto' or not language:
-        language = None
-    
     results = []
     success_count = 0
     failed_count = 0
     
     for idx, audio_file in enumerate(batch['audio_files'], 1):
-        try:
-            logger.info(f"[{idx}/{len(batch['audio_files'])}] Transcribing: {audio_file['filename']}")
-            
-            transcription, wordOffS = transcribe_audio_locally(
-                audio_file['filepath'], 
-                language=language
-            )
-            
-            if isinstance(transcription, str) and ("Error:" in transcription or "failed" in transcription.lower()):
-                results.append({
-                    'filename': audio_file['filename'],
-                    'status': 'failed',
-                    'error': transcription
-                })
-                failed_count += 1
-            else:
-                results.append({
-                    'filename': audio_file['filename'],
-                    'status': 'success',
-                    'transcription': transcription if transcription else "",
-                    'offsets': wordOffS if wordOffS else [],
-                    'audio_path': audio_file['filepath']
-                })
-                success_count += 1
-                logger.info(f"[{idx}/{len(batch['audio_files'])}] ✅ Transcription complete: {audio_file['filename']}")
-                
-        except Exception as e:
-            logger.error(f"Error transcribing {audio_file['filename']}: {e}", exc_info=True)
-            results.append({
-                'filename': audio_file['filename'],
-                'status': 'failed',
-                'error': f'Transcription error: {str(e)}'
-            })
+        result = _transcribe_single_file(audio_file, language=language)
+        results.append(result)
+        
+        if result['status'] == 'success':
+            success_count += 1
+        else:
             failed_count += 1
     
+    # Update batch state
     batch['processed'] = True
     batch['results'] = results
     
-    return jsonify({
+    return {
         'success': True,
         'batch_id': batch_id,
         'success_count': success_count,
         'failed_count': failed_count,
         'results': results
-    })
+    }
 
-# NEW: Process all unprocessed batches
+@app.route('/process_batch/<batch_id>', methods=['POST'])
+def process_batch(batch_id):
+    """Transcribe all audio files in a batch."""
+    try:
+        language = request.form.get('language', 'auto')
+        if language == 'auto' or not language:
+            language = None
+        
+        result = _transcribe_batch(batch_id, language=language)
+        
+        if 'error' in result:
+            return jsonify(result), 404
+        
+        return jsonify(result)
+    
+    except Exception as e:
+        logger.error(f"Error processing batch {batch_id}: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/process_all_batches', methods=['POST'])
 def process_all_batches():
-    """Transcribe all unprocessed batches (one at a time sequentially)."""
-    batches_to_process = [
-        bid for bid, data in app.bulk_batches.items() 
-        if not data.get('processed', False)
-    ]
+    """Transcribe all unprocessed batches sequentially."""
+    try:
+        language = request.form.get('language', 'auto')
+        if language == 'auto' or not language:
+            language = None
+        
+        batches_to_process = [
+            bid for bid, data in app.bulk_batches.items()
+            if not data.get('processed', False)
+        ]
+        
+        if not batches_to_process:
+            return jsonify({'success': True, 'message': 'No batches to process'})
+        
+        all_results = {}
+        total_success = 0
+        total_failed = 0
+        
+        for batch_id in batches_to_process:
+            try:
+                result = _transcribe_batch(batch_id, language=language)
+                if result.get('success'):
+                    total_success += result.get('success_count', 0)
+                    total_failed += result.get('failed_count', 0)
+                all_results[batch_id] = result
+            except Exception as e:
+                logger.error(f"Error processing batch {batch_id}: {e}")
+                all_results[batch_id] = {'error': str(e)}
+        
+        return jsonify({
+            'success': True,
+            'batches_processed': len(batches_to_process),
+            'total_success': total_success,
+            'total_failed': total_failed,
+            'results': all_results
+        })
     
-    if not batches_to_process:
-        return jsonify({'success': True, 'message': 'No batches to process'})
-    
-    all_results = {}
-    total_success = 0
-    total_failed = 0
-    
-    for batch_id in batches_to_process:
-        try:
-            result = process_batch(batch_id)  # Calls the function directly
-            if result.get('success'):
-                total_success += result.get('success_count', 0)
-                total_failed += result.get('failed_count', 0)
-            all_results[batch_id] = result
-        except Exception as e:
-            logger.error(f"Error processing batch {batch_id}: {e}")
-            all_results[batch_id] = {'error': str(e)}
-    
-    return jsonify({
-        'success': True,
-        'batches_processed': len(batches_to_process),
-        'total_success': total_success,
-        'total_failed': total_failed,
-        'results': all_results
-    })
+    except Exception as e:
+        logger.error(f"Error in process_all_batches: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/download_text/<file_type>/<filename>')
 def download_text(file_type, filename):

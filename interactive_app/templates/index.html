@@ -299,21 +299,6 @@
 
         <div class="section">
             <h3>Batch Management</h3>
-            <div id="bulk-batch-list" class="pii-tag-grid">
-                <p style="color: #009AA9; font-size: 0.9em;">No batches uploaded.</p>
-            </div>
-            <div class="button-wrapper">
-                <button id="refresh-batches-btn" class="button secondary">
-                    <span class="icon">🔄</span> Refresh Batches
-                </button>
-                <button id="transcribe-all-batches-btn" class="button" disabled>
-                    <span class="icon">⚡</span> Transcribe All Batches
-                </button>
-            </div>
-        </div>
-
-        <div class="section">
-            <h3>Batch Management</h3>
             <p style="color: #009AA9; margin-bottom: 15px; font-size: 0.95em;">
                 Uploaded audio files are stored here. Transcribe them individually or all at once.
             </p>
@@ -711,7 +696,7 @@
                         `Transcription complete: ${result.total_success} succeeded, ${result.total_failed} failed`,
                         result.total_failed === 0
                     );
-                    refreshBatches();  // Refresh the batch list
+                    refreshBatches();
                 } else {
                     throw new Error(result.error || "Transcription failed");
                 }
@@ -730,6 +715,9 @@
         
         // Auto-refresh batches on page load
         refreshBatches();
+        
+        // --- API Calls ---
+        async function transcribe() {
                 
         // --- API Calls ---
         async function transcribe() {
