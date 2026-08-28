@@ -312,6 +312,25 @@
             </div>
         </div>
 
+        <div class="section">
+            <h3>Batch Management</h3>
+            <p style="color: #009AA9; margin-bottom: 15px; font-size: 0.95em;">
+                Uploaded audio files are stored here. Transcribe them individually or all at once.
+            </p>
+            <div id="bulk-batch-list" class="pii-tag-grid">
+                <p style="color: #009AA9; font-size: 0.9em; grid-column: 1/-1;">No batches uploaded yet.</p>
+            </div>
+            <div class="button-wrapper">
+                <button id="refresh-batches-btn" class="button secondary">
+                    <span class="icon">🔄</span> Refresh Batches
+                </button>
+                <button id="transcribe-all-batches-btn" class="button" disabled>
+                    <span class="icon">⚡</span> Transcribe All Batches
+                </button>
+            </div>
+            <div id="batch-status" class="status" style="margin-top: 15px;"></div>
+        </div>
+
         <!-- 4. Transcribed Text -->
         <div class="section">
             <h3>Transcribed Text</h3>
@@ -633,28 +652,84 @@
         async function refreshBatches() {
             try {
                 const resp = await fetch('/list_batches');
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
                 const data = await resp.json();
+                
                 const container = document.getElementById('bulk-batch-list');
+                const transcribeBtn = document.getElementById('transcribe-all-batches-btn');
                 
                 if (data.batches.length === 0) {
-                    container.innerHTML = '<p style="color: #009AA9; font-size: 0.9em; grid-column: 1/-1;">No batches uploaded.</p>';
+                    container.innerHTML = '<p style="color: #009AA9; font-size: 0.9em; grid-column: 1/-1;">No batches uploaded yet.</p>';
+                    transcribeBtn.disabled = true;
                     return;
                 }
                 
+                transcribeBtn.disabled = false;
                 container.innerHTML = '';
+                
                 data.batches.forEach(batch => {
                     const div = document.createElement('div');
                     div.className = 'pii-tag-item';
+                    const statusIcon = batch.processed ? '✅' : '⏳';
+                    const statusText = batch.processed ? 
+                        `${batch.result_count} files transcribed` : 
+                        `${batch.audio_count} files waiting`;
+                    
                     div.innerHTML = `
-                        <strong>${batch.batch_id}</strong><br>
-                        <small>${batch.file_count} files | ${batch.processed ? '✅ Processed' : '⏳ Pending'}</small>
+                        <div style="flex:1;">
+                            <div style="font-weight:600;margin-bottom:4px;">${batch.batch_id}</div>
+                            <div style="font-size:13px;color:#009AA9;">
+                                ${statusIcon} ${statusText}
+                            </div>
+                        </div>
                     `;
                     container.appendChild(div);
                 });
+                
+                updateStatus(`${data.batches.length} batch(es) loaded`, false);
+                
             } catch (error) {
                 console.error('Failed to load batches:', error);
+                updateStatus(`Failed to load batches: ${error.message}`, true);
             }
         }
+        
+        async function transcribeAllBatches() {
+            showLoader(true);
+            updateStatus('Transcribing all batches...', false);
+            
+            try {
+                const response = await fetch('/process_all_batches', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok && result.success) {
+                    updateStatus(
+                        `Transcription complete: ${result.total_success} succeeded, ${result.total_failed} failed`,
+                        result.total_failed === 0
+                    );
+                    refreshBatches();  // Refresh the batch list
+                } else {
+                    throw new Error(result.error || "Transcription failed");
+                }
+                
+            } catch (error) {
+                console.error('Batch transcription error:', error);
+                updateStatus(`Batch transcription failed: ${error.message}`, true);
+            } finally {
+                showLoader(false);
+            }
+        }
+        
+        // Event listeners for batch buttons
+        document.getElementById('refresh-batches-btn').addEventListener('click', refreshBatches);
+        document.getElementById('transcribe-all-batches-btn').addEventListener('click', transcribeAllBatches);
+        
+        // Auto-refresh batches on page load
+        refreshBatches();
                 
         // --- API Calls ---
         async function transcribe() {
