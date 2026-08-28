@@ -720,11 +720,15 @@
 
         let mediaRecorder, audioChunks = [], timerInterval, seconds = 0, isRecording = false, audioBlob = null, uploadedFile = null, offsetData = null, audioName = null;
 
-        function updateStatus(message, isError = false) {
+        function updateStatus(message, isError = false, persistent = false) {
             statusDiv.textContent = message;
             statusDiv.className = `status ${isError ? 'error' : 'success'}`;
             statusDiv.style.display = 'block';
-            setTimeout(() => { statusDiv.style.display = 'none'; }, 5000);
+            // Only auto-hide if NOT persistent (for transient messages)
+            if (!persistent) {
+                setTimeout(() => { statusDiv.style.display = 'none'; }, 5000);
+            }
+        }
         }
 
         function showLoader(show) { loader.style.display = show ? 'block' : 'none'; }
@@ -856,13 +860,13 @@
         async function transcribe() {
             if (!audioBlob && !uploadedFile) { updateStatus("No audio to transcribe.", true); return; }
             showLoader(true); transcribeBtn.disabled = true;
-            updateStatus("Transcription in progress...", false);
+            updateStatus("Transcription in progress...", false, true); // ← Add `true` for persistent
             const formData = new FormData();
             formData.append('audio', audioBlob || uploadedFile, audioBlob ? 'recording.webm' : uploadedFile.name);
             formData.append('model_size', whisperModelSelect.value);
             if (transcriptionLanguageSelect.value !== 'auto')
                 formData.append('language', transcriptionLanguageSelect.value.toLowerCase());
-
+        
             try {
                 const response = await fetch(audioBlob ? '/transcribe_recording' : '/upload', { method: 'POST', body: formData });
                 const result = await response.json();
@@ -870,13 +874,13 @@
                     transcribedText.value = result.transcription || "";
                     offsetData = result.offsets || [];
                     audioName = result.audio_name;
-                    updateStatus("Transcription successful!", false);
+                    updateStatus("Transcription successful!", false); // ← Normal auto-hide for success
                     downloadOriginalBtn.disabled = false;
                     anonymizeBtn.disabled = false;
                     downloadBertBtn.disabled = true; downloadSpeechBtn.disabled = true;
                 } else throw new Error(result.error || "Transcription failed.");
             } catch (error) {
-                updateStatus(`Transcription failed: ${error.message}`, true);
+                updateStatus(`Transcription failed: ${error.message}`, true); // ← Normal auto-hide for error
             } finally {
                 showLoader(false); transcribeBtn.disabled = false;
             }
