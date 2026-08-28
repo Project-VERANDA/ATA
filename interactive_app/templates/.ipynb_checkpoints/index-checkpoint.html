@@ -15,27 +15,38 @@
             overflow-x: hidden;
         }
 
-        .container {
-            background: #FFFFFF;
-            border-radius: 20px;
-            box-shadow: 0 25px 50px rgba(0, 55, 84, 0.2);
-            padding: 40px;
-            border: 3px solid #009AA9;
-            max-width: 950px;
-            width: 100%;
+        /* === PAGE LAYOUT WITH SIDE PANELS === */
+        .page-wrapper {
+            display: flex;
+            align-items: flex-start;
+            justify-content: center;
+            gap: 40px;
+            max-width: 1600px;
             margin: 0 auto;
             position: relative;
         }
 
-        h1 { text-align: center; color: #003754; margin-bottom: 10px; font-size: 2.8em; font-weight: 600; }
-        .subtitle { text-align: center; color: #009AA9; margin-bottom: 40px; font-size: 1.2em; font-weight: 500; }
-
-        /* === SIDE ANNOTATIONS (Fixed, alternating left/right) === */
-        .side-annotation {
-            position: fixed;
-            top: 50%;
-            transform: translateY(-50%);
+        /* Left side annotations panel */
+        .annotations-left {
             width: 300px;
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            padding-top: 20px;
+        }
+
+        /* Right side annotations panel */
+        .annotations-right {
+            width: 300px;
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            padding-top: 20px;
+        }
+
+        .side-annotation {
             background: linear-gradient(135deg, #E8F7F8 0%, #F0FBFC 100%);
             border-left: 4px solid #009AA9;
             padding: 20px;
@@ -43,34 +54,26 @@
             font-size: 13px;
             color: #003754;
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-            z-index: 100;
-            opacity: 0;
-            transition: opacity 0.3s ease;
-            pointer-events: none;
         }
-
-        .side-annotation.visible {
-            opacity: 1;
-            pointer-events: auto;
-        }
-
-        .annot-left { left: calc(50% - 480px); }
-        .annot-right { right: calc(50% - 480px); }
 
         .side-annotation strong { color: #009AA9; display: block; margin-bottom: 8px; font-size: 14px; }
         .side-annotation p { line-height: 1.6; margin: 0; }
 
-        /* Hide annotations on smaller screens */
-        @media (max-width: 1500px) {
-            .side-annotation { display: none; }
+        .main-content {
+            flex: 1;
+            max-width: 950px;
         }
 
-        .section-anchor {
-            position: relative;
-            top: -50px;
-            height: 1px;
-            margin-bottom: 10px;
+        .container {
+            background: #FFFFFF;
+            border-radius: 20px;
+            box-shadow: 0 25px 50px rgba(0, 55, 84, 0.2);
+            padding: 40px;
+            border: 3px solid #009AA9;
         }
+
+        h1 { text-align: center; color: #003754; margin-bottom: 10px; font-size: 2.8em; font-weight: 600; }
+        .subtitle { text-align: center; color: #009AA9; margin-bottom: 40px; font-size: 1.2em; font-weight: 500; }
 
         .section {
             margin-bottom: 30px; padding: 25px; border-radius: 15px;
@@ -294,10 +297,7 @@
             display: flex;
             animation: fadeIn 0.3s ease;
         }
-        @keyframes fadeIn {
-            from { opacity: 0; }
-            to { opacity: 1; }
-        }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         .modal-content {
             background: #FFFFFF;
             border-radius: 20px;
@@ -314,19 +314,14 @@
         }
         .modal-close {
             position: absolute;
-            top: 15px;
-            right: 15px;
-            background: #F5F5F5;
-            border: none;
-            width: 35px;
-            height: 35px;
+            top: 15px; right: 15px;
+            background: #F5F5F5; border: none;
+            width: 35px; height: 35px;
             border-radius: 50%;
             cursor: pointer;
             font-size: 22px;
             color: #003754;
-            display: flex;
-            align-items: center;
-            justify-content: center;
+            display: flex; align-items: center; justify-content: center;
             transition: all 0.2s ease;
         }
         .modal-close:hover {
@@ -334,39 +329,19 @@
             color: #FFFFFF;
             transform: rotate(90deg);
         }
-        .modal-header {
-            text-align: center;
-            margin-bottom: 25px;
-        }
-        .modal-header h2 {
-            color: #003754;
-            font-size: 1.8em;
-            margin-bottom: 10px;
-        }
-        .modal-header .modal-icon {
-            font-size: 3em;
-            margin-bottom: 15px;
-        }
+        .modal-header { text-align: center; margin-bottom: 25px; }
+        .modal-header h2 { color: #003754; font-size: 1.8em; margin-bottom: 10px; }
+        .modal-header .modal-icon { font-size: 3em; margin-bottom: 15px; }
         .modal-body {
             color: #003754;
             line-height: 1.7;
             font-size: 15px;
             margin-bottom: 30px;
         }
-        .modal-body p {
-            margin-bottom: 15px;
-        }
-        .modal-body a {
-            color: #009AA9;
-            text-decoration: underline;
-            font-weight: 600;
-        }
-        .modal-body a:hover {
-            color: #EA5451;
-        }
-        .modal-footer {
-            text-align: center;
-        }
+        .modal-body p { margin-bottom: 15px; }
+        .modal-body a { color: #009AA9; text-decoration: underline; font-weight: 600; }
+        .modal-body a:hover { color: #EA5451; }
+        .modal-footer { text-align: center; }
         .modal-cta-btn {
             background: linear-gradient(135deg, #009AA9 0%, #003754 100%);
             color: #FFFFFF;
@@ -396,207 +371,218 @@
             color: #EA5451;
             text-decoration: underline;
         }
+
+        @media (max-width: 1400px) {
+            .page-wrapper { flex-direction: column; align-items: center; }
+            .annotations-left, .annotations-right { display: none; }
+        }
     </style>
 </head>
 <body>
-    <!-- === FIXED SIDE ANNOTATIONS === -->
-    <div class="side-annotation annot-left" id="annot-1" data-section="sec-1">
-        <strong>ℹ️ Model & Language</strong>
-        <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
-    </div>
-    <div class="side-annotation annot-left" id="annot-2" data-section="sec-2">
-        <strong>ℹ️ Recording & Upload</strong>
-        <p>Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.</p>
-    </div>
-    <div class="side-annotation annot-right" id="annot-4" data-section="sec-4">
-        <strong>ℹ️ Transcription Output</strong>
-        <p>Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium.</p>
-    </div>
-    <div class="side-annotation annot-right" id="annot-5" data-section="sec-5">
-        <strong>ℹ️ PII Categories</strong>
-        <p>Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit.</p>
-    </div>
-    <div class="side-annotation annot-right" id="annot-6" data-section="sec-6">
-        <strong>ℹ️ Anonymization Output</strong>
-        <p>Neque porro quisquam est, qui dolorem ipsum quia dolor sit amet, consectetur.</p>
-    </div>
-
-    <div class="container">
-        <!-- Branding Header -->
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; width: 100%;">
-            <img src="{{ url_for('static', filename='dfki_Logo_sz.svg') }}" alt="DFKI Logo" style="max-height: 100px; width: auto; object-fit: contain;">
-            <img src="{{ url_for('static', filename='Online_251121A_BIH_Logo_RGB_BIH_Logo_StandardClaim_ENG_BlauKorall.svg') }}" alt="BIH Logo" style="max-height: 100px; width: auto; object-fit: contain;">
-            <img src="{{ url_for('static', filename='tu-berlin-logo-long-red.svg') }}" alt="TUB Logo" style="max-height: 100px; width: auto; object-fit: contain;">
-        </div>
-        <div style="text-align: center; margin-bottom: 30px;">
-            <img src="{{ url_for('static', filename='VERANDA_LOGO.svg') }}" alt="VERANDA Logo" style="max-height: 40px; width: auto; object-fit: contain;">
-        </div>
-
-        <h1>Speech Anonymizer</h1>
-        <p class="subtitle">Record, upload, transcribe, edit, and anonymize speech with advanced AI models.</p>
-
-        <div class="loader" id="loader"></div>
-        <div id="status" class="status"></div>
-
-        <!-- 1. Transcription Settings -->
-        <div class="section-anchor" id="anchor-1"></div>
-        <div class="section" id="sec-1">
-            <h3>Transcription Settings</h3>
-            <div class="language-selector">
-                <label for="transcription-language">Transcription Language:</label>
-                <select id="transcription-language">
-                    <option value="auto" selected>Auto-Detect (Default)</option>
-                    <option value="AR">Arabic (AR)</option>
-                    <option value="DE">German (DE)</option>
-                    <option value="EN">English (EN)</option>
-                    <option value="FI">Finnish (FI)</option>
-                    <option value="FR">French (FR)</option>
-                    <option value="HI">Hindi (HI)</option>
-                    <option value="IT">Italian (IT)</option>
-                    <option value="PL">Polish (PL)</option>
-                    <option value="PT">Portuguese (PT)</option>
-                    <option value="ES">Spanish (ES)</option>
-                    <option value="TR">Turkish (TR)</option>
-                </select>
+    <div class="page-wrapper">
+        <!-- LEFT ANNOTATIONS PANEL (2 boxes) -->
+        <div class="annotations-left">
+            <div class="side-annotation">
+                <strong>ℹ️ Model & Language</strong>
+                <p>Select the Whisper model and transcription language. Auto-detect is recommended for mixed-language content.</p>
             </div>
-            <div class="level-selector" style="margin-top: 15px;">
-                <label for="whisper-model-select">Whisper Model:</label>
-                <select id="whisper-model-select"></select>
+            <div class="side-annotation">
+                <strong>ℹ️ Recording & Upload</strong>
+                <p>Record directly via microphone or upload existing audio files in common formats (MP3, WAV, WEBM).</p>
             </div>
         </div>
 
-        <!-- 2. Input Audio -->
-        <div class="section-anchor" id="anchor-2"></div>
-        <div class="section" id="sec-2">
-            <h3>Input Audio</h3>
-            <div class="controls">
-                <button id="record-btn" class="button">
-                    <span class="icon" id="record-icon">🎤 Start </span>Recording
-                </button>
-                <div id="timer" class="timer">00:00</div>
-                <div class="separator">OR</div>
-                <div class="file-input">
-                    <input type="file" id="file-input" accept="audio/*" />
-                    <label for="file-input" id="upload-label">
-                        <span class="icon">📁</span> Click to Upload Audio
-                    </label>
+        <!-- MAIN CONTENT -->
+        <div class="main-content">
+            <div class="container">
+                <!-- Branding Header -->
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; width: 100%;">
+                    <img src="{{ url_for('static', filename='dfki_Logo_sz.svg') }}" alt="DFKI Logo" style="max-height: 100px; width: auto; object-fit: contain;">
+                    <img src="{{ url_for('static', filename='Online_251121A_BIH_Logo_RGB_BIH_Logo_StandardClaim_ENG_BlauKorall.svg') }}" alt="BIH Logo" style="max-height: 100px; width: auto; object-fit: contain;">
+                    <img src="{{ url_for('static', filename='tu-berlin-logo-long-red.svg') }}" alt="TUB Logo" style="max-height: 100px; width: auto; object-fit: contain;">
+                </div>
+                <div style="text-align: center; margin-bottom: 30px;">
+                    <img src="{{ url_for('static', filename='VERANDA_LOGO.svg') }}" alt="VERANDA Logo" style="max-height: 40px; width: auto; object-fit: contain;">
+                </div>
+
+                <h1>Speech Anonymizer</h1>
+                <p class="subtitle">Record, upload, transcribe, edit, and anonymize speech with advanced AI models.</p>
+
+                <div class="loader" id="loader"></div>
+                <div id="status" class="status"></div>
+
+                <!-- 1. Transcription Settings -->
+                <div class="section">
+                    <h3>Transcription Settings</h3>
+                    <div class="language-selector">
+                        <label for="transcription-language">Transcription Language:</label>
+                        <select id="transcription-language">
+                            <option value="auto" selected>Auto-Detect (Default)</option>
+                            <option value="AR">Arabic (AR)</option>
+                            <option value="DE">German (DE)</option>
+                            <option value="EN">English (EN)</option>
+                            <option value="FI">Finnish (FI)</option>
+                            <option value="FR">French (FR)</option>
+                            <option value="HI">Hindi (HI)</option>
+                            <option value="IT">Italian (IT)</option>
+                            <option value="PL">Polish (PL)</option>
+                            <option value="PT">Portuguese (PT)</option>
+                            <option value="ES">Spanish (ES)</option>
+                            <option value="TR">Turkish (TR)</option>
+                        </select>
+                    </div>
+                    <div class="level-selector" style="margin-top: 15px;">
+                        <label for="whisper-model-select">Whisper Model:</label>
+                        <select id="whisper-model-select"></select>
+                    </div>
+                </div>
+
+                <!-- 2. Input Audio -->
+                <div class="section">
+                    <h3>Input Audio</h3>
+                    <div class="controls">
+                        <button id="record-btn" class="button">
+                            <span class="icon" id="record-icon">🎤 Start </span>Recording
+                        </button>
+                        <div id="timer" class="timer">00:00</div>
+                        <div class="separator">OR</div>
+                        <div class="file-input">
+                            <input type="file" id="file-input" accept="audio/*" />
+                            <label for="file-input" id="upload-label">
+                                <span class="icon">📁</span> Click to Upload Audio
+                            </label>
+                        </div>
+                    </div>
+                    <div id="filename-display" style="margin-top: 10px; color: #003754; font-weight: 500; text-align: center;"></div>
+                    <div class="button-wrapper">
+                        <button id="transcribe-btn" class="button" disabled>
+                            <span class="icon">▶️</span> Transcribe
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 3. Bulk Upload (Hidden) -->
+                <div class="section" style="display:none;">
+                    <h3>Bulk Upload (Audio/Text Files)</h3>
+                    <p style="color: #009AA9; margin-bottom: 15px; font-size: 0.95em;">
+                        Upload multiple audio files, text files, or a ZIP folder containing them.
+                    </p>
+                    <div class="file-input">
+                        <input type="file" id="bulk-file-input" multiple accept=".mp3,.wav,.webm,.txt,.zip" />
+                        <label for="bulk-file-input" id="bulk-upload-label">
+                            <span class="icon">📂</span> Select Multiple Files or Folder
+                        </label>
+                    </div>
+                    <div id="bulk-status" style="margin-top: 10px; color: #003754; font-weight: 500; text-align: center;"></div>
+                    <div class="button-wrapper">
+                        <button id="process-bulk-btn" class="button" disabled>
+                            <span class="icon">⚡</span> Process Bulk Upload
+                        </button>
+                    </div>
+                </div>
+
+                <div class="section" style="display:none;">
+                    <h3>Batch Management</h3>
+                    <p style="color: #009AA9; margin-bottom: 15px; font-size: 0.95em;">
+                        Uploaded audio files are stored here. Transcribe them individually or all at once.
+                    </p>
+                    <div id="bulk-batch-list" class="pii-tag-grid">
+                        <p style="color: #009AA9; font-size: 0.9em; grid-column: 1/-1;">No batches uploaded yet.</p>
+                    </div>
+                    <div class="button-wrapper">
+                        <button id="refresh-batches-btn" class="button secondary">
+                            <span class="icon">🔄</span> Refresh Batches
+                        </button>
+                        <button id="transcribe-all-batches-btn" class="button" disabled>
+                            <span class="icon">⚡</span> Transcribe All Batches
+                        </button>
+                    </div>
+                    <div id="batch-status" class="status" style="margin-top: 15px;"></div>
+                </div>
+
+                <!-- 4. Transcribed Text -->
+                <div class="section">
+                    <h3>Transcribed Text</h3>
+                    <textarea id="transcribed-text" class="text-area" placeholder="Transcription will appear here..."></textarea>
+                    <div class="button-wrapper" style="display: flex; gap: 10px; justify-content: center; margin-top: 15px;">
+                        <button id="save-edit-btn" class="button secondary">
+                            <span class="icon">💾</span> Save Edit
+                        </button>
+                        <button id="anonymize-btn" class="button" disabled>
+                            <span class="icon">🔒</span> Anonymize Text
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 5. PII Tag Selection -->
+                <div class="section">
+                    <h3>PII Tag Selection</h3>
+                    <p style="color: #009AA9; margin-bottom: 15px; font-size: 0.95em;">
+                        Select which categories of personally identifiable information to anonymize. All are enabled by default.
+                    </p>
+                    <div class="pii-tag-toggle-container">
+                        <button id="pii-toggle-btn" class="pii-tag-toggle-btn">Hide Tags</button>
+                    </div>
+                    <div id="pii-tag-expand-wrapper" class="pii-tag-expand-wrapper">
+                        <div id="pii-tag-grid" class="pii-tag-grid">
+                            <p style="color: #009AA9; font-size: 0.9em; grid-column: 1/-1;">Loading available tags...</p>
+                        </div>
+                    </div>
+                    <div class="pii-tag-actions">
+                        <button id="pii-select-all">Select All</button>
+                        <button id="pii-clear-all">Clear All</button>
+                    </div>
+                </div>
+
+                <!-- 6. Anonymized Text -->
+                <div class="section">
+                    <h3>Anonymized Text</h3>
+                    <textarea id="anonymized-text" class="text-area" placeholder="Anonymized text will appear here..." readonly></textarea>
+                    <div id="tts-container" class="hidden" style="display: flex; gap: 10px; justify-content: center; margin-top: 15px;">
+                         <button id="surrogate-btn" class="button">Surrogate</button>
+                         <button id="rephrase-btn" class="button">Rephrase</button>
+                         <button id="generate-speech-btn" class="button">Synthetic Audio</button>
+                         <button id="process-org-audio-btn" class="button">Process Audio</button>
+                    </div>
+                    <audio id="audio-player" controls class="hidden"></audio>
+                </div>
+
+                <!-- 7. Download Results -->
+                <div class="section">
+                    <h3>Download Results</h3>
+                    <p style="color: #009AA9; margin-bottom: 15px; font-size: 0.95em;">
+                        Download the generated outputs.
+                    </p>
+                    <div class="download-grid">
+                        <button id="download-original-btn" class="button download-btn" disabled>
+                            <span class="icon">📄</span> Original Text
+                        </button>
+                        <button id="download-bert-btn" class="button download-btn" disabled>
+                            <span class="icon">🔒</span> BERT-Anonymized
+                        </button>
+                        <button id="download-speech-btn" class="button download-btn" disabled>
+                            <span class="icon">🔊</span> Generated Speech
+                        </button>
+                    </div>
+                    <div id="download-status" class="status" style="margin-top: 15px;"></div>
                 </div>
             </div>
-            <div id="filename-display" style="margin-top: 10px; color: #003754; font-weight: 500; text-align: center;"></div>
-            <div class="button-wrapper">
-                <button id="transcribe-btn" class="button" disabled>
-                    <span class="icon">▶️</span> Transcribe
-                </button>
-            </div>
         </div>
 
-        <!-- 3. Bulk Upload -->
-        <div class="section" style="display:none;">
-            <h3>Bulk Upload (Audio/Text Files)</h3>
-            <p style="color: #009AA9; margin-bottom: 15px; font-size: 0.95em;">
-                Upload multiple audio files, text files, or a ZIP folder containing them.
-            </p>
-            <div class="file-input">
-                <input type="file" id="bulk-file-input" multiple accept=".mp3,.wav,.webm,.txt,.zip" />
-                <label for="bulk-file-input" id="bulk-upload-label">
-                    <span class="icon">📂</span> Select Multiple Files or Folder
-                </label>
+        <!-- RIGHT ANNOTATIONS PANEL (3 boxes) -->
+        <div class="annotations-right">
+            <div class="side-annotation">
+                <strong>ℹ️ Transcription Output</strong>
+                <p>Edit the transcribed text before anonymization. Click Save Edit to preserve changes.</p>
             </div>
-            <div id="bulk-status" style="margin-top: 10px; color: #003754; font-weight: 500; text-align: center;"></div>
-            <div class="button-wrapper">
-                <button id="process-bulk-btn" class="button" disabled>
-                    <span class="icon">⚡</span> Process Bulk Upload
-                </button>
+            <div class="side-annotation">
+                <strong>ℹ️ PII Categories</strong>
+                <p>Choose which PII types to anonymize. Use the toggle to collapse/expand the list.</p>
             </div>
-        </div>
-
-        <div class="section" style="display:none;">
-            <h3>Batch Management</h3>
-            <p style="color: #009AA9; margin-bottom: 15px; font-size: 0.95em;">
-                Uploaded audio files are stored here. Transcribe them individually or all at once.
-            </p>
-            <div id="bulk-batch-list" class="pii-tag-grid">
-                <p style="color: #009AA9; font-size: 0.9em; grid-column: 1/-1;">No batches uploaded yet.</p>
+            <div class="side-annotation">
+                <strong>ℹ️ Anonymization Output</h3>
+                <p>The anonymized text appears here. Generate synthetic speech or process original audio for additional output options.</p>
             </div>
-            <div class="button-wrapper">
-                <button id="refresh-batches-btn" class="button secondary">
-                    <span class="icon">🔄</span> Refresh Batches
-                </button>
-                <button id="transcribe-all-batches-btn" class="button" disabled>
-                    <span class="icon">⚡</span> Transcribe All Batches
-                </button>
-            </div>
-            <div id="batch-status" class="status" style="margin-top: 15px;"></div>
-        </div>
-
-        <!-- 4. Transcribed Text -->
-        <div class="section-anchor" id="anchor-4"></div>
-        <div class="section" id="sec-4">
-            <h3>Transcribed Text</h3>
-            <textarea id="transcribed-text" class="text-area" placeholder="Transcription will appear here..."></textarea>
-            <div class="button-wrapper" style="display: flex; gap: 10px; justify-content: center; margin-top: 15px;">
-                <button id="save-edit-btn" class="button secondary">
-                    <span class="icon">💾</span> Save Edit
-                </button>
-                <button id="anonymize-btn" class="button" disabled>
-                    <span class="icon">🔒</span> Anonymize Text
-                </button>
-            </div>
-        </div>
-
-        <!-- 5. PII Tag Selection -->
-        <div class="section-anchor" id="anchor-5"></div>
-        <div class="section" id="sec-5">
-            <h3>PII Tag Selection</h3>
-            <p style="color: #009AA9; margin-bottom: 15px; font-size: 0.95em;">
-                Select which categories of personally identifiable information to anonymize. All are enabled by default.
-            </p>
-            <div class="pii-tag-toggle-container">
-                <button id="pii-toggle-btn" class="pii-tag-toggle-btn">Hide Tags</button>
-            </div>
-            <div id="pii-tag-expand-wrapper" class="pii-tag-expand-wrapper">
-                <div id="pii-tag-grid" class="pii-tag-grid">
-                    <p style="color: #009AA9; font-size: 0.9em; grid-column: 1/-1;">Loading available tags...</p>
-                </div>
-            </div>
-            <div class="pii-tag-actions">
-                <button id="pii-select-all">Select All</button>
-                <button id="pii-clear-all">Clear All</button>
-            </div>
-        </div>
-
-        <!-- 6. Anonymized Text -->
-        <div class="section-anchor" id="anchor-6"></div>
-        <div class="section" id="sec-6">
-            <h3>Anonymized Text</h3>
-            <textarea id="anonymized-text" class="text-area" placeholder="Anonymized text will appear here..." readonly></textarea>
-            <div id="tts-container" class="hidden" style="display: flex; gap: 10px; justify-content: center; margin-top: 15px;">
-                 <button id="surrogate-btn" class="button">Surrogate</button>
-                 <button id="rephrase-btn" class="button">Rephrase</button>
-                 <button id="generate-speech-btn" class="button">Synthetic Audio</button>
-                 <button id="process-org-audio-btn" class="button">Process Audio</button>
-            </div>
-            <audio id="audio-player" controls class="hidden"></audio>
-        </div>
-
-        <!-- 7. Download Results -->
-        <div class="section">
-            <h3>Download Results</h3>
-            <p style="color: #009AA9; margin-bottom: 15px; font-size: 0.95em;">
-                Download the generated outputs.
-            </p>
-            <div class="download-grid">
-                <button id="download-original-btn" class="button download-btn" disabled>
-                    <span class="icon">📄</span> Original Text
-                </button>
-                <button id="download-bert-btn" class="button download-btn" disabled>
-                    <span class="icon">🔒</span> BERT-Anonymized
-                </button>
-                <button id="download-speech-btn" class="button download-btn" disabled>
-                    <span class="icon">🔊</span> Generated Speech
-                </button>
-            </div>
-            <div id="download-status" class="status" style="margin-top: 15px;"></div>
         </div>
     </div>
 
@@ -666,33 +652,6 @@
                 piiToggleBtn.textContent = piiExpandWrapper.classList.contains('collapsed') ? 'Show Tags' : 'Hide Tags';
             });
         }
-
-        // === SCROLL OBSERVER FOR ANNOTATIONS ===
-        const annotations = document.querySelectorAll('.side-annotation');
-        const anchors = document.querySelectorAll('.section-anchor');
-        
-        const observerOptions = {
-            root: null,
-            rootMargin: '-40% 0px -40% 0px',
-            threshold: 0
-        };
-
-        const observer = new IntersectionObserver((entries) => {
-            // Hide all annotations
-            annotations.forEach(a => a.classList.remove('visible'));
-            
-            entries.forEach(entry => {
-                if (entry.isIntersecting) {
-                    const anchorId = entry.target.id;
-                    const sectionNum = anchorId.replace('anchor-', '');
-                    const annotId = `annot-${sectionNum}`;
-                    const annot = document.getElementById(annotId);
-                    if (annot) annot.classList.add('visible');
-                }
-            });
-        }, observerOptions);
-
-        anchors.forEach(anchor => observer.observe(anchor));
 
         // === DOM Elements ===
         const recordBtn = document.getElementById('record-btn');
