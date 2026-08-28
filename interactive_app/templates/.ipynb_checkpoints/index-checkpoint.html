@@ -21,36 +21,39 @@
             box-shadow: 0 25px 50px rgba(0, 55, 84, 0.2);
             padding: 40px; max-width: 950px; width: 100%;
             border: 3px solid #009AA9;
+            position: relative;
+            z-index: 10;
         }
 
         h1 { text-align: center; color: #003754; margin-bottom: 10px; font-size: 2.8em; font-weight: 600; text-shadow: 0 2px 4px rgba(0, 55, 84, 0.1); }
         .subtitle { text-align: center; color: #009AA9; margin-bottom: 40px; font-size: 1.2em; font-weight: 500; }
 
-        /* === SIDEBAR ANNOTATION BOXES === */
-        .annotation-box {
+        /* === SIDE ANNOTATION BOXES (Outside Container) === */
+        .side-annotation {
+            position: fixed;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 320px;
             background: linear-gradient(135deg, #E8F7F8 0%, #F0FBFC 100%);
             border-left: 4px solid #009AA9;
-            padding: 15px 20px;
-            margin: 10px 0 20px 0;
+            padding: 20px;
             border-radius: 8px;
             font-size: 13px;
             color: #003754;
-            box-shadow: 0 2px 6px rgba(0, 55, 84, 0.1);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            z-index: 20;
+            transition: opacity 0.3s ease;
         }
-        .annotation-box strong { color: #009AA9; display: block; margin-bottom: 5px; }
-        .annotation-box p { line-height: 1.5; margin: 0; }
+        .side-annotation strong { color: #009AA9; display: block; margin-bottom: 8px; font-size: 14px; }
+        .side-annotation p { line-height: 1.6; margin: 0; }
 
-        /* Section with annotation - flexible layout */
-        .section-with-annotation {
-            display: flex; gap: 25px; margin-bottom: 30px; align-items: flex-start;
-        }
-        .section-main { flex: 1; }
-        .section-annotation {
-            width: 280px; flex-shrink: 0;
-        }
-        @media (max-width: 900px) {
-            .section-with-annotation { flex-direction: column; }
-            .section-annotation { width: 100%; }
+        /* Position annotations left/right based on section */
+        .annot-left { left: calc(50vw - 500px); }
+        .annot-right { right: calc(50vw - 500px); }
+
+        /* Hide annotations on mobile/narrow screens */
+        @media (max-width: 1400px) {
+            .side-annotation { display: none; }
         }
 
         .section {
@@ -397,6 +400,28 @@
     </style>
 </head>
 <body>
+    <!-- === SIDE ANNOTATIONS (Floating in Gradient Space) === -->
+    <div class="side-annotation annot-left" id="annot-1">
+        <strong>ℹ️ Model & Language</strong>
+        <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
+    </div>
+    <div class="side-annotation annot-left" id="annot-2">
+        <strong>ℹ️ Recording & Upload</strong>
+        <p>Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.</p>
+    </div>
+    <div class="side-annotation annot-right" id="annot-4">
+        <strong>ℹ️ Transcription Output</strong>
+        <p>Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium.</p>
+    </div>
+    <div class="side-annotation annot-right" id="annot-5">
+        <strong>ℹ️ PII Categories</strong>
+        <p>Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit.</p>
+    </div>
+    <div class="side-annotation annot-right" id="annot-6">
+        <strong>ℹ️ Anonymization Output</strong>
+        <p>Neque porro quisquam est, qui dolorem ipsum quia dolor sit amet, consectetur.</p>
+    </div>
+
     <div class="container">
         <!-- Branding Header -->
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; width: 100%;">
@@ -414,73 +439,53 @@
         <div class="loader" id="loader"></div>
         <div id="status" class="status"></div>
 
-        <!-- 1. Transcription Settings (WITH ANNOTATION) -->
-        <div class="section-with-annotation">
-            <div class="section-main">
-                <div class="section">
-                    <h3>Transcription Settings</h3>
-                    <div class="language-selector">
-                        <label for="transcription-language">Transcription Language:</label>
-                        <select id="transcription-language">
-                            <option value="auto" selected>Auto-Detect (Default)</option>
-                            <option value="AR">Arabic (AR)</option>
-                            <option value="DE">German (DE)</option>
-                            <option value="EN">English (EN)</option>
-                            <option value="FI">Finnish (FI)</option>
-                            <option value="FR">French (FR)</option>
-                            <option value="HI">Hindi (HI)</option>
-                            <option value="IT">Italian (IT)</option>
-                            <option value="PL">Polish (PL)</option>
-                            <option value="PT">Portuguese (PT)</option>
-                            <option value="ES">Spanish (ES)</option>
-                            <option value="TR">Turkish (TR)</option>
-                        </select>
-                    </div>
-                    <div class="level-selector" style="margin-top: 15px;">
-                        <label for="whisper-model-select">Whisper Model:</label>
-                        <select id="whisper-model-select"></select>
-                    </div>
-                </div>
+        <!-- 1. Transcription Settings -->
+        <div class="section" id="sec-1">
+            <h3>Transcription Settings</h3>
+            <div class="language-selector">
+                <label for="transcription-language">Transcription Language:</label>
+                <select id="transcription-language">
+                    <option value="auto" selected>Auto-Detect (Default)</option>
+                    <option value="AR">Arabic (AR)</option>
+                    <option value="DE">German (DE)</option>
+                    <option value="EN">English (EN)</option>
+                    <option value="FI">Finnish (FI)</option>
+                    <option value="FR">French (FR)</option>
+                    <option value="HI">Hindi (HI)</option>
+                    <option value="IT">Italian (IT)</option>
+                    <option value="PL">Polish (PL)</option>
+                    <option value="PT">Portuguese (PT)</option>
+                    <option value="ES">Spanish (ES)</option>
+                    <option value="TR">Turkish (TR)</option>
+                </select>
             </div>
-            <div class="section-annotation">
-                <div class="annotation-box">
-                    <strong>ℹ️ Model & Language</strong>
-                    <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam.</p>
-                </div>
+            <div class="level-selector" style="margin-top: 15px;">
+                <label for="whisper-model-select">Whisper Model:</label>
+                <select id="whisper-model-select"></select>
             </div>
         </div>
 
-        <!-- 2. Input Audio (WITH ANNOTATION) -->
-        <div class="section-with-annotation">
-            <div class="section-main">
-                <div class="section">
-                    <h3>Input Audio</h3>
-                    <div class="controls">
-                        <button id="record-btn" class="button">
-                            <span class="icon" id="record-icon">🎤 Start </span>Recording
-                        </button>
-                        <div id="timer" class="timer">00:00</div>
-                        <div class="separator">OR</div>
-                        <div class="file-input">
-                            <input type="file" id="file-input" accept="audio/*" />
-                            <label for="file-input" id="upload-label">
-                                <span class="icon">📁</span> Click to Upload Audio
-                            </label>
-                        </div>
-                    </div>
-                    <div id="filename-display" style="margin-top: 10px; color: #003754; font-weight: 500; text-align: center;"></div>
-                    <div class="button-wrapper">
-                        <button id="transcribe-btn" class="button" disabled>
-                            <span class="icon">▶️</span> Transcribe
-                        </button>
-                    </div>
+        <!-- 2. Input Audio -->
+        <div class="section" id="sec-2">
+            <h3>Input Audio</h3>
+            <div class="controls">
+                <button id="record-btn" class="button">
+                    <span class="icon" id="record-icon">🎤 Start </span>Recording
+                </button>
+                <div id="timer" class="timer">00:00</div>
+                <div class="separator">OR</div>
+                <div class="file-input">
+                    <input type="file" id="file-input" accept="audio/*" />
+                    <label for="file-input" id="upload-label">
+                        <span class="icon">📁</span> Click to Upload Audio
+                    </label>
                 </div>
             </div>
-            <div class="section-annotation">
-                <div class="annotation-box">
-                    <strong>ℹ️ Recording & Upload</strong>
-                    <p>Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident.</p>
-                </div>
+            <div id="filename-display" style="margin-top: 10px; color: #003754; font-weight: 500; text-align: center;"></div>
+            <div class="button-wrapper">
+                <button id="transcribe-btn" class="button" disabled>
+                    <span class="icon">▶️</span> Transcribe
+                </button>
             </div>
         </div>
 
@@ -523,81 +528,51 @@
             <div id="batch-status" class="status" style="margin-top: 15px;"></div>
         </div>
 
-        <!-- 4. Transcribed Text (WITH ANNOTATION) -->
-        <div class="section-with-annotation">
-            <div class="section-main">
-                <div class="section">
-                    <h3>Transcribed Text</h3>
-                    <textarea id="transcribed-text" class="text-area" placeholder="Transcription will appear here..."></textarea>
-                    <div class="button-wrapper" style="display: flex; gap: 10px; justify-content: center; margin-top: 15px;">
-                        <button id="save-edit-btn" class="button secondary">
-                            <span class="icon">💾</span> Save Edit
-                        </button>
-                        <button id="anonymize-btn" class="button" disabled>
-                            <span class="icon">🔒</span> Anonymize Text
-                        </button>
-                    </div>
-                </div>
-            </div>
-            <div class="section-annotation">
-                <div class="annotation-box">
-                    <strong>ℹ️ Transcription Output</strong>
-                    <p>Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam.</p>
-                </div>
+        <!-- 4. Transcribed Text -->
+        <div class="section" id="sec-4">
+            <h3>Transcribed Text</h3>
+            <textarea id="transcribed-text" class="text-area" placeholder="Transcription will appear here..."></textarea>
+            <div class="button-wrapper" style="display: flex; gap: 10px; justify-content: center; margin-top: 15px;">
+                <button id="save-edit-btn" class="button secondary">
+                    <span class="icon">💾</span> Save Edit
+                </button>
+                <button id="anonymize-btn" class="button" disabled>
+                    <span class="icon">🔒</span> Anonymize Text
+                </button>
             </div>
         </div>
 
-        <!-- 5. PII Tag Selection (EXPANDING MENU WITH ANNOTATION) -->
-        <div class="section-with-annotation">
-            <div class="section-main">
-                <div class="section">
-                    <h3>PII Tag Selection</h3>
-                    <p style="color: #009AA9; margin-bottom: 15px; font-size: 0.95em;">
-                        Select which categories of personally identifiable information to anonymize. All are enabled by default.
-                    </p>
-                    <div class="pii-tag-toggle-container">
-                        <button id="pii-toggle-btn" class="pii-tag-toggle-btn">Hide Tags</button>
-                    </div>
-                    <div id="pii-tag-expand-wrapper" class="pii-tag-expand-wrapper">
-                        <div id="pii-tag-grid" class="pii-tag-grid">
-                            <p style="color: #009AA9; font-size: 0.9em; grid-column: 1/-1;">Loading available tags...</p>
-                        </div>
-                    </div>
-                    <div class="pii-tag-actions">
-                        <button id="pii-select-all">Select All</button>
-                        <button id="pii-clear-all">Clear All</button>
-                    </div>
+        <!-- 5. PII Tag Selection (Expanding Menu) -->
+        <div class="section" id="sec-5">
+            <h3>PII Tag Selection</h3>
+            <p style="color: #009AA9; margin-bottom: 15px; font-size: 0.95em;">
+                Select which categories of personally identifiable information to anonymize. All are enabled by default.
+            </p>
+            <div class="pii-tag-toggle-container">
+                <button id="pii-toggle-btn" class="pii-tag-toggle-btn">Hide Tags</button>
+            </div>
+            <div id="pii-tag-expand-wrapper" class="pii-tag-expand-wrapper">
+                <div id="pii-tag-grid" class="pii-tag-grid">
+                    <p style="color: #009AA9; font-size: 0.9em; grid-column: 1/-1;">Loading available tags...</p>
                 </div>
             </div>
-            <div class="section-annotation">
-                <div class="annotation-box">
-                    <strong>ℹ️ PII Categories</strong>
-                    <p>Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit, sed quia consequuntur magni dolores.</p>
-                </div>
+            <div class="pii-tag-actions">
+                <button id="pii-select-all">Select All</button>
+                <button id="pii-clear-all">Clear All</button>
             </div>
         </div>
 
-        <!-- 6. Anonymized Text (WITH ANNOTATION) -->
-        <div class="section-with-annotation">
-            <div class="section-main">
-                <div class="section">
-                    <h3>Anonymized Text</h3>
-                    <textarea id="anonymized-text" class="text-area" placeholder="Anonymized text will appear here..." readonly></textarea>
-                    <div id="tts-container" class="hidden" style="display: flex; gap: 10px; justify-content: center; margin-top: 15px;">
-                         <button id="surrogate-btn" class="button">Surrogate</button>
-                         <button id="rephrase-btn" class="button">Rephrase</button>
-                         <button id="generate-speech-btn" class="button">Synthetic Audio</button>
-                         <button id="process-org-audio-btn" class="button">Process Audio</button>
-                    </div>
-                    <audio id="audio-player" controls class="hidden"></audio>
-                </div>
+        <!-- 6. Anonymized Text -->
+        <div class="section" id="sec-6">
+            <h3>Anonymized Text</h3>
+            <textarea id="anonymized-text" class="text-area" placeholder="Anonymized text will appear here..." readonly></textarea>
+            <div id="tts-container" class="hidden" style="display: flex; gap: 10px; justify-content: center; margin-top: 15px;">
+                 <button id="surrogate-btn" class="button">Surrogate</button>
+                 <button id="rephrase-btn" class="button">Rephrase</button>
+                 <button id="generate-speech-btn" class="button">Synthetic Audio</button>
+                 <button id="process-org-audio-btn" class="button">Process Audio</button>
             </div>
-            <div class="section-annotation">
-                <div class="annotation-box">
-                    <strong>ℹ️ Anonymization Output</strong>
-                    <p>Neque porro quisquam est, qui dolorem ipsum quia dolor sit amet, consectetur, adipisci velit, sed quia non numquam eius modi tempora.</p>
-                </div>
-            </div>
+            <audio id="audio-player" controls class="hidden"></audio>
         </div>
 
         <!-- 7. Download Results -->
@@ -665,11 +640,10 @@
         }
 
         function scheduleSurveyModal() {
-            // Schedule modal to appear 20 seconds after anonymization
             if (surveyTimer) clearTimeout(surveyTimer);
             surveyTimer = setTimeout(() => {
                 showSurveyModal();
-            }, 20000); // 20 seconds
+            }, 20000);
         }
 
         // Modal event listeners
@@ -679,7 +653,6 @@
         if (modalDismissLink) {
             modalDismissLink.addEventListener('click', hideSurveyModal);
         }
-        // Close on overlay click
         if (surveyModal) {
             surveyModal.addEventListener('click', (e) => {
                 if (e.target === surveyModal) {
@@ -687,6 +660,56 @@
                 }
             });
         }
+
+        // === PII Toggle Button Logic ===
+        const piiToggleBtn = document.getElementById('pii-toggle-btn');
+        const piiExpandWrapper = document.getElementById('pii-tag-expand-wrapper');
+        if (piiToggleBtn && piiExpandWrapper) {
+            piiToggleBtn.addEventListener('click', () => {
+                piiExpandWrapper.classList.toggle('collapsed');
+                piiToggleBtn.classList.toggle('collapsed');
+                piiToggleBtn.textContent = piiExpandWrapper.classList.contains('collapsed') ? 'Show Tags' : 'Hide Tags';
+            });
+        }
+
+        // === SCROLL-BASED ANNOTATION VISIBILITY ===
+        // Show/hide side annotations based on which section is in view
+        const sectionsWithAnnots = [
+            { id: 'sec-1', annotId: 'annot-1' },
+            { id: 'sec-2', annotId: 'annot-2' },
+            { id: 'sec-4', annotId: 'annot-4' },
+            { id: 'sec-5', annotId: 'annot-5' },
+            { id: 'sec-6', annotId: 'annot-6' }
+        ];
+
+        function updateAnnotationVisibility() {
+            const viewportCenter = window.scrollY + window.innerHeight / 2;
+            
+            sectionsWithAnnots.forEach(({ id, annotId }) => {
+                const section = document.getElementById(id);
+                const annot = document.getElementById(annotId);
+                
+                if (section && annot) {
+                    const rect = section.getBoundingClientRect();
+                    const sectionTop = window.scrollY + rect.top;
+                    const sectionBottom = sectionTop + rect.height;
+                    
+                    // Show annotation if section is within 200px of viewport center
+                    if (Math.abs(viewportCenter - sectionTop) < 300 || 
+                        Math.abs(viewportCenter - sectionBottom) < 300 ||
+                        (viewportCenter > sectionTop && viewportCenter < sectionBottom)) {
+                        annot.style.opacity = '1';
+                    } else {
+                        annot.style.opacity = '0.5';
+                    }
+                }
+            });
+        }
+
+        // Update on scroll
+        window.addEventListener('scroll', updateAnnotationVisibility);
+        // Initial call
+        setTimeout(updateAnnotationVisibility, 100);
 
         // === DOM Elements ===
         const recordBtn = document.getElementById('record-btn');
@@ -724,15 +747,11 @@
         const downloadSpeechBtn = document.getElementById('download-speech-btn');
         const downloadStatus = document.getElementById('download-status');
 
-        // PII Tag Selection
         const piiTagGrid = document.getElementById('pii-tag-grid');
-        const piiToggleBtn = document.getElementById('pii-toggle-btn');
-        const piiExpandWrapper = document.getElementById('pii-tag-expand-wrapper');
         const piiSelectAllBtn = document.getElementById('pii-select-all');
         const piiClearAllBtn = document.getElementById('pii-clear-all');
         let availablePiiTags = [];
 
-        // PII Tag Mapping - Backend Tags → Human Readable Labels
         const piiTagMapping = {
             'PERSON': { label: 'Names', desc: 'Person names and identities' },
             'PERSON_EMAIL': { label: 'Email Addresses', desc: 'Email addresses' },
@@ -754,15 +773,6 @@
             'QUANTITY': { label: 'Quantities', desc: 'Measurements and amounts' },
             'MISC': { label: 'Miscellaneous', desc: 'Other identifiable information' }
         };
-
-        // === PII Toggle Button Logic ===
-        if (piiToggleBtn && piiExpandWrapper) {
-            piiToggleBtn.addEventListener('click', () => {
-                piiExpandWrapper.classList.toggle('collapsed');
-                piiToggleBtn.classList.toggle('collapsed');
-                piiToggleBtn.textContent = piiExpandWrapper.classList.contains('collapsed') ? 'Show Tags' : 'Hide Tags';
-            });
-        }
 
         // === State Variables ===
         let mediaRecorder;
@@ -796,30 +806,21 @@
                 const resp = await fetch('/available_tags');
                 if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
                 const data = await resp.json();
-
                 availablePiiTags = data.tags || [];
-
-                // Render flat tag grid with human-readable labels
                 piiTagGrid.innerHTML = '';
-
-                // Sort tags alphabetically by their backend name
                 const sortedTags = availablePiiTags.sort();
 
                 sortedTags.forEach(tag => {
                     const mapping = piiTagMapping[tag] || { label: tag, desc: '' };
-
                     const labelDiv = document.createElement('label');
                     labelDiv.className = 'pii-tag-item';
-
                     const checkbox = document.createElement('input');
                     checkbox.type = 'checkbox';
                     checkbox.value = tag;
-                    checkbox.checked = true; // Default: all selected
-
+                    checkbox.checked = true;
                     const labelText = document.createElement('span');
                     labelText.className = 'pii-tag-label';
                     labelText.textContent = mapping.label;
-
                     const descText = document.createElement('div');
                     descText.className = 'pii-tag-description';
                     descText.textContent = mapping.desc;
@@ -828,13 +829,9 @@
                     labelDiv.appendChild(labelText);
                     labelDiv.appendChild(descText);
 
-                    // Allow clicking the whole div
                     labelDiv.addEventListener('click', (e) => {
-                        if (e.target !== checkbox) {
-                            checkbox.checked = !checkbox.checked;
-                        }
+                        if (e.target !== checkbox) checkbox.checked = !checkbox.checked;
                     });
-
                     piiTagGrid.appendChild(labelDiv);
                 });
             } catch (error) {
@@ -861,12 +858,10 @@
             try {
                 const whisperSelect = document.getElementById('whisper-model-select');
                 if (!whisperSelect) return;
-
                 const baseUrl = window.location.origin;
                 const transResp = await fetch(baseUrl + '/transcription_models');
                 if (!transResp.ok) throw new Error(`HTTP error! status: ${transResp.status}`);
                 const transData = await transResp.json();
-
                 if (transData.whisper_models && Array.isArray(transData.whisper_models)) {
                     whisperSelect.innerHTML = '';
                     transData.whisper_models.forEach(([value, label]) => {
@@ -882,10 +877,8 @@
             }
         }
 
-        // === Recording ===
-        async function toggleRecording() {
-            if (isRecording) { stopRecording(); } else { await startRecording(); }
-        }
+        // === Recording Functions ===
+        async function toggleRecording() { if (isRecording) { stopRecording(); } else { await startRecording(); } }
 
         async function startRecording() {
             try {
@@ -924,9 +917,7 @@
             seconds = 0; timerDiv.textContent = '00:00';
             timerInterval = setInterval(() => {
                 seconds++;
-                const minutes = Math.floor(seconds / 60);
-                const displaySeconds = seconds % 60;
-                timerDiv.textContent = `${String(minutes).padStart(2, '0')}:${String(displaySeconds).padStart(2, '0')}`;
+                timerDiv.textContent = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
             }, 1000);
         }
 
@@ -952,88 +943,6 @@
             }
         }
 
-        async function refreshBatches() {
-            try {
-                const resp = await fetch('/list_batches');
-                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-                const data = await resp.json();
-                
-                const container = document.getElementById('bulk-batch-list');
-                const transcribeBtn = document.getElementById('transcribe-all-batches-btn');
-                
-                if (data.batches.length === 0) {
-                    container.innerHTML = '<p style="color: #009AA9; font-size: 0.9em; grid-column: 1/-1;">No batches uploaded yet.</p>';
-                    transcribeBtn.disabled = true;
-                    return;
-                }
-                
-                transcribeBtn.disabled = false;
-                container.innerHTML = '';
-                
-                data.batches.forEach(batch => {
-                    const div = document.createElement('div');
-                    div.className = 'pii-tag-item';
-                    const statusIcon = batch.processed ? '✅' : '⏳';
-                    const statusText = batch.processed ? 
-                        `${batch.result_count} files transcribed` : 
-                        `${batch.audio_count} files waiting`;
-                    
-                    div.innerHTML = `
-                        <div style="flex:1;">
-                            <div style="font-weight:600;margin-bottom:4px;">${batch.batch_id}</div>
-                            <div style="font-size:13px;color:#009AA9;">
-                                ${statusIcon} ${statusText}
-                            </div>
-                        </div>
-                    `;
-                    container.appendChild(div);
-                });
-                
-                updateStatus(`${data.batches.length} batch(es) loaded`, false);
-                
-            } catch (error) {
-                console.error('Failed to load batches:', error);
-                updateStatus(`Failed to load batches: ${error.message}`, true);
-            }
-        }
-        
-        async function transcribeAllBatches() {
-            showLoader(true);
-            updateStatus('Transcribing all batches...', false);
-            
-            try {
-                const response = await fetch('/process_all_batches', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' }
-                });
-                
-                const result = await response.json();
-                
-                if (response.ok && result.success) {
-                    updateStatus(
-                        `Transcription complete: ${result.total_success} succeeded, ${result.total_failed} failed`,
-                        result.total_failed === 0
-                    );
-                    refreshBatches();
-                } else {
-                    throw new Error(result.error || "Transcription failed");
-                }
-                
-            } catch (error) {
-                console.error('Batch transcription error:', error);
-                updateStatus(`Batch transcription failed: ${error.message}`, true);
-            } finally {
-                showLoader(false);
-            }
-        }
-        
-        // Event listeners for batch buttons
-        document.getElementById('refresh-batches-btn').addEventListener('click', refreshBatches);
-        document.getElementById('transcribe-all-batches-btn').addEventListener('click', transcribeAllBatches);
-        
-        // Auto-refresh batches on page load
-        refreshBatches();
-                
         // === API Calls ===
         async function transcribe() {
             if (!audioBlob && !uploadedFile) {
@@ -1066,11 +975,6 @@
                     anonymizeBtn.disabled = false;
                     ttsContainer.classList.add('hidden');
                     downloadBertBtn.disabled = true; downloadSpeechBtn.disabled = true;
-                    window.lastTranscriptionData = {
-                        text: result.transcription,
-                        offsets: result.offsets,
-                        audio_name: result.audio_name
-                    };
                 } else {
                     throw new Error(result.error || "Transcription failed.");
                 }
@@ -1129,8 +1033,6 @@
                     ttsContainer.classList.remove('hidden');
                     downloadBertBtn.disabled = false;
                     updateStatus("Anonymization successful!", false);
-                    
-                    // === SCHEDULE SURVEY MODAL (20 seconds) ===
                     scheduleSurveyModal();
                 } else {
                     throw new Error(result.error || result.details || "Anonymization failed.");
@@ -1153,7 +1055,6 @@
                     body: JSON.stringify({ text: text, offSet: offsetData, audioName: audioName })
                 });
                 const result = await response.json();
-
                 if (response.ok && result.success) {
                     audioPlayer.src = result.audio_url;
                     audioPlayer.classList.remove('hidden');
@@ -1177,7 +1078,6 @@
                     body: JSON.stringify({ text: text, lang: transcriptionLanguageSelect.value })
                 });
                 const result = await response.json();
-
                 if (response.ok && result.success) {
                     anonymizedText.value = result.surrogated_text;
                     anonymizedText.dispatchEvent(new Event('input'));
@@ -1203,7 +1103,6 @@
                     body: JSON.stringify({ text: text, lang: transcriptionLanguageSelect.value })
                 });
                 const result = await response.json();
-
                 if (response.ok && result.success) {
                     anonymizedText.value = result.rephrased_text;
                     anonymizedText.dispatchEvent(new Event('input'));
@@ -1239,8 +1138,6 @@
                 }
 
                 const audioBlob = await response.blob();
-                console.log("✅ Received audio blob:", audioBlob.type, audioBlob.size, "bytes");
-
                 if (audioBlob.size < 100) {
                     throw new Error("Generated audio too small - likely an error occurred");
                 }
@@ -1260,30 +1157,6 @@
             }
         }
 
-        async function processBulk() {
-            if (bulkFileInput.files.length === 0) return;
-            showLoader(true);
-            const formData = new FormData();
-            for (let file of bulkFileInput.files) {
-                formData.append('files', file);
-            }
-            try {
-                const response = await fetch('/upload_bulk', {
-                    method: 'POST', body: formData
-                });
-                const result = await response.json();
-
-                if (response.ok && result.success) {
-                    bulkStatus.textContent = `Processed ${result.processed_count} files`;
-                    updateStatus("Bulk upload processed!", false);
-                } else {
-                    throw new Error(result.error || "Bulk upload failed.");
-                }
-            } catch (error) {
-                updateStatus(`Bulk upload failed: ${error.message}`, true);
-            } finally { showLoader(false); }
-        }
-
         // === Event Listeners ===
         recordBtn.addEventListener('click', toggleRecording);
         fileInput.addEventListener('change', handleFileUpload);
@@ -1295,16 +1168,8 @@
         generateSpeechBtn.addEventListener('click', generateSpeech);
         processOrgAudioBtn.addEventListener('click', processOrgAudio);
         anonymizedText.addEventListener('input', () => {
-            const hasText = anonymizedText.value.trim().length > 0;
-            downloadBertBtn.disabled = !hasText;
-            downloadSpeechBtn.disabled = !hasText;
-        });
-        processBulkBtn.addEventListener('click', processBulk);
-        bulkFileInput.addEventListener('change', () => {
-            if (bulkFileInput.files.length > 0) {
-                bulkStatus.textContent = `${bulkFileInput.files.length} file(s) selected`;
-                processBulkBtn.disabled = false;
-            }
+            downloadBertBtn.disabled = !anonymizedText.value.trim().length;
+            downloadSpeechBtn.disabled = !anonymizedText.value.trim().length;
         });
         downloadOriginalBtn.addEventListener('click', () => window.open('/download_text/original/transcription.txt'));
         downloadBertBtn.addEventListener('click', () => window.open('/download_text/bert/anonymized.txt'));
