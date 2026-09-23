@@ -31,6 +31,7 @@ blis>=1.3.0
 click>=8.4.0
 typer>=0.27.0
 torchcrf>=0.7.2
+Faker==40.37.0
 
 # Audio utilities (minimal)
 ffmpeg-python>=0.2.0
