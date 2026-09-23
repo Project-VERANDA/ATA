@@ -361,70 +361,62 @@ ensure_conda_available() {
     if command -v conda &> /dev/null; then
         log_success "Conda already installed and in PATH"
         eval "$(conda shell.bash hook)"
+        conda config --add channels conda-forge
+        conda config --set channel_priority strict
         return 0
     fi
     
-    # Check 2: Does Miniconda exist at default location but isn't initialized?
-    if [ -f "$HOME/miniconda3/bin/conda" ]; then
-        log_info "Miniconda found at $HOME/miniconda3 - initializing..."
-        # Source conda from known location
-        source "$HOME/miniconda3/etc/profile.d/conda.sh"
+    # Check 2: Does Miniforge/Miniconda exist?
+    if [ -f "$HOME/miniforge3/bin/conda" ]; then
+        CONDA_PATH="$HOME/miniforge3"
+    elif [ -f "$HOME/miniconda3/bin/conda" ]; then
+        CONDA_PATH="$HOME/miniconda3"
+    else
+        CONDA_PATH=""
+    fi
+    
+    if [ -n "$CONDA_PATH" ]; then
+        log_info "Conda distribution found at $CONDA_PATH - initializing..."
+        source "$CONDA_PATH/etc/profile.d/conda.sh"
         eval "$(conda shell.bash hook)"
-        export PATH="/root/miniconda3/bin:$PATH"
+        export PATH="$CONDA_PATH/bin:$PATH"
         
         if command -v conda &> /dev/null; then
             log_success "Conda initialized successfully"
+            conda config --add channels conda-forge
+            conda config --set channel_priority strict
             return 0
-        else
-            log_error "Conda initialization failed"
         fi
     fi
     
-    # Check 3: Try other common locations
-    for CONDA_PATH in "/opt/miniconda3" "/usr/local/miniconda3" "$HOME/anaconda3"; do
-        if [ -f "$CONDA_PATH/bin/conda" ]; then
-            log_info "Found conda at $CONDA_PATH - initializing..."
-            source "$CONDA_PATH/etc/profile.d/conda.sh"
-            eval "$(conda shell.bash hook)"
-            export PATH="$CONDA_PATH/bin:$PATH"
-            
-            if command -v conda &> /dev/null; then
-                log_success "Conda initialized from $CONDA_PATH"
-                return 0
-            fi
-        fi
-    done
+    # Check 3: Install Miniforge
+    log_info "Installing Miniforge (conda-forge distribution)..."
     
-    # Check 4: Truly no conda - install fresh
-    log_info "Conda not found. Installing Miniconda..."
+    rm -rf "$HOME/miniforge3"
+    wget -q https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh -O miniforge.sh
     
-    # Remove existing installation if present (to allow clean reinstall)
-    if [ -d "$HOME/miniconda3" ]; then
-        log_warn "Removing existing Miniconda installation..."
-        rm -rf "$HOME/miniconda3"
-    fi
-    
-    wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh
-    
-    if bash miniconda.sh -b -f -p "$HOME/miniconda3"; then
-        rm miniconda.sh
-        source "$HOME/miniconda3/etc/profile.d/conda.sh"
+    if bash miniforge.sh -b -f -p "$HOME/miniforge3"; then
+        rm miniforge.sh
+        source "$HOME/miniforge3/etc/profile.d/conda.sh"
         eval "$(conda shell.bash hook)"
-        export PATH="/root/miniconda3/bin:$PATH"
-        log_success "Miniconda installed and initialized"
+        export PATH="$HOME/miniforge3/bin:$PATH"
+        log_success "Miniforge installed and initialized"
         return 0
     else
-        log_error "Miniconda installation failed"
-        rm -f miniconda.sh
+        log_error "Miniforge installation failed"
+        rm -f miniforge.sh
         return 1
     fi
 }
 
-# Run conda setup
 if ! ensure_conda_available; then
     log_error "Failed to initialize conda"
     exit 1
 fi
+
+# Configure channels before environment creation
+conda config --add channels conda-forge
+conda config --set channel_priority strict
 
 log_info "Creating conda environment '${ENV_NAME}' with Python ${TARGET_PYTHON}..."
 
@@ -439,10 +431,9 @@ else
     conda create -n "$ENV_NAME" python="$TARGET_PYTHON" -c conda-forge -y
 fi
 
-eval "$(conda shell.bash hook)"
 conda activate "$ENV_NAME"
 
-ACTUAL_PYTHON=$(conda run -n "$ENV_NAME" python --version | awk '{print $2}')
+ACTUAL_PYTHON=$(python --version | awk '{print $2}')
 if [[ ! "$ACTUAL_PYTHON" =~ ^3\.12 ]]; then
     log_error "Expected Python 3.12.x, got $ACTUAL_PYTHON"
     exit 1
