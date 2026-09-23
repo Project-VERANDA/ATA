@@ -361,6 +361,12 @@ ensure_conda_available() {
     if command -v conda &> /dev/null; then
         log_success "Conda already installed and in PATH"
         eval "$(conda shell.bash hook)"
+        
+        # Remove Anaconda channels if they exist (migration to conda-forge)
+        conda config --remove channels https://repo.anaconda.com/pkgs/main 2>/dev/null || true
+        conda config --remove channels https://repo.anaconda.com/pkgs/r 2>/dev/null || true
+        
+        # Ensure conda-forge is primary
         conda config --add channels conda-forge
         conda config --set channel_priority strict
         return 0
@@ -383,6 +389,8 @@ ensure_conda_available() {
         
         if command -v conda &> /dev/null; then
             log_success "Conda initialized successfully"
+            conda config --remove channels https://repo.anaconda.com/pkgs/main 2>/dev/null || true
+            conda config --remove channels https://repo.anaconda.com/pkgs/r 2>/dev/null || true
             conda config --add channels conda-forge
             conda config --set channel_priority strict
             return 0
@@ -413,10 +421,6 @@ if ! ensure_conda_available; then
     log_error "Failed to initialize conda"
     exit 1
 fi
-
-# Configure channels before environment creation
-conda config --add channels conda-forge
-conda config --set channel_priority strict
 
 log_info "Creating conda environment '${ENV_NAME}' with Python ${TARGET_PYTHON}..."
 
