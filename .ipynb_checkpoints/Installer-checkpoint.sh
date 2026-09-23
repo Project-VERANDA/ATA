@@ -56,23 +56,39 @@ create_version_backup() {
     local timestamp=$(date +%Y%m%d_%H%M%S)
     local backup_dir="$CURRENT_DIR/backups/$timestamp"
     
-    mkdir -p "$backup_dir"
+    # Create backups parent directory if needed
+    if [ ! -d "$CURRENT_DIR/backups" ]; then
+        log_info "Creating backups directory..."
+        mkdir -p "$CURRENT_DIR/backups" || {
+            log_warn "Cannot create backups directory - disabling backup feature"
+            return 0
+        }
+        # Fix permissions
+        chmod 755 "$CURRENT_DIR/backups" 2>/dev/null || true
+    fi
+    
+    # Create timestamped backup subdirectory
+    mkdir -p "$backup_dir" || {
+        log_warn "Cannot create backup directory at $backup_dir - disabling backup feature"
+        return 0
+    }
     
     log_info "Creating version backup at $backup_dir..."
     
-    # Backup environment state
+    # Backup environment state (with fallback)
     if conda env list | grep -q "^${ENV_NAME} "; then
-        conda env export -n "$ENV_NAME" > "$backup_dir/conda_env.yaml" 2>/dev/null || true
+        conda env export -n "$ENV_NAME" > "$backup_dir/conda_env.yaml" 2>/dev/null || \
+            log_warn "Could not export conda environment"
     fi
     
     # Backup .env configuration
-    [ -f ".env" ] && cp .env "$backup_dir/.env.backup"
+    [ -f ".env" ] && cp .env "$backup_dir/.env.backup" 2>/dev/null || true
     
     # Backup requirements.lock reference
-    [ -f "requirements-lock.txt" ] && cp requirements-lock.txt "$backup_dir/requirements-lock.txt.ref"
+    [ -f "requirements-lock.txt" ] && cp requirements-lock.txt "$backup_dir/requirements-lock.txt.ref" 2>/dev/null || true
     
     # Create metadata file
-    cat > "$backup_dir/metadata.json" << EOF
+    cat > "$backup_dir/metadata.json" << EOF || log_warn "Could not create metadata.json"
 {
     "backup_date": "$(date -Iseconds)",
     "script_version": "$SCRIPT_VERSION",
@@ -82,7 +98,12 @@ create_version_backup() {
 }
 EOF
     
-    log_success "Backup created: $(du -sh "$backup_dir" | awk '{print $1}')"
+    if [ -d "$backup_dir" ]; then
+        local size=$(du -sh "$backup_dir" 2>/dev/null | awk '{print $1}')
+        log_success "Backup created: ${size:-N/A}"
+    else
+        log_warn "Backup directory empty or inaccessible"
+    fi
 }
 
 check_remote_updates() {
@@ -155,6 +176,7 @@ Options:
   --whisper-models LIST   Comma-separated list (tiny,base,small,medium,large,large-turbo)
   --auto-login            Auto-authenticate with HUGGINGFACE_TOKEN
   -q, --quiet             Minimal output mode
+  --force-refresh         Reinstall all packages from scratch
   --sync-only             Pull latest repo updates (no reinstall)
   --rollback              Restore from most recent backup
 
@@ -171,6 +193,9 @@ EOF
 # ============================================================================
 # ARGUMENT PARSING
 # ============================================================================
+
+# Initialize WEB_MODE_CHOICE early to prevent undefined variable errors
+WEB_MODE_CHOICE="both"
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -321,7 +346,12 @@ fi
 # Handle rollback
 if [ "$ROLLBACK" = true ]; then
     log_section "Rollback Mode"
-    local_backups=(backups/*/metadata.json 2>/dev/null)
+    
+    # Fixed: Enable nullglob to handle empty directory gracefully
+    shopt -s nullglob
+    local_backups=(backups/*/metadata.json)
+    shopt -u nullglob
+    
     if [ ${#local_backups[@]} -eq 0 ]; then
         log_error "No backups found in backups/"
         exit 1
@@ -347,15 +377,70 @@ detect_package_manager
 # CONDA ENVIRONMENT SETUP
 # ============================================================================
 
-if ! command -v conda &> /dev/null; then
-    log_info "Conda not found. Installing Miniconda..."
-    wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh
-    bash miniconda.sh -b -p "$HOME/miniconda3"
-    rm miniconda.sh
-    eval "$("$HOME/miniconda3/bin/conda" shell.bash hook)"
-else
-    log_success "Conda already installed"
-    eval "$(conda shell.bash hook)"
+ensure_conda_available() {
+    # Check 1: Is conda already in PATH?
+    if command -v conda &> /dev/null; then
+        log_success "Conda already installed and in PATH"
+        eval "$(conda shell.bash hook)"
+        
+        # Remove Anaconda channels if they exist (migration to conda-forge)
+        conda config --remove channels https://repo.anaconda.com/pkgs/main 2>/dev/null || true
+        conda config --remove channels https://repo.anaconda.com/pkgs/r 2>/dev/null || true
+        
+        # Ensure conda-forge is primary
+        conda config --add channels conda-forge
+        conda config --set channel_priority strict
+        return 0
+    fi
+    
+    # Check 2: Does Miniforge/Miniconda exist?
+    if [ -f "$HOME/miniforge3/bin/conda" ]; then
+        CONDA_PATH="$HOME/miniforge3"
+    elif [ -f "$HOME/miniconda3/bin/conda" ]; then
+        CONDA_PATH="$HOME/miniconda3"
+    else
+        CONDA_PATH=""
+    fi
+    
+    if [ -n "$CONDA_PATH" ]; then
+        log_info "Conda distribution found at $CONDA_PATH - initializing..."
+        source "$CONDA_PATH/etc/profile.d/conda.sh"
+        eval "$(conda shell.bash hook)"
+        export PATH="$CONDA_PATH/bin:$PATH"
+        
+        if command -v conda &> /dev/null; then
+            log_success "Conda initialized successfully"
+            conda config --remove channels https://repo.anaconda.com/pkgs/main 2>/dev/null || true
+            conda config --remove channels https://repo.anaconda.com/pkgs/r 2>/dev/null || true
+            conda config --add channels conda-forge
+            conda config --set channel_priority strict
+            return 0
+        fi
+    fi
+    
+    # Check 3: Install Miniforge
+    log_info "Installing Miniforge (conda-forge distribution)..."
+    
+    rm -rf "$HOME/miniforge3"
+    wget -q https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh -O miniforge.sh
+    
+    if bash miniforge.sh -b -f -p "$HOME/miniforge3"; then
+        rm miniforge.sh
+        source "$HOME/miniforge3/etc/profile.d/conda.sh"
+        eval "$(conda shell.bash hook)"
+        export PATH="$HOME/miniforge3/bin:$PATH"
+        log_success "Miniforge installed and initialized"
+        return 0
+    else
+        log_error "Miniforge installation failed"
+        rm -f miniforge.sh
+        return 1
+    fi
+}
+
+if ! ensure_conda_available; then
+    log_error "Failed to initialize conda"
+    exit 1
 fi
 
 log_info "Creating conda environment '${ENV_NAME}' with Python ${TARGET_PYTHON}..."
@@ -371,10 +456,9 @@ else
     conda create -n "$ENV_NAME" python="$TARGET_PYTHON" -c conda-forge -y
 fi
 
-eval "$(conda shell.bash hook)"
 conda activate "$ENV_NAME"
 
-ACTUAL_PYTHON=$(conda run -n "$ENV_NAME" python --version | awk '{print $2}')
+ACTUAL_PYTHON=$(python --version | awk '{print $2}')
 if [[ ! "$ACTUAL_PYTHON" =~ ^3\.12 ]]; then
     log_error "Expected Python 3.12.x, got $ACTUAL_PYTHON"
     exit 1
@@ -412,6 +496,9 @@ pip install --no-cache-dir -r "$REQUIREMENTS_SRC" -q
 if [ "$WEB_MODE_CHOICE" = "flask" ] || [ "$WEB_MODE_CHOICE" = "both" ]; then
     log_info "Installing web interface dependencies from $WEB_REQUIREMENTS_SRC..."
     if [ -f "$WEB_REQUIREMENTS_SRC" ]; then
+        # Note: requirements-web.txt no longer includes '-r requirements.txt'
+        # So we install both separately to avoid missing core deps
+        pip install --no-cache-dir -r "$REQUIREMENTS_SRC" -q  # Ensure core deps are present
         pip install --no-cache-dir -r "$WEB_REQUIREMENTS_SRC" -q
         log_success "Web dependencies installed"
     else
@@ -449,7 +536,6 @@ fi
 log_section "Web Interface Configuration"
 
 PHASE_OUT_NOTE="NOTE: Flask is being phased out in favor of React"
-WEB_MODE_CHOICE="both"
 
 if [ "$SKIP_WEB" = true ]; then
     log_info "Skipping all web interfaces (--skip-web)"
@@ -553,7 +639,7 @@ else
         elif [ "$ANSWER_YES" = true ]; then
             WHISPER_MODELS_INPUT="large"
         else
-            read -p "WhisperX models to download (comma-separated): " WHISPER_MODELS_INPUT
+            read -p "WhisperX models to download (tiny, small, base, medium, large, large-v3-turbo): " WHISPER_MODELS_INPUT
             WHISPER_MODELS_INPUT="${WHISPER_MODELS_INPUT//,/ }"
         fi
         

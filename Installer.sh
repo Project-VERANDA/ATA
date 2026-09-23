@@ -56,23 +56,39 @@ create_version_backup() {
     local timestamp=$(date +%Y%m%d_%H%M%S)
     local backup_dir="$CURRENT_DIR/backups/$timestamp"
     
-    mkdir -p "$backup_dir"
+    # Create backups parent directory if needed
+    if [ ! -d "$CURRENT_DIR/backups" ]; then
+        log_info "Creating backups directory..."
+        mkdir -p "$CURRENT_DIR/backups" || {
+            log_warn "Cannot create backups directory - disabling backup feature"
+            return 0
+        }
+        # Fix permissions
+        chmod 755 "$CURRENT_DIR/backups" 2>/dev/null || true
+    fi
+    
+    # Create timestamped backup subdirectory
+    mkdir -p "$backup_dir" || {
+        log_warn "Cannot create backup directory at $backup_dir - disabling backup feature"
+        return 0
+    }
     
     log_info "Creating version backup at $backup_dir..."
     
-    # Backup environment state
+    # Backup environment state (with fallback)
     if conda env list | grep -q "^${ENV_NAME} "; then
-        conda env export -n "$ENV_NAME" > "$backup_dir/conda_env.yaml" 2>/dev/null || true
+        conda env export -n "$ENV_NAME" > "$backup_dir/conda_env.yaml" 2>/dev/null || \
+            log_warn "Could not export conda environment"
     fi
     
     # Backup .env configuration
-    [ -f ".env" ] && cp .env "$backup_dir/.env.backup"
+    [ -f ".env" ] && cp .env "$backup_dir/.env.backup" 2>/dev/null || true
     
     # Backup requirements.lock reference
-    [ -f "requirements-lock.txt" ] && cp requirements-lock.txt "$backup_dir/requirements-lock.txt.ref"
+    [ -f "requirements-lock.txt" ] && cp requirements-lock.txt "$backup_dir/requirements-lock.txt.ref" 2>/dev/null || true
     
     # Create metadata file
-    cat > "$backup_dir/metadata.json" << EOF
+    cat > "$backup_dir/metadata.json" << EOF || log_warn "Could not create metadata.json"
 {
     "backup_date": "$(date -Iseconds)",
     "script_version": "$SCRIPT_VERSION",
@@ -82,7 +98,12 @@ create_version_backup() {
 }
 EOF
     
-    log_success "Backup created: $(du -sh "$backup_dir" | awk '{print $1}')"
+    if [ -d "$backup_dir" ]; then
+        local size=$(du -sh "$backup_dir" 2>/dev/null | awk '{print $1}')
+        log_success "Backup created: ${size:-N/A}"
+    else
+        log_warn "Backup directory empty or inaccessible"
+    fi
 }
 
 check_remote_updates() {
@@ -618,7 +639,7 @@ else
         elif [ "$ANSWER_YES" = true ]; then
             WHISPER_MODELS_INPUT="large"
         else
-            read -p "WhisperX models to download (comma-separated): " WHISPER_MODELS_INPUT
+            read -p "WhisperX models to download (tiny, small, base, medium, large, large-v3-turbo): " WHISPER_MODELS_INPUT
             WHISPER_MODELS_INPUT="${WHISPER_MODELS_INPUT//,/ }"
         fi
         
