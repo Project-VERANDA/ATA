@@ -356,15 +356,74 @@ detect_package_manager
 # CONDA ENVIRONMENT SETUP
 # ============================================================================
 
-if ! command -v conda &> /dev/null; then
+ensure_conda_available() {
+    # Check 1: Is conda already in PATH?
+    if command -v conda &> /dev/null; then
+        log_success "Conda already installed and in PATH"
+        eval "$(conda shell.bash hook)"
+        return 0
+    fi
+    
+    # Check 2: Does Miniconda exist at default location but isn't initialized?
+    if [ -f "$HOME/miniconda3/bin/conda" ]; then
+        log_info "Miniconda found at $HOME/miniconda3 - initializing..."
+        # Source conda from known location
+        source "$HOME/miniconda3/etc/profile.d/conda.sh"
+        eval "$(conda shell.bash hook)"
+        export PATH="/root/miniconda3/bin:$PATH"
+        
+        if command -v conda &> /dev/null; then
+            log_success "Conda initialized successfully"
+            return 0
+        else
+            log_error "Conda initialization failed"
+        fi
+    fi
+    
+    # Check 3: Try other common locations
+    for CONDA_PATH in "/opt/miniconda3" "/usr/local/miniconda3" "$HOME/anaconda3"; do
+        if [ -f "$CONDA_PATH/bin/conda" ]; then
+            log_info "Found conda at $CONDA_PATH - initializing..."
+            source "$CONDA_PATH/etc/profile.d/conda.sh"
+            eval "$(conda shell.bash hook)"
+            export PATH="$CONDA_PATH/bin:$PATH"
+            
+            if command -v conda &> /dev/null; then
+                log_success "Conda initialized from $CONDA_PATH"
+                return 0
+            fi
+        fi
+    done
+    
+    # Check 4: Truly no conda - install fresh
     log_info "Conda not found. Installing Miniconda..."
+    
+    # Remove existing installation if present (to allow clean reinstall)
+    if [ -d "$HOME/miniconda3" ]; then
+        log_warn "Removing existing Miniconda installation..."
+        rm -rf "$HOME/miniconda3"
+    fi
+    
     wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh
-    bash miniconda.sh -b -p "$HOME/miniconda3"
-    rm miniconda.sh
-    eval "$("$HOME/miniconda3/bin/conda" shell.bash hook)"
-else
-    log_success "Conda already installed"
-    eval "$(conda shell.bash hook)"
+    
+    if bash miniconda.sh -b -f -p "$HOME/miniconda3"; then
+        rm miniconda.sh
+        source "$HOME/miniconda3/etc/profile.d/conda.sh"
+        eval "$(conda shell.bash hook)"
+        export PATH="/root/miniconda3/bin:$PATH"
+        log_success "Miniconda installed and initialized"
+        return 0
+    else
+        log_error "Miniconda installation failed"
+        rm -f miniconda.sh
+        return 1
+    fi
+}
+
+# Run conda setup
+if ! ensure_conda_available; then
+    log_error "Failed to initialize conda"
+    exit 1
 fi
 
 log_info "Creating conda environment '${ENV_NAME}' with Python ${TARGET_PYTHON}..."
