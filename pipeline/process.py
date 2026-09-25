@@ -2165,7 +2165,7 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
                     text_content,
                     use_surrogates=args.enable_surrogates,
                     surrogate_seed=args.surrogate_seed,
-                    surrogate_locales=args.surrogate_locale
+                    surrogate_locales=args.surrogate_language
                 )
                 
                 if not success or not anonymized_text:
