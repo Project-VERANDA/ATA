@@ -1590,7 +1590,7 @@ class AnonymizationEngine:
             logger.error(traceback.format_exc())
             self.method = None
 
-    def anonymize(self, text):
+    def anonymize(self, text, use_surrogates=False, surrogate_seed=None, surrogate_locales='de_DE,en_US'):
         """
         Anonymizes text using simple sentence-level splitting.
         Returns:
