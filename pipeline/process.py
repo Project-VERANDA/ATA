@@ -1626,7 +1626,20 @@ class AnonymizationEngine:
         reconstructed_text = normalize_punctuation(reconstructed_text)
         reconstructed_text = merge_adjacent_tags(reconstructed_text)
 
-        return reconstructed_text, True, "Success", entity_map
+        surrogate_registry = {}
+        if use_surrogates:
+            reconstructed_text, surrogate_registry = apply_surrogate_substitution(
+                reconstructed_text,
+                entity_map,
+                use_surrogates=True,
+                seed=surrogate_seed,
+                locales=surrogate_locales
+            )
+
+        if use_surrogates and surrogate_registry:
+            return reconstructed_text, True, "Success", entity_map, surrogate_registry
+        else:
+            return reconstructed_text, True, "Success", entity_map, {}
 
 # --- LLM Rewrite Features ---
 
