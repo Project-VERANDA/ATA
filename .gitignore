@@ -48,6 +48,9 @@ ssl_certs/server.key
 /etc/letsencrypt/**
 config.sh
 
+# Backups
+backups/
+
 # Unrelated files
 *.csv
 TextAnonym.py
@@ -81,7 +84,6 @@ secrets/*.key
 secrets/*.txt
 secrets/*.crt
 !secrets/setup-secrets.sh
-
 *.pem
 *.key
 *.p12
