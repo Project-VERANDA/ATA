@@ -3,8 +3,7 @@
 # ============================================================================
 # Install this ON TOP OF requirements.txt when web UI is needed.
 # Includes Flask, database, queue, security, and TTS backends.
-
--r requirements.txt  # Include all core ML dependencies
+# Docker will handle both files separately. CLI installer can use: pip install -r requirements-web.txt
 
 # Flask & Web Server
 Flask==3.0.3
@@ -18,7 +17,7 @@ cryptography>=44.0.0
 PyJWT>=2.9.0
 Authlib>=1.4.1
 
-# TTS (Piper backend)
+# TTS (Piper backend - pip installable)
 piper-tts>=1.4.2
 
 # Database (job tracking)

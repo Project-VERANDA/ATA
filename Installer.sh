@@ -56,22 +56,14 @@ create_version_backup() {
     local timestamp=$(date +%Y%m%d_%H%M%S)
     local backup_dir="$CURRENT_DIR/backups/$timestamp"
     
-    # Create backups parent directory if needed
-    if [ ! -d "$CURRENT_DIR/backups" ]; then
-        log_info "Creating backups directory..."
-        mkdir -p "$CURRENT_DIR/backups" || {
-            log_warn "Cannot create backups directory - disabling backup feature"
-            return 0
-        }
-        # Fix permissions
-        chmod 755 "$CURRENT_DIR/backups" 2>/dev/null || true
-    fi
-    
-    # Create timestamped backup subdirectory
-    mkdir -p "$backup_dir" || {
+    # Create backup directory (creates parent if needed too)
+    if ! mkdir -p "$backup_dir" 2>/dev/null; then
         log_warn "Cannot create backup directory at $backup_dir - disabling backup feature"
         return 0
-    }
+    fi
+    
+    # Fix permissions on parent directory
+    chmod 755 "$CURRENT_DIR/backups" 2>/dev/null || true
     
     log_info "Creating version backup at $backup_dir..."
     
