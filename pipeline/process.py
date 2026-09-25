@@ -865,8 +865,6 @@ def process_audios(enable_diarization=True, lang_code=None, file_list=None, args
     
     if not enable_diarization:
         logger.info("⚠️  Speaker diarization DISABLED. Using generic speaker labels.")
-    else:
-        logger.info("✅ Speaker diarization ENABLED.")
 
     try:
         device = "cuda" if torch.cuda.is_available() else "cpu"
