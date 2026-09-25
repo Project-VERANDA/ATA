@@ -2299,9 +2299,9 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
                         logger.warning(f"LLM rewrite failed for {base_name}: {status}")
                         llm_failed_count += 1
 
-        if llm_start:  # Only calculate if timing was set
-            llm_duration = time.time() - llm_start
-            logger.info(f"  LLM Rewrite took: {llm_duration:.2f}s")
+            if llm_start:  # Only calculate if timing was set
+                llm_duration = time.time() - llm_start
+                logger.info(f"  LLM Rewrite took: {llm_duration:.2f}s")
 
         except Exception as e:
             logger.error(f"Error processing file {file.name}: {e}")
