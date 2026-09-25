@@ -850,6 +850,7 @@ def process_videos(file_list=None):
 
 def process_audios(enable_diarization=True, lang_code=None, file_list=None, args=None):
     """Process audio files: transcribe and optionally diarize."""
+    file_start = time.time()
     force_language = lang_code
     
     whisper_code = None
@@ -1035,6 +1036,11 @@ def process_audios(enable_diarization=True, lang_code=None, file_list=None, args
 
     cleanup_gpu_resources()
     logger.info("Stream processing finished.")
+    except Exception as e:
+        logger.error(f"❌ FAILED: {input_file.name} - {e}")
+    finally:
+        file_duration = time.time() - file_start
+        logger.info(f"   Duration: {file_duration:.2f}s")
     return len(files_to_process)
     
 # --- Global model cache ---
@@ -2186,6 +2192,7 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
                 continue
 
             if not skip_bert:
+                anon_start = time.time()
                 anonymized_text, success, msg, entity_map, surrogate_registry = anonymizer.anonymize(
                     text_content,
                     use_surrogates=args.enable_surrogates,
@@ -2236,6 +2243,9 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
                 logger.info(f"BERT Anonymized transcript saved to: {output_path}")
                 processed_count += 1
                 
+                anon_duration = time.time() - anon_start
+                logger.info(f"  BERT Anonymization took: {anon_duration:.2f}s")
+
                 text_for_llm = anonymized_text
             else:
                 text_for_llm = text_content
@@ -2278,6 +2288,7 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
 
                 else:
                     logger.info(f"Running standard LLM rewrite on {base_name} with model {target_llm_model}...")
+                    llm_start = time.time()
                     llm_result, status = call_llm_rewriter(text_for_llm, target_llm_model)
                     
                     if llm_result:
@@ -2298,12 +2309,15 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
                         logger.warning(f"LLM rewrite failed for {base_name}: {status}")
                         llm_failed_count += 1
 
+        llm_duration = time.time() - llm_start
+        logger.info(f"  LLM Rewrite took: {llm_duration:.2f}s")
+
         except Exception as e:
             logger.error(f"Error processing file {file.name}: {e}")
             import traceback
             logger.error(traceback.format_exc())
             failed_count += 1
-
+    
     logger.info(f"Anonymization phase complete.")
     if not skip_bert:
         logger.info(f"  BERT Processed: {processed_count}, Failed: {failed_count}")
@@ -2378,6 +2392,9 @@ def anonymize(self, text, use_surrogates=False, surrogate_seed=None, surrogate_l
 # --- Main Execution ---
 
 if __name__ == "__main__":
+    
+    pipeline_start = time.time()
+    
     parser = argparse.ArgumentParser(
         description="Audio Anonymization Pipeline with Granular Step Control",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -2533,6 +2550,8 @@ Examples:
             logger.warning("⚠️  LLM rewrite requested but BERT anonymization is disabled...")
     
     logger.info("Pipeline finished.")
+    pipeline_duration = time.time() - pipeline_start
+    logger.info(f"Pipeline total duration: {pipeline_duration:.2f}s ({pipeline_duration/60:.1f} minutes)")
     session_logger.finish()
 
 
