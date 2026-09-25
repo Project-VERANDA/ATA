@@ -1022,25 +1022,23 @@ def process_audios(enable_diarization=True, lang_code=None, file_list=None, args
                         f.write(f"{segment.get('speaker', 'Unknown')}: {text}\n")
             
             logger.info(f"✅ COMPLETED: {input_file.name} -> {transcript_file.name}")
-
+            
         except Exception as e:
             logger.error(f"❌ FAILED: {input_file.name} - {e}")
             import traceback
             logger.error(traceback.format_exc())
         
         finally:
+            logger.info(f"✅ COMPLETED: {input_file.name} -> {transcript_file.name}")
+            logger.info(f"   Duration: {time.time() - file_start:.2f}s")
             gc.collect()
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
             time.sleep(0.1)
-
+    
+    # AFTER the loop completes:
     cleanup_gpu_resources()
     logger.info("Stream processing finished.")
-    except Exception as e:
-        logger.error(f"❌ FAILED: {input_file.name} - {e}")
-    finally:
-        file_duration = time.time() - file_start
-        logger.info(f"   Duration: {file_duration:.2f}s")
     return len(files_to_process)
     
 # --- Global model cache ---
@@ -1640,13 +1638,13 @@ class AnonymizationEngine:
                 locales=surrogate_locales
             )
 
+        logger.info(f"  Entities detected: {len(entity_map)}")
+        logger.info(f"  Tags found: {', '.join(entity_map.keys())}")
+
         if use_surrogates and surrogate_registry:
             return reconstructed_text, True, "Success", entity_map, surrogate_registry
         else:
             return reconstructed_text, True, "Success", entity_map, {}
-        
-        logger.info(f"  Entities detected: {len(entity_map)}")
-        logger.info(f"  Tags found: {', '.join(entity_map.keys())}")
 
 # --- LLM Rewrite Features ---
 
@@ -2220,15 +2218,6 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
                     with open(surrogate_path, "w", encoding="utf-8") as f:
                         json.dump(surrogate_registry, f, indent=2, ensure_ascii=False)
                     logger.info(f"Surrogate registry saved: {surrogate_path}")
-                
-                # Optionally save entity map for audit/debugging
-                entity_map_path = ANONYM_FOLDER / f"{base_name}_anon_entitymap.json"
-                if len(json.dumps(entity_map)) < 1_000_000:  # 1MB limit
-                    with open(entity_map_path, "w") as f:
-                        json.dump(entity_map, f)
-                else:
-                    logger.warning(f"Entity map too large (>1MB), skipping save")
-                logger.debug(f"Entity map saved: {entity_map_path}")
 
                 output_filename = f"{base_name}_anon.txt"
                 output_path = ANONYM_FOLDER / output_filename
@@ -2251,7 +2240,9 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
                 text_for_llm = text_content
                 logger.info(f"Using existing anonymized content from {file.name} for LLM step.")
 
+            llm_start = None 
             if use_llm:
+                llm_start = time.time()
                 if adversarial_mode:
                     logger.info(f"Running ADVERSARIAL LOOP (3 iterations) on {base_name} with model {target_llm_model}...")
                     
@@ -2288,7 +2279,6 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
 
                 else:
                     logger.info(f"Running standard LLM rewrite on {base_name} with model {target_llm_model}...")
-                    llm_start = time.time()
                     llm_result, status = call_llm_rewriter(text_for_llm, target_llm_model)
                     
                     if llm_result:
@@ -2309,8 +2299,9 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
                         logger.warning(f"LLM rewrite failed for {base_name}: {status}")
                         llm_failed_count += 1
 
-        llm_duration = time.time() - llm_start
-        logger.info(f"  LLM Rewrite took: {llm_duration:.2f}s")
+        if llm_start:  # Only calculate if timing was set
+            llm_duration = time.time() - llm_start
+            logger.info(f"  LLM Rewrite took: {llm_duration:.2f}s")
 
         except Exception as e:
             logger.error(f"Error processing file {file.name}: {e}")
@@ -2332,62 +2323,6 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
         "llm_success": llm_processed_count,
         "llm_failed": llm_failed_count
     }
-
-def anonymize(self, text, use_surrogates=False, surrogate_seed=None, surrogate_locales='de_DE,en_US'):
-    """
-    Anonymizes text using simple sentence-level splitting.
-    
-    Args:
-        text: Input dialogue text
-        use_surrogates: If True, applies Faker substitution to placeholders
-        surrogate_seed: Optional seed for reproducible surrogates
-        surrogate_locales: Faker locale(s) for generation
-    
-    Returns:
-        tuple: (anonymized_text, success, message, entity_map, surrogate_registry)
-               surrogate_registry only populated when use_surrogates=True
-    """
-    if not self.method or not self.model or not self.tokenizer:
-        return None, False, "Anonymization model not loaded.", {}, {}
-
-    sentences_data = split_dialogue_into_sentences(text)
-    if not sentences_data:
-        return text, False, "No sentences detected.", {}, {}
-
-    sentences_tokens = [tokens for _, tokens in sentences_data]
-    
-    try:
-        predictions = predict_sentences_simple(
-            sentences_tokens=sentences_tokens,
-            model=self.model,
-            tokenizer=self.tokenizer,
-            id_to_tag_map=self.label_mapping,
-            device=self.device
-        )
-    except Exception as e:
-        logger.error(f"Inference failed: {e}")
-        return text, False, str(e), {}, {}
-
-    # Returns (text, entity_map) tuple
-    reconstructed_text, entity_map = reconstruct_text_from_predictions(
-        sentences_data, predictions, {}
-    )
-    reconstructed_text = normalize_punctuation(reconstructed_text)
-    reconstructed_text = merge_adjacent_tags(reconstructed_text)
-    
-    # Apply surrogate substitution if requested
-    surrogate_registry = {}
-    if use_surrogates:
-        reconstructed_text, surrogate_registry = apply_surrogate_substitution(
-            reconstructed_text,
-            entity_map,
-            use_surrogates=True,
-            seed=surrogate_seed,
-            locales=surrogate_locales
-        )
-
-    # Return 5 values when surrogates used, maintain backward compat
-    return reconstructed_text, True, "Success", entity_map, surrogate_registry
 
 # --- Main Execution ---
 
