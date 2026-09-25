@@ -1494,7 +1494,10 @@ class AnonymizationEngine:
 
         try:
             from transformers import AutoModel, AutoTokenizer
-            from torchcrf import CRF
+            try:
+                from torchcrf import CRF
+                except ImportError:
+                    raise ImportError("torchcrf module not found")
             import torch.nn as nn
             import json
             
