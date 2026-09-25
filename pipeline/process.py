@@ -850,8 +850,6 @@ def process_videos(file_list=None):
 
 def process_audios(enable_diarization=True, lang_code=None, file_list=None, args=None):
     """Process audio files: transcribe and optionally diarize."""
-    check_gpu_resources() 
-
     force_language = lang_code
     
     whisper_code = None
@@ -1640,6 +1638,9 @@ class AnonymizationEngine:
             return reconstructed_text, True, "Success", entity_map, surrogate_registry
         else:
             return reconstructed_text, True, "Success", entity_map, {}
+        
+        logger.info(f"  Entities detected: {len(entity_map)}")
+        logger.info(f"  Tags found: {', '.join(entity_map.keys())}")
 
 # --- LLM Rewrite Features ---
 
@@ -1767,10 +1768,21 @@ def call_llm_rewriter(text, model_id, system_prompt=None):
         return rewritten_text, "Success"
 
     except Exception as e:
-        logger.error(f"LLM Rewriter failed for model {final_model}: {e}")
+        logger.error(f"LLM Rewriter failed for model {final_model}: {type(e).__name__}")
+        if hasattr(e, 'response'):
+            logger.error(f"  HTTP status: {e.response.status_code}")
+            logger.error(f"  Endpoint: {CHAT_AI_ENDPOINT}")
+            logger.error(f"  Response: {e.response.text[:200]}")
+        elif hasattr(e, 'request'):
+            logger.error(f"  Endpoint: {CHAT_AI_ENDPOINT}")
+            logger.error(f"  Request error: {e.request}")
+        else:
+            logger.error(f"  Endpoint: {CHAT_AI_ENDPOINT}")
+            logger.error(f"  Error details: {str(e)[:200]}")
         return None, str(e)
 
-# --- ADVERSARIAL ANONYMIZATION (Restored Feature) ---
+
+# --- ADVERSARIAL ANONYMIZATION ---
 
 def run_adversarial_anonymization(text, model_id, iterations=3):
     """
@@ -2185,6 +2197,9 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
                     logger.warning(f"BERT Anonymization failed for {base_name}: {msg}")
                     failed_count += 1
                     continue
+                
+                logger.info(f"  Entities detected: {len(entity_map)}")
+                logger.info(f"  Tags found: {', '.join(entity_map.keys()) if entity_map else 'None'}")
                 
                 # Save entity map for audit/debugging
                 entity_map_path = ANONYM_FOLDER / f"{base_name}_anon_entitymap.json"
