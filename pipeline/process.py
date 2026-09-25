@@ -33,11 +33,13 @@ except ImportError:
     logger.warning("Faker not installed. Surrogate substitution will be disabled.")
 
 # =============================================================================
-# CRITICAL: cuDNN DISABLE FIX
+# cuDNN DISABLE FIX
 # =============================================================================
 # This MUST run BEFORE any whisperx/pyannote imports that trigger cuDNN init
 # =============================================================================
 import torch
+if args.verbose:
+    warnings.filterwarnings("ignore", category=UserWarning, module="pyannote")
 
 # Disable cuDNN to avoid CUDNN_STATUS_NOT_INITIALIZED with WhisperX + Pyannote
 torch.backends.cudnn.enabled = True
@@ -1019,8 +1021,6 @@ def process_audios(enable_diarization=True, lang_code=None, file_list=None, args
                     if text:
                         f.write(f"{segment.get('speaker', 'Unknown')}: {text}\n")
             
-            logger.info(f"✅ COMPLETED: {input_file.name} -> {transcript_file.name}")
-            
         except Exception as e:
             logger.error(f"❌ FAILED: {input_file.name} - {e}")
             import traceback
@@ -1635,9 +1635,6 @@ class AnonymizationEngine:
                 seed=surrogate_seed,
                 locales=surrogate_locales
             )
-
-        logger.info(f"  Entities detected: {len(entity_map)}")
-        logger.info(f"  Tags found: {', '.join(entity_map.keys())}")
 
         if use_surrogates and surrogate_registry:
             return reconstructed_text, True, "Success", entity_map, surrogate_registry
@@ -2485,6 +2482,8 @@ Examples:
     logger.info("Pipeline finished.")
     pipeline_duration = time.time() - pipeline_start
     logger.info(f"Pipeline total duration: {pipeline_duration:.2f}s ({pipeline_duration/60:.1f} minutes)")
+    file_size = os.path.getsize(transcript_file) / 1024
+    logger.info(f"   Output size: {file_size:.1f} KB")
     session_logger.finish()
 
 
