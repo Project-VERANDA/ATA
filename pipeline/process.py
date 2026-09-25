@@ -1486,6 +1486,22 @@ class AnonymizationEngine:
 
     def _load_model(self):
         """Loads the multilingual_DialogPII_NER model with proper CRF support."""
+        
+        # Validate required modules early
+        required_modules = {'transformers': 'AutoModel, AutoTokenizer', 'torchcrf': 'CRF'}
+
+        for module, feature in required_modules.items():
+            try:
+                __import__(module)
+            except ImportError:
+                print(f"ERROR: {module} module not found.")
+                print(f"To install: pip install {'pytorch-crf' if module == 'torchcrf' else module}")
+                sys.exit(1)
+
+        # Now import safely
+        from transformers import AutoModel, AutoTokenizer
+        from torchcrf import CRF
+
         if not self.model_path.exists():
             logger.error(f"Model path not found: {self.model_path}")
             logger.error(f"Available folders in MODEL_FOLDER: {list(MODEL_FOLDER.iterdir()) if MODEL_FOLDER.exists() else 'Folder missing'}")
@@ -1493,11 +1509,6 @@ class AnonymizationEngine:
             return
 
         try:
-            from transformers import AutoModel, AutoTokenizer
-            try:
-                from torchcrf import CRF
-                except ImportError:
-                    raise ImportError("torchcrf module not found")
             import torch.nn as nn
             import json
             
