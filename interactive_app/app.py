@@ -124,20 +124,6 @@ except ImportError as e:
     logging.critical(f"Failed to import tts_engine: {e}")
     sys.exit(1)
 
-# Import Anonymization engine
-global_anonymizer = None
-try:
-    from process import AnonymizationEngine, MODEL_FOLDER
-    global_anonymizer = AnonymizationEngine(
-        method="local_mmbert",
-        level="standard",
-        model_path=MODEL_FOLDER / "multilingual_DialogPII_NER"
-    )
-    logger.info(f"✅ AnonymizationEngine pre-loaded successfully. Method: {global_anonymizer.method}")
-except Exception as e:
-    logger.error(f"⚠️ Failed to pre-load AnonymizationEngine: {e}")
-    global_anonymizer = None
-
 # Verify model path consistency
 if MODEL_FOLDER != PROCESS_MODEL_FOLDER:
     logging.warning(f"⚠️  Path mismatch detected! app.py: {MODEL_FOLDER}, process.py: {PROCESS_MODEL_FOLDER}")
@@ -578,22 +564,16 @@ def anonymize():
         if not transcript_text:
             logger.warning("No transcript provided to /anonymize")
             return jsonify({'error': 'No transcript provided'}), 400
-        
-        # =========================================
-        # INSERT CLEANUP LOGIC HERE (after validation, before save)
-        # =========================================
-        
-        # Check if global_anonymizer was loaded successfully
-        if global_anonymizer is None or not global_anonymizer.method:
-            # Try to create one on-demand
+
+        if not hasattr(app, 'global_anonymizer') or app.global_anonymizer is None:
             try:
-                global_anonymizer = AnonymizationEngine(
+                app.global_anonymizer = AnonymizationEngine(
                     method="local_mmbert",
                     level="standard",
                     model_path=MODEL_FOLDER / "multilingual_DialogPII_NER",
                     include_tags=include_tags
                 )
-                if not global_anonymizer.method:
+                if not app.global_anonymizer.method:
                     raise ValueError("Anonymization engine failed to initialize")
             except Exception as e:
                 logger.error(f"Failed to initialize AnonymizationEngine: {e}")
@@ -602,8 +582,8 @@ def anonymize():
                     'details': str(e)
                 }), 500
         
-        # Call .anonymize() directly (returns 5 values)
-        result_text, success, msg, entity_map, surrogate_registry = global_anonymizer.anonymize(
+        # Call .anonymize() using app instance
+        result_text, success, msg, entity_map, surrogate_registry = app.global_anonymizer.anonymize(
             transcript_text,
             use_surrogates=False
         )
@@ -618,10 +598,7 @@ def anonymize():
                 'original_length': len(transcript_text)
             }), 500
         
-        # =========================================
         # SESSION EXPIRATION CLEANUP LOGIC
-        # Add this block BEFORE saving the new session
-        # =========================================
         MAX_SESSION_AGE_SECONDS = 3600  # 1 hour
         
         if hasattr(app, 'session_entity_maps'):
@@ -645,7 +622,6 @@ def anonymize():
             'original_length': len(transcript_text)
         }
         
-        # Rest of the route remains unchanged...
         logger.info(f"Anonymization SUCCESS: {len(transcript_text)} → {len(result_text)} chars")
         logger.info(f"Session ID: {session_id} | Entity map entries: {sum(len(v) for v in entity_map.values())}")
         
