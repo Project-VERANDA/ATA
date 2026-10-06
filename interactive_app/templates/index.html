@@ -866,60 +866,55 @@
                     headers: { 'Accept': 'application/json' }
                 });
 
-                console.log('Response status:', response.status);
-
                 if (!response.ok) {
                     throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                 }
 
                 const data = await response.json();
-                console.log('✓ Received models data:', data);
 
-                // Clear existing options
-                whisperModelSelect.innerHTML = '';
-
-                // Check if data is valid
                 if (!data.whisper_models || !Array.isArray(data.whisper_models)) {
-                    console.error('✗ Invalid response format:', data);
+                    console.warn('Invalid response format or empty array:', data);
                     const option = document.createElement('option');
                     option.value = '';
                     option.textContent = 'Error loading models';
                     option.disabled = true;
-                    option.selected = true;
                     whisperModelSelect.appendChild(option);
                     return;
                 }
 
-                // Populate dropdown
-                if (data.whisper_models.length === 0) {
-                    const option = document.createElement('option');
-                    option.value = '';
-                    option.textContent = 'No models available';
-                    whisperModelSelect.appendChild(option);
-                    console.warn('⚠️ No whisper models found');
-                }
+                // Clear existing options
+                whisperModelSelect.innerHTML = '';
+
+                // Check if we have a saved preference
+                const savedPreference = localStorage.getItem('preferredWhisperModel');
+                console.log('Saved preference:', savedPreference);
 
                 data.whisper_models.forEach(function(model) {
                     const option = document.createElement('option');
                     option.value = model.key;
                     option.textContent = model.label;
-                    if (model.key === data.default_whisper_model) {
+                    
+                    // ✅ FIX: Use saved preference OR server default
+                    if (model.key === savedPreference || model.key === data.default_whisper_model) {
                         option.selected = true;
-                        console.log('✓ Set default:', model.key);
+                        console.log('✓ Selected:', model.key);
                     }
+                    
                     whisperModelSelect.appendChild(option);
-                    console.log('✓ Added option:', model.key);
+                });
+
+                // Listen for changes and save preference
+                whisperModelSelect.addEventListener('change', function() {
+                    const selectedModel = this.value;
+                    localStorage.setItem('preferredWhisperModel', selectedModel);
+                    console.log('✓ Saved preference:', selectedModel);
                 });
 
                 console.log('✓ Dropdown populated with', data.whisper_models.length, 'models');
 
             } catch (error) {
-                console.error('✗ Error in loadModels:', error);
-                // Add fallback option
-                const option = document.createElement('option');
-                option.value = 'base';
-                option.textContent = 'Base (Fallback)';
-                whisperModelSelect.appendChild(option);
+                console.error('Error in loadModels:', error);
+                updateStatus(`Failed to load models: ${error.message}`, true);
             }
         }
 

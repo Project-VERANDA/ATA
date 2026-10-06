@@ -987,10 +987,22 @@ def surrogate_text():
             return jsonify({'error': 'No text provided'}), 400
 
         text = data['text']
-        lang = (data.get('lang') or 'EN').upper()
+        lang_input = data.get('lang', 'EN')  # Get original value
         session_id = data.get('session_id')
 
-        # Retrieve entity_map from session storage (saved during /anonymize)
+        # ✅ FIX: Normalize lang to valid code
+        lang_mapping = {
+            'auto': 'EN',
+            'AUTO': 'EN',
+            'EN': 'EN',
+            'DE': 'DE',
+            'FR': 'FR',
+            'ES': 'ES',
+            'SP': 'ES',  # Spanish alternative
+        }
+        lang = lang_mapping.get(lang_input, 'EN').upper()
+
+        # Retrieve entity_map from session storage
         if not session_id:
             return jsonify({'error': 'No session_id provided'}), 400
         
@@ -1012,22 +1024,32 @@ def surrogate_text():
 
         logger.info(
             f"Surrogate request for session {session_id[:8]}... "
-            f"Entity map entries: {sum(len(v) for v in entity_map.values())}"
+            f"Entity map entries: {sum(len(v) for v in entity_map.values())}, Lang: {lang}"
         )
+
+        # ✅ FIX: Build valid locales string
+        lang_to_locale = {
+            'EN': 'en_US',
+            'DE': 'de_DE',
+            'FR': 'fr_FR',
+            'ES': 'es_ES',
+        }
+        locale_prefix = lang_to_locale.get(lang, 'en_US')
+        locales = f'{locale_prefix},{locale_prefix.replace("_", "-")} en_US'  # e.g., "de_DE, de-US en_US"
 
         # Call imported function from process.py
         s_text, surrogate_registry = apply_surrogate_substitution(
             text=text,
             entity_map=entity_map,
             use_surrogates=True,
-            seed=None,  # Random surrogate per request
-            locales=f'{lang.lower()}_US,en_US'  # Match session language
+            seed=None,
+            locales=locales
         )
 
         entities_replaced = sum(len(v) for v in surrogate_registry.values())
         logger.info(
             f"Surrogate substitution complete: {entities_replaced} entities replaced. "
-            f"Session: {session_id[:8]}..."
+            f"Session: {session_id[:8]}, Locales: {locales}"
         )
 
         return jsonify({
@@ -1039,8 +1061,7 @@ def surrogate_text():
 
     except Exception as e:
         logger.error(f"Error in surrogate_text route: {str(e)}", exc_info=True)
-        return jsonify({'error': f'Error generating surrogates: {str(e)}'}), 500
-        
+        return jsonify({'error': f'Error generating surrogates: {str(e)}'}), 500        
 
 @app.route('/rephrase_text', methods=['POST'])
 def rephrase_text():
