@@ -768,12 +768,12 @@ def get_models():
 def get_transcription_models():
     # Scan MODEL_FOLDER for actual available Whisper models
     model_map = {
-        'large': 'Systran--faster-whisper-large-v3',
-        'large-turbo': 'Systran--faster-whisper-large-v3-turbo',
-        'medium': 'Systran--faster-whisper-medium',
-        'small': 'Systran--faster-whisper-small',
-        'base': 'Systran--faster-whisper-base',
-        'tiny': 'Systran--faster-whisper-tiny',
+        'large': 'faster-whisper-large-v3',
+        'large-turbo': 'faster-whisper-large-v3-turbo',
+        'medium': 'faster-whisper-medium',
+        'small': 'faster-whisper-small',
+        'base': 'faster-whisper-base',
+        'tiny': 'faster-whisper-tiny',
     }
     
     available_models = {}
