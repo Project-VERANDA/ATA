@@ -99,7 +99,6 @@ try:
         AVAILABLE_LLM_MODELS, 
         CHAT_AI_API_KEY, 
         CHAT_AI_ENDPOINT,
-        anonymize_text_locally,
         MODEL_FOLDER as PROCESS_MODEL_FOLDER,
         LLM_ANONYM_FOLDER,
         ANONYM_FOLDER,
@@ -579,13 +578,33 @@ def anonymize():
             logger.warning("No transcript provided to /anonymize")
             return jsonify({'error': 'No transcript provided'}), 400
         
-        # Pass include_tags to anonymization engine
-        result_text, success, msg = anonymize_text_locally(
-            transcript_text, 
-            include_tags=include_tags
+        # Check if global_anonymizer was loaded successfully
+        if global_anonymizer is None or not global_anonymizer.method:
+            # Try to create one on-demand
+            try:
+                from process import AnonymizationEngine, MODEL_FOLDER
+                global_anonymizer = AnonymizationEngine(
+                    method="local_mmbert",
+                    level="standard",
+                    model_path=MODEL_FOLDER / "multilingual_DialogPII_NER",
+                    include_tags=include_tags
+                )
+                if not global_anonymizer.method:
+                    raise ValueError("Anonymization engine failed to initialize")
+            except Exception as e:
+                logger.error(f"Failed to initialize AnonymizationEngine: {e}")
+                return jsonify({
+                    'error': 'Anonymization service unavailable',
+                    'details': str(e)
+                }), 500
+        
+        # Call the existing anonymize() method - returns 5 values
+        result_text, success, msg, entity_map, surrogate_registry = global_anonymizer.anonymize(
+            transcript_text,
+            use_surrogates=False
         )
         
-        logger.info(f"Anonymization result: success={success}, text_len={len(result_text) if result_text else 0}, tags={include_tags}")
+        logger.info(f"Anonymization result: success={success}, text_len={len(result_text) if result_text else 0}")
         
         if not success or result_text is None:
             logger.error(f"Anonymization FAILED: {msg}")
@@ -605,7 +624,7 @@ def anonymize():
         })
         
     except TypeError as e:
-        logger.error(f"TUPLE UNPACKING ERROR - check anonymize_text_locally return type: {e}")
+        logger.error(f"Anonymization error: {e}")
         import traceback
         logger.error(traceback.format_exc())
         return jsonify({'error': f'Server configuration error: {str(e)}'}), 500
