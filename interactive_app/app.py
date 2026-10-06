@@ -980,10 +980,7 @@ def transcribe_recording():
 
 @app.route('/surrogate_text', methods=['POST'])
 def surrogate_text():
-    """
-    Apply surrogate substitution using persisted entity_map from /anonymize.
-    STRICT MODE: Requires valid session_id; rejects if session expired/missing.
-    """
+    """Replace [TAG] placeholders with realistic surrogate values."""
     try:
         data = request.get_json()
         if not data or 'text' not in data:
@@ -992,112 +989,60 @@ def surrogate_text():
         text = data['text']
         lang = (data.get('lang') or 'EN').upper()
         session_id = data.get('session_id')
-        seed = data.get('seed')  # Optional reproducibility
-        locale = FAKER_LOCALE_MAP.get(lang, 'en_US')
 
-        if not apply_surrogate_substitution or not HAS_FAKER:
-            return jsonify({
-                'error': 'Faker library not available on server',
-                'hint': 'Install with: pip install faker'
-            }), 500
+        if lang not in SURROGATES:
+            lang = 'EN'
+        values = SURROGATES[lang]
 
-        # ==========================================
-        # CRITICAL: Validate session_id exists
-        # ==========================================
-        if not session_id:
-            return jsonify({
-                'error': 'Missing session_id',
-                'hint': 'Call /anonymize first and use the returned session_id here.',
-                'required': True
-            }), 400
+        # Track replacements for consistency (same tag gets varied values)
+        used = {}
+        registry = {}
 
-        # Retrieve persisted entity_map
-        entity_maps = getattr(app, 'session_entity_maps', {})
-        
-        if session_id not in entity_maps:
-            return jsonify({
-                'error': 'Session expired or invalid',
-                'hint': 'Run /anonymize again to create a new session.',
-                'expired': True
-            }), 401
+        def repl(match):
+            tag = match.group(1)
+            category = TAG_TO_SURROGATE_CATEGORY.get(tag)
 
-        entity_map_record = entity_maps[session_id]
-        entity_map = entity_map_record['entity_map']
-        original_length = entity_map_record.get('original_length', 0)
-        created_at = entity_map_record.get('timestamp', 0)
+            if category is None or category not in values:
+                # No surrogate pool for this tag — keep placeholder visible
+                return match.group(0)
 
-        # Optional: Enforce session expiration (e.g., 1 hour)
-        MAX_SESSION_AGE_SECONDS = 3600
-        if time.time() - created_at > MAX_SESSION_AGE_SECONDS:
-            # Cleanup expired session
-            del entity_maps[session_id]
-            return jsonify({
-                'error': 'Session expired',
-                'hint': f'Session older than {MAX_SESSION_AGE_SECONDS/60:.0f} minutes. Run /anonymize again.',
-                'expired': True,
-                'age_seconds': int(time.time() - created_at)
-            }), 401
+            pool = values[category]
+            # Avoid immediate repetition
+            prev = used.get(category, [])
+            available = [x for x in pool if x not in prev[-3:]] or pool
+            value = random.choice(available)
+            used[category] = prev + [value]
 
-        # Validate entity_map is not empty
-        total_entities = sum(len(v) for v in entity_map.values())
-        if total_entities == 0:
-            return jsonify({
-                'error': 'Empty entity map',
-                'hint': 'Anonymization produced no entities. No surrogates needed.'
-            }), 400
+            registry.setdefault(tag, []).append(value)
+            return value
 
-        # Count placeholders in text vs entity_map entries (alignment check)
-        placeholder_count = sum(len(v) for v in entity_map.values())
-        actual_placeholders = sum(
-            len(re.findall(rf'\[{tag}\]', text)) 
-            for tag in entity_map.keys()
-        )
+        s_text = re.sub(r'\[([A-Z_]+)\]', repl, text)
 
-        alignment_error = abs(placeholder_count - actual_placeholders) > 0
-        if alignment_error:
-            logger.warning(
-                f"Placeholder mismatch: map={placeholder_count}, text={actual_placeholders}. "
-                f"User may have edited transcript after anonymization."
-            )
-            # Still proceed but log warning; decision to abort is yours.
-            # Uncomment below to make this a hard failure:
-            # return jsonify({
-            #     'error': 'Transcript mismatch',
-            #     'hint': 'Placeholder count differs from anonymization output. User edits may have broken alignment.',
-            #     'expected': placeholder_count,
-            #     'found': actual_placeholders
-            # }), 400
-
-        # Apply surrogate substitution
-        s_text, registry = apply_surrogate_substitution(
-            text,
-            entity_map,
-            use_surrogates=True,
-            seed=seed,
-            locales=locale
-        )
-
-        # Optional: Clean up used sessions to prevent memory bloat
-        # del entity_maps[session_id]
-
+        entities_replaced = sum(len(v) for v in registry.values())
         logger.info(
-            f"Surrogate substitution complete: {sum(len(v) for v in registry.values())} entities replaced. "
-            f"Session: {session_id[:8]}... Engine: faker-consistent"
+            f"Surrogate substitution: {entities_replaced} placeholders replaced. "
+            f"Session: {session_id[:8] if session_id else 'none'}..."
         )
+
+        if entities_replaced == 0:
+            return jsonify({
+                'success': True,
+                'surrogated_text': s_text,
+                'entities_replaced': 0,
+                'note': 'No [TAG] placeholders found in text.'
+            })
 
         return jsonify({
             'success': True,
             'surrogated_text': s_text,
-            'entities_replaced': sum(len(v) for v in registry.values()),
+            'entities_replaced': entities_replaced,
             'surrogate_registry': registry,
-            'engine': 'faker-consistent',  # Identity guaranteed
-            'tts_available': TTS_AVAILABLE,
-            'tts_backend': TTS_BACKEND,
         })
 
     except Exception as e:
         logger.error(f"Error in surrogate_text route: {str(e)}", exc_info=True)
         return jsonify({'error': f'Error generating surrogates: {str(e)}'}), 500
+        
 
 @app.route('/rephrase_text', methods=['POST'])
 def rephrase_text():
