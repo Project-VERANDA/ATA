@@ -162,6 +162,19 @@ import torch
 from flask import Flask, render_template, request, jsonify, send_file
 
 app = Flask(__name__)
+@app.after_request
+def add_security_headers(response):
+    """Add security headers including CSP that allows blob URLs for audio."""
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['Content-Security-Policy'] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "media-src 'self' blob: data:; "
+        "img-src 'self' data: https:;"
+    )
+    return response
 app.config['MAX_CONTENT_LENGTH'] = 5 * 1024 * 1024 * 1024
 app.config['UPLOAD_FOLDER'] = 'uploads'
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
@@ -1000,7 +1013,7 @@ def surrogate_text():
 
         def repl(match):
             tag = match.group(1)
-            category = TAG_TO_SURROGATE_CATEGORY.get(tag)
+            category = faker_methods.get(tag)
 
             if category is None or category not in values:
                 # No surrogate pool for this tag — keep placeholder visible
