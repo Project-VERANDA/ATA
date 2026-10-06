@@ -756,12 +756,30 @@ def get_models():
 
 @app.route('/transcription_models')
 def get_transcription_models():
-    # DEBUG: Print to server console
-    print(f"DEBUG: WHISPER_MODELS content: {list(WHISPER_MODELS.items())}")
+    # Scan MODEL_FOLDER for actual available Whisper models
+    model_map = {
+        'large': 'Large (Best Accuracy)',
+        'medium': 'Medium',
+        'small': 'Small',
+        'base': 'Base (Default)',
+        'tiny': 'Tiny (Fastest)',
+    }
+    
+    available_models = {}
+    for model_key, model_desc in model_map.items():
+        model_path = MODEL_FOLDER / f'Systran--faster-whisper-{model_key}'
+        if model_path.exists():
+            available_models[model_key] = model_desc
+    
+    if not available_models:
+        logger.warning("No Whisper models found in MODEL_FOLDER!")
+        available_models = {'base': 'Base (Fallback)'}  # Safety fallback
     
     return jsonify({
-        'whisper_models': list(WHISPER_MODELS.items()),
-        'default_whisper_model': 'base'
+        'whisper_models': [
+            {'key': k, 'label': v} for k, v in available_models.items()
+        ],
+        'default_whisper_model': 'large' if 'large' in available_models else 'base'
     })
 
 @app.route('/available_tags')
@@ -815,6 +833,9 @@ def upload_file():
         language = request.form.get('language', None)
         if not language or language == 'auto':
             language = None
+
+        language = request.form.get('language', None)
+        whisper_model = request.form.get('whisper_model', 'large')
         
         if file and allowed_file(file.filename):
             filename = secure_filename(file.filename)
@@ -822,7 +843,11 @@ def upload_file():
             file.save(filepath)
             
             logger.info(f"Transcribing file: {filename} in language: {language}")
-            transcription, wordOffS = transcribe_audio_locally(filepath, language=language)
+            transcription, wordOffS = transcribe_audio_locally(
+                filepath, 
+                language=language,
+                whisper_model_name=whisper_model
+            )
             
             # Check if transcription resulted in an error message
             if not isinstance(transcription, str):

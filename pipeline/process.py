@@ -1058,13 +1058,26 @@ def process_audios(enable_diarization=True, lang_code=None, file_list=None, args
 _loaded_whisper_model = None
 _loaded_diarize_model = None
 
-def load_models():
+def load_models(whisper_model_override=None):
     """Loads models globally for reuse across both process_audios() and transcribe_audio_locally()."""
     global _loaded_whisper_model, _loaded_diarize_model
     
     # Reset global cache on reload attempt
     _loaded_whisper_model = None
     _loaded_diarize_model = None
+    
+    # Determine which Whisper model to use
+    model_name = whisper_model_override or os.getenv('WHISPER_MODEL', 'large')
+    model_map = {
+        'large': 'Systran--faster-whisper-large-v3',
+        'medium': 'Systran--faster-whisper-medium',
+        'small': 'Systran--faster-whisper-small',
+        'base': 'Systran--faster-whisper-base',
+        'tiny': 'Systran--faster-whisper-tiny',
+    }
+    
+    model_folder_name = model_map.get(model_name, f'Systran--faster-whisper-{model_name}')
+    whisper_model_path = MODEL_FOLDER / model_folder_name
 
     check_gpu_resources()
     
@@ -1133,20 +1146,23 @@ def load_models():
     logger.info("Models loaded successfully.")
     return _loaded_whisper_model, _loaded_diarize_model
 
-def transcribe_audio_locally(audio_path, language=None):
+def transcribe_audio_locally(audio_path, language=None, whisper_model_name=None):
     """
     Transcribes a single audio file using cached global models.
+    
+    Args:
+        audio_path: Path to audio file
+        language: Language code ('auto', 'DE', 'EN', etc.)
+        whisper_model_name: Optional override (e.g., 'large-v3', 'base', 'tiny')
     
     Returns:
         tuple: (transcription_text, wordOffsets)
     """
     global _loaded_whisper_model, _loaded_diarize_model
     
-    logger.info(f"--- Starting transcription for: {os.path.basename(audio_path)} ---")
-    
-    # Load models if not already loaded
-    if not _loaded_whisper_model:
-        _loaded_whisper_model, _loaded_diarize_model = load_models()
+    # Load models if not already loaded OR if model was switched
+    if not _loaded_whisper_model or whisper_model_name:
+        _loaded_whisper_model, _loaded_diarize_model = load_models(whisper_model_override=whisper_model_name)
     
     if not _loaded_whisper_model:
         logger.error("Error: WhisperX model not loaded.")
