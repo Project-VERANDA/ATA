@@ -776,19 +776,26 @@
         async function loadModels() {
             try {
                 const transResp = await fetch(window.location.origin + '/transcription_models');
+                if (!transResp.ok) {
+                    throw new Error(`HTTP ${transResp.status}: ${transResp.statusText}`);
+                }
                 const transData = await transResp.json();
-                if (transData.whisper_models) {
+                
+                if (transData.whisper_models && Array.isArray(transData.whisper_models)) {
                     whisperModelSelect.innerHTML = '';
-                    transData.whisper_models.forEach(([value, label]) => {
+                    transData.whisper_models.forEach(({key, label}) => {
                         const option = document.createElement('option');
-                        option.value = value;
+                        option.value = key;
                         option.textContent = label;
-                        if (value === transData.default_whisper_model) option.selected = true;
+                        if (key === transData.default_whisper_model) option.selected = true;
                         whisperModelSelect.appendChild(option);
                     });
+                } else {
+                    console.warn("No whisper_models found in response:", transData);
                 }
             } catch (error) {
                 console.error("Error in loadModels:", error);
+                updateStatus(`Failed to load transcription models: ${error.message}`, true);
             }
         }
 
