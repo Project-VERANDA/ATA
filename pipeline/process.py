@@ -77,6 +77,14 @@ from pipeline.tts.tts_engine import (
     TTS_ENABLED,
 )
 
+# --- Surrogate Consistency Support ---
+
+FAKER_LOCALE_MAP = {
+    'EN': 'en_US', 'DE': 'de_DE', 'FR': 'fr_FR', 'ES': 'es_ES',
+    'IT': 'it_IT', 'PL': 'pl_PL', 'PT': 'pt_BR', 'FI': 'fi_FI',
+    'TR': 'tr_TR', 'AR': 'ar_AA', 'HI': 'hi_IN'
+}
+
 # =============================================================================
 # ENVIRONMENT CONFIGURATION
 # =============================================================================
@@ -1947,6 +1955,8 @@ def normalize_punctuation(text) -> str:
 
     return "\n".join(normalized_lines)
 
+# --- Surrogate Substitution ---
+
 def apply_surrogate_substitution(text, entity_map, 
                                   use_surrogates=False,
                                   seed=None,
@@ -1955,37 +1965,32 @@ def apply_surrogate_substitution(text, entity_map,
     Applies consistent Faker-based surrogate substitution to anonymized text.
     
     Args:
-        text: Anonymized text with placeholder tags like [PERSON], [LOCATION_CITY], etc.
-        entity_map: Dict from reconstruct_text_from_predictions(), e.g.:
+        text: Anonymized text with placeholder tags like [PERSON], [CITY], etc.
+        entity_map: Dict from reconstruct_text_from_predictions():
             {
                 'PERSON': ['Max Mustermann', 'Anna Schmidt'],
-                'ORG': ['TechCorp GmbH', 'City Hospital'],
-                'LOC_CITY': ['Berlin', 'Munich']
+                'ORGANISATION': ['TechCorp GmbH', 'City Hospital'],
+                'CITY': ['Berlin', 'Munich']
             }
-        use_surrogates: If False, returns text unchanged (backward compatible)
+        use_surrogates: If False, returns text unchanged
         seed: Optional seed for reproducible surrogate generation
-        locales: Comma-separated Faker locales (e.g., 'de_DE,en_US')
+        locales: Comma-separated Faker locales
     
     Returns:
         tuple: (substituted_text, surrogate_registry)
         surrogate_registry = {entity_type: {original: surrogate, ...}}
-    
-    Note:
-        Only applies when use_surrogates=True. Otherwise returns original text.
     """
 
     if not HAS_FAKER:
         logger.error("Faker library not installed. Install with: pip install faker")
         return text, {}
-
+    
     if not use_surrogates:
         return text, {}
     
     if not entity_map:
         logger.warning("Surrogate substitution requested but no entity map provided.")
         return text, {}
-    
-    #from faker import Faker  # Lazy import to avoid dependency unless used
     
     try:
         parsed_locales = [loc.strip() for loc in locales.split(',') if loc.strip()]
@@ -2001,23 +2006,23 @@ def apply_surrogate_substitution(text, entity_map,
     surrogate_registry = defaultdict(dict)  # {type: {original: surrogate}}
     counter = defaultdict(int)
     
-    # Mapping rules for different entity types
+    # FIXED: Keys match PLACEHOLDER names written into text by BERT (no brackets)
     faker_methods = {
         'PERSON': lambda: fake.name(),
-        'PERSON_EMAIL': lambda: fake.email(),
-        'PERSON_SOCIAL_RELATION': lambda: fake.name(),
-        'ORG': lambda: fake.company(),
-        'LOC_CITY': lambda: fake.city(),
-        'LOC_COUNTRY': lambda: fake.country(),
-        'LOC_STREET': lambda: fake.street_address(),
-        'LOC_ZIP': lambda: fake.postcode(),
-        'LOC_HOUSENUMBER': lambda: str(fake.random_int(1, 999)),
-        'LOC_OTHER': lambda: fake.city(),
+        'EMAIL': lambda: fake.email(),
+        'NAME_RELATIVE': lambda: fake.name(),
+        'ORGANISATION': lambda: fake.company(),
+        'CITY': lambda: fake.city(),
+        'COUNTRY': lambda: fake.country(),
+        'STREET': lambda: fake.street_address(),
+        'ZIP': lambda: fake.postcode(),
+        'HOUSENUMBER': lambda: str(fake.random_int(1, 999)),
+        'LOCATION': lambda: fake.city(),
         'DATETIME': lambda: fake.date(),
-        'DATETIME_AGE': lambda: str(fake.random_int(18, 90)),
-        'CODE_PHONE': lambda: fake.phone_number(),
-        'CODE_URL': lambda: fake.url(),
+        'AGE': lambda: str(fake.random_int(18, 90)),
         'CODE': lambda: fake.uuid4()[:8].upper(),
+        'PHONE': lambda: fake.phone_number(),
+        'URL': lambda: fake.url(),
         'PROFESSION': lambda: fake.job(),
         'PRODUCT': lambda: fake.catch_phrase(),
         'QUANTITY': lambda: str(fake.random_int(1, 1000)),
@@ -2052,10 +2057,10 @@ def apply_surrogate_substitution(text, entity_map,
         speaker = match.group(1)
         content = match.group(2)
         
-        # Replace each placeholder with corresponding surrogate
-        for entity_type in entity_map.keys():
-            # Pattern matches: [PERSON], [CITY], [PHONE], etc.
-            placeholder_pattern = rf'\[{entity_type}\]'
+        # FIXED: Strip brackets from entity_map keys before pattern building
+        for entity_type_raw in entity_map.keys():
+            entity_type = entity_type_raw.strip('[]')          # Strip surrounding []
+            placeholder_pattern = rf'\[{re.escape(entity_type)}\]'
             
             # Track position to ensure sequential replacement
             pos_tracker = defaultdict(int)
@@ -2489,7 +2494,6 @@ Examples:
     logger.info("Pipeline finished.")
     pipeline_duration = time.time() - pipeline_start
     logger.info(f"Pipeline total duration: {pipeline_duration:.2f}s ({pipeline_duration/60:.1f} minutes)")
-    file_size = os.path.getsize(transcript_file) / 1024
     logger.info(f"   Output size: {file_size:.1f} KB")
     session_logger.finish()
 
@@ -2506,7 +2510,6 @@ __all__ = [
     'load_models',
     'transcribe_audio_locally',
     'AnonymizationEngine',
-    'anonymize_text_locally',
     'process_anonymization',
     'generate_audio_edit_script',
     'AUDIO_EDIT_SUPPORT',

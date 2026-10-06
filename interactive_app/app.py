@@ -103,6 +103,7 @@ try:
         LLM_ANONYM_FOLDER,
         ANONYM_FOLDER,
         BASE_PATH,
+        AnonymizationEngine
     )
 except ImportError as e:
     logging.critical(f"Failed to import from process.py: {e}")
@@ -578,11 +579,14 @@ def anonymize():
             logger.warning("No transcript provided to /anonymize")
             return jsonify({'error': 'No transcript provided'}), 400
         
+        # =========================================
+        # INSERT CLEANUP LOGIC HERE (after validation, before save)
+        # =========================================
+        
         # Check if global_anonymizer was loaded successfully
         if global_anonymizer is None or not global_anonymizer.method:
             # Try to create one on-demand
             try:
-                from process import AnonymizationEngine, MODEL_FOLDER
                 global_anonymizer = AnonymizationEngine(
                     method="local_mmbert",
                     level="standard",
@@ -598,7 +602,7 @@ def anonymize():
                     'details': str(e)
                 }), 500
         
-        # Call the existing anonymize() method - returns 5 values
+        # Call .anonymize() directly (returns 5 values)
         result_text, success, msg, entity_map, surrogate_registry = global_anonymizer.anonymize(
             transcript_text,
             use_surrogates=False
@@ -614,17 +618,49 @@ def anonymize():
                 'original_length': len(transcript_text)
             }), 500
         
+        # =========================================
+        # SESSION EXPIRATION CLEANUP LOGIC
+        # Add this block BEFORE saving the new session
+        # =========================================
+        MAX_SESSION_AGE_SECONDS = 3600  # 1 hour
+        
+        if hasattr(app, 'session_entity_maps'):
+            current_time = time.time()
+            expired_sessions = [
+                sid for sid, record in app.session_entity_maps.items()
+                if current_time - record.get('timestamp', 0) > MAX_SESSION_AGE_SECONDS
+            ]
+            for sid in expired_sessions:
+                del app.session_entity_maps[sid]
+                logger.debug(f"Cleaned up expired session: {sid[:8]}...")
+        
+        # Now save the new session
+        session_id = request.headers.get('X-Session-ID', str(int(time.time())))
+        if not hasattr(app, 'session_entity_maps'):
+            app.session_entity_maps = {}
+        
+        app.session_entity_maps[session_id] = {
+            'entity_map': entity_map,
+            'timestamp': time.time(),
+            'original_length': len(transcript_text)
+        }
+        
+        # Rest of the route remains unchanged...
         logger.info(f"Anonymization SUCCESS: {len(transcript_text)} → {len(result_text)} chars")
+        logger.info(f"Session ID: {session_id} | Entity map entries: {sum(len(v) for v in entity_map.values())}")
+        
         return jsonify({
             'status': 'success',
             'original': transcript_text,
             'anonymized': result_text,
             'chars_original': len(transcript_text),
-            'chars_anonymized': len(result_text)
+            'chars_anonymized': len(result_text),
+            'session_id': session_id,
+            'entity_count': sum(len(v) for v in entity_map.values()),
         })
-        
+    
     except TypeError as e:
-        logger.error(f"Anonymization error: {e}")
+        logger.error(f"Anonymization tuple unpacking error: {e}")
         import traceback
         logger.error(traceback.format_exc())
         return jsonify({'error': f'Server configuration error: {str(e)}'}), 500
@@ -904,26 +940,124 @@ def transcribe_recording():
 
 @app.route('/surrogate_text', methods=['POST'])
 def surrogate_text():
+    """
+    Apply surrogate substitution using persisted entity_map from /anonymize.
+    STRICT MODE: Requires valid session_id; rejects if session expired/missing.
+    """
     try:
         data = request.get_json()
         if not data or 'text' not in data:
             return jsonify({'error': 'No text provided'}), 400
-        
+
         text = data['text']
-        la = data['lang']
+        lang = (data.get('lang') or 'EN').upper()
+        session_id = data.get('session_id')
+        seed = data.get('seed')  # Optional reproducibility
+        locale = FAKER_LOCALE_MAP.get(lang, 'en_US')
+
+        if not apply_surrogate_substitution or not HAS_FAKER:
+            return jsonify({
+                'error': 'Faker library not available on server',
+                'hint': 'Install with: pip install faker'
+            }), 500
+
+        # ==========================================
+        # CRITICAL: Validate session_id exists
+        # ==========================================
+        if not session_id:
+            return jsonify({
+                'error': 'Missing session_id',
+                'hint': 'Call /anonymize first and use the returned session_id here.',
+                'required': True
+            }), 400
+
+        # Retrieve persisted entity_map
+        entity_maps = getattr(app, 'session_entity_maps', {})
         
-        s_text = replace_surrogates(text, la)
-        
+        if session_id not in entity_maps:
+            return jsonify({
+                'error': 'Session expired or invalid',
+                'hint': 'Run /anonymize again to create a new session.',
+                'expired': True
+            }), 401
+
+        entity_map_record = entity_maps[session_id]
+        entity_map = entity_map_record['entity_map']
+        original_length = entity_map_record.get('original_length', 0)
+        created_at = entity_map_record.get('timestamp', 0)
+
+        # Optional: Enforce session expiration (e.g., 1 hour)
+        MAX_SESSION_AGE_SECONDS = 3600
+        if time.time() - created_at > MAX_SESSION_AGE_SECONDS:
+            # Cleanup expired session
+            del entity_maps[session_id]
+            return jsonify({
+                'error': 'Session expired',
+                'hint': f'Session older than {MAX_SESSION_AGE_SECONDS/60:.0f} minutes. Run /anonymize again.',
+                'expired': True,
+                'age_seconds': int(time.time() - created_at)
+            }), 401
+
+        # Validate entity_map is not empty
+        total_entities = sum(len(v) for v in entity_map.values())
+        if total_entities == 0:
+            return jsonify({
+                'error': 'Empty entity map',
+                'hint': 'Anonymization produced no entities. No surrogates needed.'
+            }), 400
+
+        # Count placeholders in text vs entity_map entries (alignment check)
+        placeholder_count = sum(len(v) for v in entity_map.values())
+        actual_placeholders = sum(
+            len(re.findall(rf'\[{tag}\]', text)) 
+            for tag in entity_map.keys()
+        )
+
+        alignment_error = abs(placeholder_count - actual_placeholders) > 0
+        if alignment_error:
+            logger.warning(
+                f"Placeholder mismatch: map={placeholder_count}, text={actual_placeholders}. "
+                f"User may have edited transcript after anonymization."
+            )
+            # Still proceed but log warning; decision to abort is yours.
+            # Uncomment below to make this a hard failure:
+            # return jsonify({
+            #     'error': 'Transcript mismatch',
+            #     'hint': 'Placeholder count differs from anonymization output. User edits may have broken alignment.',
+            #     'expected': placeholder_count,
+            #     'found': actual_placeholders
+            # }), 400
+
+        # Apply surrogate substitution
+        s_text, registry = apply_surrogate_substitution(
+            text,
+            entity_map,
+            use_surrogates=True,
+            seed=seed,
+            locales=locale
+        )
+
+        # Optional: Clean up used sessions to prevent memory bloat
+        # del entity_maps[session_id]
+
+        logger.info(
+            f"Surrogate substitution complete: {sum(len(v) for v in registry.values())} entities replaced. "
+            f"Session: {session_id[:8]}... Engine: faker-consistent"
+        )
+
         return jsonify({
-            'success': True, 
+            'success': True,
             'surrogated_text': s_text,
+            'entities_replaced': sum(len(v) for v in registry.values()),
+            'surrogate_registry': registry,
+            'engine': 'faker-consistent',  # Identity guaranteed
             'tts_available': TTS_AVAILABLE,
             'tts_backend': TTS_BACKEND,
         })
-    
+
     except Exception as e:
-        logger.error(f"Error in anonymize route: {str(e)}")
-        return jsonify({'error': f'Error anonymizing text: {str(e)}'}), 500
+        logger.error(f"Error in surrogate_text route: {str(e)}", exc_info=True)
+        return jsonify({'error': f'Error generating surrogates: {str(e)}'}), 500
 
 @app.route('/rephrase_text', methods=['POST'])
 def rephrase_text():
@@ -1542,8 +1676,56 @@ def generate_beep_route():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+
+def _cleanup_expired_sessions():
+    """Background task to remove expired sessions periodically."""
+    MAX_SESSION_AGE_SECONDS = int(os.getenv('SESSION_MAX_AGE_SECONDS', 3600))
+    CLEANUP_INTERVAL_SECONDS = int(os.getenv('SESSION_CLEANUP_INTERVAL', 300))  # ← Use env var
+    
+    while True:
+        time.sleep(CLEANUP_INTERVAL_SECONDS) 
+        
+        try:
+            if not hasattr(app, 'session_entity_maps'):
+                continue
+            
+            current_time = time.time()
+            expired_sessions = [
+                sid for sid, record in app.session_entity_maps.items()
+                if current_time - record.get('timestamp', 0) > MAX_SESSION_AGE_SECONDS
+            ]
+            
+            if expired_sessions:
+                count = len(expired_sessions)
+                for sid in expired_sessions:
+                    del app.session_entity_maps[sid]
+                
+                logger.info(f"Background cleanup: removed {count} expired session(s)")
+        
+        except Exception as e:
+            logger.error(f"Error in background session cleanup: {e}")
+
+@app.route('/debug/sessions')
+def debug_session_count():
+    """Healthcheck endpoint to monitor session memory usage."""
+    session_count = len(getattr(app, 'session_entity_maps', {}))
+    total_memory_mb = sum(
+        sys.getsizeof(record['entity_map']) / (1024 * 1024)
+        for record in getattr(app, 'session_entity_maps', {}).values()
+    )
+    return jsonify({
+        'active_sessions': session_count,
+        'estimated_memory_mb': round(total_memory_mb, 2)
+    })
+
+# Start background cleaner (non-blocking)
+
 if __name__ == '__main__':
     use_https = os.getenv('USE_HTTPS', 'true').lower() == 'true'
+    import threading
+    session_cleanup_thread = threading.Thread(target=cleanup_expired_sessions, daemon=True)
+    session_cleanup_thread.start()
+    logger.info("Session cleanup thread started (every 5 minutes)")
     
     if use_https:
         cert_to_use = None
