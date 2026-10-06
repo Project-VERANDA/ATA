@@ -1120,17 +1120,29 @@
                     throw new Error("Generated audio too small (" + audioBlob.size + " bytes)");
                 }
                 
-                // Force visible
-                audioPlayer.src = URL.createObjectURL(audioBlob);
+                // ✅ CRITICAL: Create URL object and force player to load
+                const audioUrl = URL.createObjectURL(audioBlob);
+                audioPlayer.src = audioUrl;
                 audioPlayer.classList.remove('hidden');
-                audioPlayer.style.display = 'block';  // Additional guarantee
+                audioPlayer.style.display = 'block';
                 audioPlayer.load();
+                
+                // Wait for readyState before attempting to play
+                await new Promise(resolve => {
+                    audioPlayer.oncanplay = resolve;
+                    setTimeout(resolve, 1000); // Fallback timeout
+                });
                 
                 downloadSpeechBtn.disabled = false;
                 updateStatus("Speech generated successfully! Click play button below.", false);
                 
-                // Auto-play to test
-                // audioPlayer.play().catch(e => console.warn('Auto-play blocked:', e));
+                // Try auto-play (may be blocked by browser policy)
+                const playPromise = audioPlayer.play();
+                if (playPromise !== undefined) {
+                    playPromise.catch(e => {
+                        console.warn('Auto-play blocked (browser policy):', e);
+                    });
+                }
                 
             } catch (error) {
                 console.error('Speech generation error:', error);

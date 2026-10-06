@@ -210,40 +210,16 @@ CHAT_AI_ENDPOINT = os.getenv('CHAT_AI_ENDPOINT', 'https://llm.cloud.cci.charite.
 
 # Faker Surrogate processing
 try:
-    from faker import Faker
+    from process import apply_surrogate_substitution, SURROGATES, TAG_TO_SURROGATE_CATEGORY
     HAS_FAKER = True
-    FAKER_LOCALE_MAP = {
-        'EN': 'en_US',
-        'DE': 'de_DE',
-        'FR': 'fr_FR',
-        'ES': 'es_ES',
-        # ... add others as needed
-    }
-    def apply_surrogate_substitution(text, entity_map, use_surrogates=False, seed=None, locales='en_US'):
-        """Apply Faker-based surrogate substitution."""
-        if seed is not None:
-            faker = Faker(locales)
-            faker.seed_instance(seed)
-        else:
-            faker = Faker(locales)
-        
-        registry = {}
-        result = text
-        
-        for tag, entities in entity_map.items():
-            for i, entity in enumerate(entities):
-                if use_surrogates and tag in SURROGATES.get('EN', {}):
-                    surrogate = random.choice(SURROGATES['EN'].get(tag, [entity]))
-                    result = result.replace(entity, surrogate, 1)
-                    if tag not in registry:
-                        registry[tag] = []
-                    registry[tag].append(surrogate)
-        
-        return result, registry
-except ImportError:
+    logger.info("✅ Successfully imported apply_surrogate_substitution from process.py")
+except ImportError as e:
     HAS_FAKER = False
-    FAKER_LOCALE_MAP = {}
+    SURROGATES = {}
+    TAG_TO_SURROGATE_CATEGORY = {}
     apply_surrogate_substitution = None
+    logger.error(f"❌ Failed to import surrogate functions from process.py: {e}")
+    logger.warning("Surrogate button will be disabled. Install Faker in the shared environment.")
 
 # Model mappings for the UI
 
@@ -993,8 +969,11 @@ def transcribe_recording():
 
 @app.route('/surrogate_text', methods=['POST'])
 def surrogate_text():
-    """Replace [TAG] placeholders with realistic surrogate values."""
+    """Replace [TAG] placeholders with realistic surrogate values using process.py function."""
     try:
+        if not apply_surrogate_substitution:
+            return jsonify({'error': 'Surrogate substitution not available. Check server logs.'}), 500
+        
         data = request.get_json()
         if not data or 'text' not in data:
             return jsonify({'error': 'No text provided'}), 400
@@ -1003,53 +982,51 @@ def surrogate_text():
         lang = (data.get('lang') or 'EN').upper()
         session_id = data.get('session_id')
 
-        if lang not in SURROGATES:
-            lang = 'EN'
-        values = SURROGATES[lang]
-
-        # Track replacements for consistency (same tag gets varied values)
-        used = {}
-        registry = {}
-
-        def repl(match):
-            tag = match.group(1)
-            category = faker_methods.get(tag)
-
-            if category is None or category not in values:
-                # No surrogate pool for this tag — keep placeholder visible
-                return match.group(0)
-
-            pool = values[category]
-            # Avoid immediate repetition
-            prev = used.get(category, [])
-            available = [x for x in pool if x not in prev[-3:]] or pool
-            value = random.choice(available)
-            used[category] = prev + [value]
-
-            registry.setdefault(tag, []).append(value)
-            return value
-
-        s_text = re.sub(r'\[([A-Z_]+)\]', repl, text)
-
-        entities_replaced = sum(len(v) for v in registry.values())
-        logger.info(
-            f"Surrogate substitution: {entities_replaced} placeholders replaced. "
-            f"Session: {session_id[:8] if session_id else 'none'}..."
-        )
-
-        if entities_replaced == 0:
+        # Retrieve entity_map from session storage (saved during /anonymize)
+        if not session_id:
+            return jsonify({'error': 'No session_id provided'}), 400
+        
+        if not hasattr(app, 'session_entity_maps'):
+            return jsonify({'error': 'No active sessions found'}), 400
+        
+        session_data = app.session_entity_maps.get(session_id)
+        if not session_data:
+            return jsonify({'error': 'Session expired or not found'}), 404
+        
+        entity_map = session_data.get('entity_map', {})
+        if not entity_map:
             return jsonify({
                 'success': True,
-                'surrogated_text': s_text,
+                'surrogated_text': text,
                 'entities_replaced': 0,
-                'note': 'No [TAG] placeholders found in text.'
+                'note': 'No entities detected in original anonymization.'
             })
+
+        logger.info(
+            f"Surrogate request for session {session_id[:8]}... "
+            f"Entity map entries: {sum(len(v) for v in entity_map.values())}"
+        )
+
+        # Call imported function from process.py
+        s_text, surrogate_registry = apply_surrogate_substitution(
+            text=text,
+            entity_map=entity_map,
+            use_surrogates=True,
+            seed=None,  # Random surrogate per request
+            locales=f'{lang.lower()}_US,en_US'  # Match session language
+        )
+
+        entities_replaced = sum(len(v) for v in surrogate_registry.values())
+        logger.info(
+            f"Surrogate substitution complete: {entities_replaced} entities replaced. "
+            f"Session: {session_id[:8]}..."
+        )
 
         return jsonify({
             'success': True,
             'surrogated_text': s_text,
             'entities_replaced': entities_replaced,
-            'surrogate_registry': registry,
+            'surrogate_registry': surrogate_registry,
         })
 
     except Exception as e:

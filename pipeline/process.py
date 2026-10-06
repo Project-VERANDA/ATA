@@ -1973,6 +1973,25 @@ def normalize_punctuation(text) -> str:
 
 # --- Surrogate Substitution ---
 
+TAG_TO_SURROGATE_CATEGORY = {
+    'PERSON': 'PERSON',
+    'PERSON_EMAIL': 'EMAIL',
+    'PERSON_SOCIAL_RELATION': 'PERSON',
+    'ORG': 'ORGANISATION',
+    'LOC_CITY': 'CITY',
+    'LOC_COUNTRY': 'CITY',
+    'LOC_STREET': 'STREET',
+    'LOC_ZIP': 'ZIP',
+    'LOC_HOUSENUMBER': 'ZIP',
+    'LOC_OTHER': 'CITY',
+    'DATETIME': 'AGE',
+    'DATETIME_AGE': 'AGE',
+    'CODE_PHONE': 'PHONE',
+    'CODE_URL': 'URL',
+    'PROFESSION': 'PROFESSION',
+    'PRODUCT': 'PRODUCT',
+}
+
 def apply_surrogate_substitution(text, entity_map, 
                                   use_surrogates=False,
                                   seed=None,
@@ -2541,6 +2560,11 @@ __all__ = [
     'synthesize_segment',
     'get_available_tts_voices',
     'get_tts_status',
+
+    # Surrogate functions
+    'apply_surrogate_substitution',
+    'SURROGATES',
+    'TAG_TO_SURROGATE_CATEGORY',
     
     # Configuration variables
     'TTS_BACKEND',
