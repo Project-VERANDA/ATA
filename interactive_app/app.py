@@ -1026,16 +1026,17 @@ def surrogate_text():
             f"Surrogate request for session {session_id[:8]}... "
             f"Entity map entries: {sum(len(v) for v in entity_map.values())}, Lang: {lang}"
         )
-
-        # ✅ FIX: Build valid locales string
         lang_to_locale = {
             'EN': 'en_US',
             'DE': 'de_DE',
             'FR': 'fr_FR',
             'ES': 'es_ES',
         }
-        locale_prefix = lang_to_locale.get(lang, 'en_US')
-        locales = f'{locale_prefix},{locale_prefix.replace("_", "-")} en_US'  # e.g., "de_DE, de-US en_US"
+        primary_locale = lang_to_locale.get(lang, 'en_US')
+        # Use clean format without spaces/hyphens
+        locales = primary_locale  # e.g., "en_US" only, not "en_US,en-US en_US"
+        
+        logger.debug(f"Surrogate locales: {locales}")
 
         # Call imported function from process.py
         s_text, surrogate_registry = apply_surrogate_substitution(
@@ -1043,7 +1044,7 @@ def surrogate_text():
             entity_map=entity_map,
             use_surrogates=True,
             seed=None,
-            locales=locales
+            locales=locales  # ← Clean locale string
         )
 
         entities_replaced = sum(len(v) for v in surrogate_registry.values())
