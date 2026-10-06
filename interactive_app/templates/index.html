@@ -625,6 +625,8 @@
 
     <script>
     document.addEventListener('DOMContentLoaded', () => {
+        console.log('📦 DOMContentLoaded fired');
+        loadModels();
         // === MODAL FUNCTIONS ===
         const surveyModal = document.getElementById('survey-modal');
         const modalCloseBtn = document.getElementById('modal-close-btn');
@@ -774,28 +776,71 @@
         piiClearAllBtn.addEventListener('click', () => piiTagGrid.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false));
 
         async function loadModels() {
+            console.log('🔍 loadModels() called');
+            
             try {
-                const transResp = await fetch(window.location.origin + '/transcription_models');
-                if (!transResp.ok) {
-                    throw new Error(`HTTP ${transResp.status}: ${transResp.statusText}`);
+                const baseUrl = window.location.origin || 'https://transcriber.cloud.cci.charite.de';
+                console.log('Fetching models from:', baseUrl + '/transcription_models');
+
+                const response = await fetch(baseUrl + '/transcription_models', {
+                    method: 'GET',
+                    headers: { 'Accept': 'application/json' }
+                });
+
+                console.log('Response status:', response.status);
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                 }
-                const transData = await transResp.json();
-                
-                if (transData.whisper_models && Array.isArray(transData.whisper_models)) {
-                    whisperModelSelect.innerHTML = '';
-                    transData.whisper_models.forEach(({key, label}) => {
-                        const option = document.createElement('option');
-                        option.value = key;
-                        option.textContent = label;
-                        if (key === transData.default_whisper_model) option.selected = true;
-                        whisperModelSelect.appendChild(option);
-                    });
-                } else {
-                    console.warn("No whisper_models found in response:", transData);
+
+                const data = await response.json();
+                console.log('✓ Received models data:', data);
+
+                // Clear existing options
+                whisperModelSelect.innerHTML = '';
+
+                // Check if data is valid
+                if (!data.whisper_models || !Array.isArray(data.whisper_models)) {
+                    console.error('✗ Invalid response format:', data);
+                    const option = document.createElement('option');
+                    option.value = '';
+                    option.textContent = 'Error loading models';
+                    option.disabled = true;
+                    option.selected = true;
+                    whisperModelSelect.appendChild(option);
+                    return;
                 }
+
+                // Populate dropdown
+                if (data.whisper_models.length === 0) {
+                    const option = document.createElement('option');
+                    option.value = '';
+                    option.textContent = 'No models available';
+                    whisperModelSelect.appendChild(option);
+                    console.warn('⚠️ No whisper models found');
+                }
+
+                data.whisper_models.forEach(function(model) {
+                    const option = document.createElement('option');
+                    option.value = model.key;
+                    option.textContent = model.label;
+                    if (model.key === data.default_whisper_model) {
+                        option.selected = true;
+                        console.log('✓ Set default:', model.key);
+                    }
+                    whisperModelSelect.appendChild(option);
+                    console.log('✓ Added option:', model.key);
+                });
+
+                console.log('✓ Dropdown populated with', data.whisper_models.length, 'models');
+
             } catch (error) {
-                console.error("Error in loadModels:", error);
-                updateStatus(`Failed to load transcription models: ${error.message}`, true);
+                console.error('✗ Error in loadModels:', error);
+                // Add fallback option
+                const option = document.createElement('option');
+                option.value = 'base';
+                option.textContent = 'Base (Fallback)';
+                whisperModelSelect.appendChild(option);
             }
         }
 
