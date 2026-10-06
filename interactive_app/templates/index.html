@@ -1087,10 +1087,14 @@
                 updateStatus("No text to generate speech from.", true); 
                 return; 
             }
+            
             showLoader(true); 
             generateSpeechBtn.disabled = true;
+            updateStatus("Generating speech... please wait (may take 30+ seconds for long texts)", false, true);
 
             try {
+                console.log('🎵 Generating speech...');
+                
                 const response = await fetch('/generate_speech', {
                     method: 'POST', 
                     headers: { 'Content-Type': 'application/json' },
@@ -1109,36 +1113,64 @@
                     throw new Error(`HTTP ${response.status}: ${errorText}`);
                 }
                 
-                const audioBlob = await response.blob();
-                console.log('Audio blob size:', audioBlob.size);
+                // ✅ Get content-type header
+                const contentType = response.headers.get('content-type');
+                console.log('Response content-type:', contentType);
                 
-                if (audioBlob.size < 100) {
-                    throw new Error("Generated audio too small (" + audioBlob.size + " bytes)");
+                const audioBlob = await response.blob();
+                console.log('Audio blob size:', audioBlob.size, 'bytes');
+                console.log('Audio blob type:', audioBlob.type);
+                
+                if (audioBlob.size < 1000) {
+                    throw new Error("Generated audio too small (" + audioBlob.size + " bytes). Server may have returned an error as audio.");
                 }
                 
-                // ✅ CRITICAL: Create URL object and force player to load
+                // ✅ Create URL object
                 const audioUrl = URL.createObjectURL(audioBlob);
+                console.log('Created audio URL:', audioUrl);
+                
+                // ✅ Set src and force load
                 audioPlayer.src = audioUrl;
                 audioPlayer.classList.remove('hidden');
                 audioPlayer.style.display = 'block';
-                audioPlayer.load();
+                audioPlayer.setAttribute('controls', '');
                 
-                // Wait for readyState before attempting to play
-                await new Promise(resolve => {
-                    audioPlayer.oncanplay = resolve;
-                    setTimeout(resolve, 1000); // Fallback timeout
+                // ✅ Wait for metadata before attempting play
+                await new Promise((resolve, reject) => {
+                    const timeout = setTimeout(() => {
+                        console.warn('Timeout waiting for audio metadata');
+                        resolve(); // Don't fail, just continue
+                    }, 5000);
+                    
+                    audioPlayer.onloadedmetadata = () => {
+                        clearTimeout(timeout);
+                        console.log('✅ Audio metadata loaded');
+                        console.log('   Duration:', audioPlayer.duration, 'seconds');
+                        console.log('   Can play:', audioPlayer.canPlayType('audio/wav'));
+                        resolve();
+                    };
+                    
+                    audioPlayer.onerror = (e) => {
+                        clearTimeout(timeout);
+                        console.error('Audio load error:', e);
+                        resolve(); // Continue anyway
+                    };
                 });
                 
-                downloadSpeechBtn.disabled = false;
-                updateStatus("Speech generated successfully! Click play button below.", false);
-                
-                // Try auto-play (may be blocked by browser policy)
-                const playPromise = audioPlayer.play();
-                if (playPromise !== undefined) {
-                    playPromise.catch(e => {
-                        console.warn('Auto-play blocked (browser policy):', e);
-                    });
+                // ✅ Try auto-play (may be blocked by browser policy)
+                try {
+                    await audioPlayer.play();
+                    console.log('✅ Auto-play succeeded!');
+                    updateStatus("Speech generated and playing!", false);
+                } catch (playError) {
+                    console.warn('Auto-play blocked (browser policy):', playError);
+                    updateStatus("Speech generated successfully! Click the play button below.", false);
                 }
+                
+                downloadSpeechBtn.disabled = false;
+                
+                // ✅ Store blob for download button
+                window.currentAudioBlob = audioBlob;
                 
             } catch (error) {
                 console.error('Speech generation error:', error);
@@ -1149,6 +1181,22 @@
             }
         }
 
+        // ✅ Fix download button to use stored blob
+        downloadSpeechBtn.addEventListener('click', () => {
+            if (window.currentAudioBlob) {
+                const url = URL.createObjectURL(window.currentAudioBlob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `synthetic_speech_${Date.now()}.wav`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                updateStatus("Download started!", false);
+            } else {
+                updateStatus("No audio to download - please generate first.", true);
+            }
+        });
         recordBtn.addEventListener('click', toggleRecording);
         fileInput.addEventListener('change', handleFileUpload);
         transcribeBtn.addEventListener('click', transcribe);
