@@ -615,12 +615,12 @@ if [ "$NO_MODELS" = true ]; then
     log_info "Skipping model downloads (--no-models)"
 else
     declare -A MODEL_MAP
-    MODEL_MAP["tiny"]="faster-whisper-tiny"
-    MODEL_MAP["base"]="faster-whisper-base"
-    MODEL_MAP["small"]="faster-whisper-small"
-    MODEL_MAP["medium"]="faster-whisper-medium"
-    MODEL_MAP["large"]="faster-whisper-large-v3"
-    MODEL_MAP["large-turbo"]="faster-whisper-large-v3-turbo"
+    MODEL_MAP["tiny"]="Systran/faster-whisper-tiny"
+    MODEL_MAP["base"]="Systran/faster-whisper-base"
+    MODEL_MAP["small"]="Systran/faster-whisper-small"
+    MODEL_MAP["medium"]="Systran/faster-whisper-medium"
+    MODEL_MAP["large"]="Systran/faster-whisper-large-v3"
+    MODEL_MAP["large-turbo"]="Systran/faster-whisper-large-v3-turbo"
     
     WHISPER_PRIMARY_PATH=""
     
@@ -640,13 +640,25 @@ else
             [ -z "${MODEL_MAP[$model_name]}" ] && continue
             
             hf_repo="${MODEL_MAP[$model_name]}"
-            target_dir="$CURRENT_DIR/pipeline/model/${hf_repo//\/--}"
+            # ✅ FIX: Add Systran-- prefix with double dashes
+            target_dir="$CURRENT_DIR/pipeline/model/Systran--${hf_repo//\/--}"
             
             if [ ! -d "$target_dir" ] || [ -z "$(ls -A "$target_dir" 2>/dev/null)" ]; then
                 log_info "Downloading ${hf_repo}..."
                 python -c "
 from huggingface_hub import snapshot_download
-snapshot_download('${hf_repo}', local_dir='${target_dir}')
+import os
+
+target = '${target_dir}'
+repo = 'Systran/${hf_repo}'  # ✅ Use full repo ID
+
+os.makedirs(target, exist_ok=True)
+
+snapshot_download(
+    repo_id=repo,
+    local_dir=target,
+    local_dir_use_symlink=False
+)
 " 2>/dev/null || log_warn "Failed to download ${hf_repo}"
             else
                 log_success "${model_name} already exists"
