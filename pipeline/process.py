@@ -2183,25 +2183,10 @@ TAG_TO_SURROGATE_CATEGORY = {
 def apply_surrogate_substitution(text, entity_map, 
                                   use_surrogates=False,
                                   seed=None,
-                                  locales='de_DE,en_US'):
+                                  locales='en_US'):
     """
     Applies consistent Faker-based surrogate substitution to anonymized text.
-    
-    Args:
-        text: Anonymized text with placeholder tags like [PERSON], [CITY], etc.
-        entity_map: Dict from reconstruct_text_from_predictions():
-            {
-                'PERSON': ['Max Mustermann', 'Anna Schmidt'],
-                'ORGANISATION': ['TechCorp GmbH', 'City Hospital'],
-                'CITY': ['Berlin', 'Munich']
-            }
-        use_surrogates: If False, returns text unchanged
-        seed: Optional seed for reproducible surrogate generation
-        locales: Comma-separated Faker locales
-    
-    Returns:
-        tuple: (substituted_text, surrogate_registry)
-        surrogate_registry = {entity_type: {original: surrogate, ...}}
+    ✅ FIXED: Now searches for [TAG] placeholders directly, regardless of entity_map keys.
     """
 
     if not HAS_FAKER:
@@ -2211,13 +2196,12 @@ def apply_surrogate_substitution(text, entity_map,
     if not use_surrogates:
         return text, {}
     
-    if not entity_map:
-        logger.warning("Surrogate substitution requested but no entity map provided.")
+    if not text or '[' not in text:
+        logger.debug("No placeholders found in text, skipping surrogate substitution.")
         return text, {}
     
     try:
-        parsed_locales = [loc.strip() for loc in locales.split(',') if loc.strip()]
-        fake = Faker(parsed_locales)
+        fake = Faker(locales.split(','))
         if seed is not None:
             fake.seed_instance(seed)
             logger.info(f"Faker seeded with value: {seed} for reproducibility")
@@ -2225,12 +2209,8 @@ def apply_surrogate_substitution(text, entity_map,
         logger.error(f"Failed to initialize Faker: {e}")
         return text, {}
     
-    # Tracking registry for consistent substitution across text
-    surrogate_registry = defaultdict(dict)  # {type: {original: surrogate}}
-    counter = defaultdict(int)
-    
-    # FIXED: Keys match PLACEHOLDER names written into text by BERT (no brackets)
-    faker_methods = {
+    # Map BERT tags → SURROGATES pools → Faker generators
+    TAG_TO_FAKER_METHOD = {
         'PERSON': lambda: fake.name(),
         'PERSON_EMAIL': lambda: fake.email(),
         'PERSON_SOCIAL_RELATION': lambda: fake.name(),
@@ -2252,59 +2232,37 @@ def apply_surrogate_substitution(text, entity_map,
         'MISC': lambda: fake.word(),
     }
     
-    def get_or_create_surrogate(entity_type, original_value):
-        """Returns consistent surrogate for each unique original value."""
-        registry_key = original_value
-        
-        if registry_key not in surrogate_registry[entity_type]:
-            faker_func = faker_methods.get(entity_type, fake.word)
-            fake_value = faker_func()
-            
-            surrogate_registry[entity_type][registry_key] = fake_value
-            counter[entity_type] += 1
-            
-            logger.debug(f"Surrogate mapped: {entity_type} '{original_value}' → '{fake_value}'")
-        
-        return surrogate_registry[entity_type][registry_key]
+    # Track substitutions for consistency
+    used_values = defaultdict(list)
+    registry = defaultdict(list)
     
-    # Process text line by line (preserve structure)
-    result_lines = []
-    lines = text.split('\n')
+    def replacer(match):
+        tag = match.group(1)  # e.g., 'PERSON'
+        
+        if tag not in TAG_TO_FAKER_METHOD:
+            # No surrogate pool for this tag - keep placeholder
+            return match.group(0)
+        
+        # Get surrogate value
+        faker_func = TAG_TO_FAKER_METHOD[tag]
+        value = faker_func()
+        
+        # Avoid immediate repetition
+        if value in used_values[tag][-3:]:
+            value = faker_func()
+        
+        used_values[tag].append(value)
+        registry[tag].append(value)
+        
+        logger.debug(f"Surrogate: [{tag}] → '{value}'")
+        return value
     
-    for line_num, line in enumerate(lines):
-        match = re.match(r'^(SPEAKER_\d+):\s*(.*)$', line)
-        if not match:
-            result_lines.append(line)
-            continue
-        
-        speaker = match.group(1)
-        content = match.group(2)
-        
-        # FIXED: Strip brackets from entity_map keys before pattern building
-        for entity_type_raw in entity_map.keys():
-            entity_type = entity_type_raw.strip('[]')          # Strip surrounding []
-            placeholder_pattern = rf'\[{re.escape(entity_type)}\]'
-            
-            # Track position to ensure sequential replacement
-            pos_tracker = defaultdict(int)
-            
-            def replacer(m):
-                pos = pos_tracker[entity_type]
-                pos_tracker[entity_type] += 1
-                
-                if entity_type in entity_map and pos < len(entity_map[entity_type]):
-                    original_value = entity_map[entity_type][pos]
-                    return get_or_create_surrogate(entity_type, original_value)
-                else:
-                    # No more originals mapped - keep placeholder or use generic
-                    return f"[{entity_type}_GENERIC]"
-            
-            content = re.sub(placeholder_pattern, replacer, content)
-        
-        result_lines.append(f"{speaker}: {content}")
+    # Replace ALL [TAG] placeholders
+    s_text = re.sub(r'\[([A-Z_]+)\]', replacer, text)
     
-    logger.info(f"Applied surrogate substitution: {sum(counter.values())} entities replaced")
-    return '\n'.join(result_lines), dict(surrogate_registry)
+    entities_replaced = sum(len(v) for v in registry.values())
+    logger.info(f"Applied surrogate substitution: {entities_replaced} entities replaced")
+    return s_text, dict(registry)
 
 def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert=False, 
                           adversarial_mode=False, include_tags=None, exclude_tags=None, file_list=None):
