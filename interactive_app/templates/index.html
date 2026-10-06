@@ -581,6 +581,7 @@
     <!-- ROW 7: Download Results (no annotation) -->
     <div class="section-row">
         <div></div>
+        <div class="section-cell"> 
             <div class="section sec-download">
                 <h3>Download Results</h3>
                 <p style="color: #009AA9; margin-bottom: 15px; font-size: 0.95em;">
@@ -624,6 +625,11 @@
     </div>
 
     <script>
+        let currentSessionId = null;
+    let audioBlob = null;
+    let uploadedFile = null;
+    let offsetData = null;
+    let audioName = null;
     document.addEventListener('DOMContentLoaded', () => {
         console.log('📦 DOMContentLoaded fired');
         loadModels();
@@ -766,6 +772,80 @@
                 piiTagGrid.innerHTML = '<p style="color:#AF1821;font-size:0.9em;grid-column:1/-1;">Failed to load PII tags.</p>';
             }
         }
+
+        document.getElementById('surrogate-btn').addEventListener('click', async () => {
+            const text = anonymizedText.value;
+            if (!text.trim()) {
+                updateStatus("No text to process.", true);
+                return;
+            }
+            if (!currentSessionId) {
+                updateStatus("No active session - please run anonymization first", true);
+                return;
+            }
+            
+            showLoader(true);
+            try {
+                const response = await fetch('/surrogate_text', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        text, 
+                        session_id: currentSessionId, 
+                        lang: transcriptionLanguageSelect.value 
+                    })
+                });
+                
+                const result = await response.json();
+                if (result.success) {
+                    anonymizedText.value = result.surrogated_text;
+                    updateStatus("Surrogates applied successfully!", false);
+                    // Reload download buttons
+                    downloadBertBtn.disabled = false;
+                } else {
+                    updateStatus(`Error: ${result.error}`, true);
+                }
+            } catch (error) {
+                updateStatus(`Request failed: ${error.message}`, true);
+            } finally {
+                showLoader(false);
+            }
+        });
+
+        // Rephrase button - Use LLM to paraphrase text
+        document.getElementById('rephrase-btn').addEventListener('click', async () => {
+            const text = anonymizedText.value;
+            if (!text.trim()) {
+                updateStatus("No text to rephrase.", true);
+                return;
+            }
+            
+            showLoader(true);
+            try {
+                const response = await fetch('/llm_rewrite', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        text,
+                        model: 'medgemma',  // Or let user select model
+                        enabled: true
+                    })
+                });
+                
+                const result = await response.json();
+                if (result.success) {
+                    anonymizedText.value = result.rewritten_text;
+                    updateStatus("Text rephrased successfully!", false);
+                    downloadBertBtn.disabled = false;
+                } else {
+                    updateStatus(`Rephrase error: ${result.error}`, true);
+                }
+            } catch (error) {
+                updateStatus(`Request failed: ${error.message}`, true);
+            } finally {
+                showLoader(false);
+            }
+        });
 
         function getSelectedPiiTags() {
             return Array.from(piiTagGrid.querySelectorAll('input[type="checkbox"]:checked')).map(cb => cb.value);
@@ -937,31 +1017,66 @@
 
         async function anonymizeText() {
             const text = transcribedText.value;
-            if (!text.trim()) { updateStatus("No text to anonymize.", true); return; }
-            showLoader(true); anonymizeBtn.disabled = true;
-            updateStatus("Anonymization in progress...", false);
+            if (!text.trim()) {
+                updateStatus("No text to anonymize.", true);
+                return;
+            }
+            
+            // Get selected PII tags
+            const selectedTags = getSelectedPiiTags();
+            
+            showLoader(true);
+            anonymizeBtn.disabled = true;
+            
+            // Set persistent status during long-running operation
+            updateStatus("Anonymization in progress...", false, true);
 
             try {
                 const response = await fetch('/anonymize', {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ 
                         transcript: text,
                         lang: transcriptionLanguageSelect.value,
-                        include_tags: getSelectedPiiTags().length > 0 ? getSelectedPiiTags() : undefined
+                        include_tags: selectedTags.length > 0 ? selectedTags : undefined
                     })
                 });
+                
                 const result = await response.json();
+                
                 if (response.ok && result.status === 'success') {
+                    // ✅ FIX: Store session_id for surrogate button to use
+                    currentSessionId = result.session_id;
+                    console.log('✅ Session ID stored:', currentSessionId);
+                    
+                    // Update UI with anonymized text
                     anonymizedText.value = result.anonymized || result.text || '';
                     ttsContainer.classList.remove('hidden');
+                    
+                    // Enable download buttons
                     downloadBertBtn.disabled = false;
-                    updateStatus("Anonymization successful!", false);
+                    downloadOriginalBtn.disabled = false;
+                    
+                    // Enable surrogate button (now has session_id)
+                    document.getElementById('surrogate-btn').disabled = false;
+                    
+                    // Show entity count
+                    updateStatus(`Anonymization successful! ${result.entity_count || 0} entities detected`, false);
+                    
+                    // Schedule survey popup
                     scheduleSurveyModal();
-                } else throw new Error(result.error || "Anonymization failed.");
+                } else {
+                    // Handle server error
+                    throw new Error(result.error || "Anonymization failed.");
+                }
             } catch (error) {
+                console.error('Anonymization error:', error);
                 updateStatus(`Anonymization failed: ${error.message}`, true);
+                // Clear any stale session
+                currentSessionId = null;
             } finally {
-                showLoader(false); anonymizeBtn.disabled = false;
+                showLoader(false);
+                anonymizeBtn.disabled = false;
             }
         }
 

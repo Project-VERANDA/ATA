@@ -195,6 +195,43 @@ def transcribe_audio(audio_path, language='auto'):
 CHAT_AI_API_KEY = os.getenv('CHAT_AI_API_KEY')
 CHAT_AI_ENDPOINT = os.getenv('CHAT_AI_ENDPOINT', 'https://llm.cloud.cci.charite.de/v1')
 
+# Faker Surrogate processing
+try:
+    from faker import Faker
+    HAS_FAKER = True
+    FAKER_LOCALE_MAP = {
+        'EN': 'en_US',
+        'DE': 'de_DE',
+        'FR': 'fr_FR',
+        'ES': 'es_ES',
+        # ... add others as needed
+    }
+    def apply_surrogate_substitution(text, entity_map, use_surrogates=False, seed=None, locales='en_US'):
+        """Apply Faker-based surrogate substitution."""
+        if seed is not None:
+            faker = Faker(locales)
+            faker.seed_instance(seed)
+        else:
+            faker = Faker(locales)
+        
+        registry = {}
+        result = text
+        
+        for tag, entities in entity_map.items():
+            for i, entity in enumerate(entities):
+                if use_surrogates and tag in SURROGATES.get('EN', {}):
+                    surrogate = random.choice(SURROGATES['EN'].get(tag, [entity]))
+                    result = result.replace(entity, surrogate, 1)
+                    if tag not in registry:
+                        registry[tag] = []
+                    registry[tag].append(surrogate)
+        
+        return result, registry
+except ImportError:
+    HAS_FAKER = False
+    FAKER_LOCALE_MAP = {}
+    apply_surrogate_substitution = None
+
 # Model mappings for the UI
 
 AVAILABLE_MODELS = {
@@ -734,26 +771,28 @@ def get_models():
 def get_transcription_models():
     # Scan MODEL_FOLDER for actual available Whisper models
     model_map = {
-        'large': 'Large (Best Accuracy)',
-        'medium': 'Medium',
-        'small': 'Small',
-        'base': 'Base (Default)',
-        'tiny': 'Tiny (Fastest)',
+        'large': 'Systran--faster-whisper-large-v3',
+        'large-turbo': 'Systran--faster-whisper-large-v3-turbo',
+        'medium': 'Systran--faster-whisper-medium',
+        'small': 'Systran--faster-whisper-small',
+        'base': 'Systran--faster-whisper-base',
+        'tiny': 'Systran--faster-whisper-tiny',
     }
     
     available_models = {}
-    for model_key, model_desc in model_map.items():
-        model_path = MODEL_FOLDER / f'Systran--faster-whisper-{model_key}'
+    for ui_key, folder_name in model_map.items():
+        model_path = MODEL_FOLDER / folder_name
         if model_path.exists():
-            available_models[model_key] = model_desc
+            available_models[ui_key] = model_map[ui_key]  # Store UI key + label
     
     if not available_models:
         logger.warning("No Whisper models found in MODEL_FOLDER!")
-        available_models = {'base': 'Base (Fallback)'}  # Safety fallback
+        available_models = {'base': 'Base (Fallback)'}
     
     return jsonify({
         'whisper_models': [
-            {'key': k, 'label': v} for k, v in available_models.items()
+            {'key': k, 'label': f'{k.title()}' if k != 'large-turbo' else 'Large Turbo'}
+            for k, v in available_models.items()
         ],
         'default_whisper_model': 'large' if 'large' in available_models else 'base'
     })
@@ -1134,29 +1173,47 @@ def generate_speech_api():
         data = request.get_json()
         text = data.get('text', '').strip()
         lang = data.get('lang', 'en')
-        randomize_voices = data.get('randomize_voices', True)  # Always randomize per spec
         
         if not text:
             return jsonify({'error': 'No text provided'}), 400
         
-        logger.info(f"🎵 Speech request: {len(text)} chars, multi-speaker=True")
+        logger.info(f"🎵 Speech request: {len(text)} chars")
         
-        # Generate multi-speaker TTS
         output_path, voice_mapping = generate_multi_speaker_tts(
             transcript_text=text,
-            word_offsets=[],  # Would pass from earlier transcription if available
+            word_offsets=[],
             audio_source_path=None
         )
         
+        # ✅ CRITICAL VERIFICATION
         if output_path is None:
-            logger.error("Speech generation failed")
-            return jsonify({'error': 'Speech generation failed'}), 500
+            logger.error("TTS returned None output path")
+            return jsonify({'error': 'TTS returned no output path'}), 500
+        
+        if not os.path.exists(output_path):
+            logger.error(f"TTS file not found: {output_path}")
+            return jsonify({'error': 'Generated file does not exist'}), 500
+        
+        file_size = os.path.getsize(output_path)
+        if file_size == 0:
+            logger.error(f"TTS file is empty: {output_path}")
+            # Debug: Log TTS engine status
+            from pipeline.tts.tts_engine import get_tts_status
+            tts_status = get_tts_status()
+            logger.error(f"TTS Status: {tts_status}")
+            return jsonify({
+                'error': 'Generated file is empty',
+                'file_path': output_path,
+                'tts_status': tts_status
+            }), 500
+        
+        logger.info(f"✅ Generated speech: {file_size} bytes")
         
         return send_file(
             output_path,
             mimetype='audio/wav',
             as_attachment=True,
-            download_name=f'multi_speaker_tts_{int(time.time())}.wav'
+            download_name=f'tts_{int(time.time())}.wav'
         )
         
     except Exception as e:
@@ -1300,7 +1357,7 @@ def llm_rewrite_route():
             return jsonify({'error': 'No text provided'}), 400
         
         text = data['text']
-        model_key = data.get('model', 'medgemma') 
+        model_key = data.get('model', 'medgemma')  # ← Use 'model' instead of 'lang'
         enabled = data.get('enabled', True)
 
         if not enabled:
@@ -1309,18 +1366,7 @@ def llm_rewrite_route():
         if not CHAT_AI_API_KEY:
             return jsonify({'error': 'LLM API Key not configured on server'}), 500
 
-        model_id = AVAILABLE_MODELS.get(model_key, model_key)
-        
-        # DEBUG: Log what we're actually sending
-        logger.info(f"Web Interface: Model key={model_key}")
-        logger.info(f"Web Interface: Mapped model_id={model_id}")
-        logger.info(f"Web Interface: Endpoint={CHAT_AI_ENDPOINT}")
-        logger.info(f"Web Interface: API Key length={len(CHAT_AI_API_KEY) if CHAT_AI_API_KEY else 0}")
-        logger.info(f"Web Interface: Text length={len(text)}")
-        
-        rewritten_text, status = call_llm_rewriter(text, model_id)
-        
-        logger.info(f"DEBUG: call_llm_rewriter returned: status={status}, len(text)={len(rewritten_text) if rewritten_text else 0}")
+        rewritten_text, status = call_llm_rewriter(text, model_key)  # Pass model_key directly
         
         if not rewritten_text:
             return jsonify({'error': f'LLM rewrite failed: {status}'}), 500
@@ -1328,13 +1374,11 @@ def llm_rewrite_route():
         return jsonify({
             'success': True,
             'rewritten_text': rewritten_text,
-            'model_used': model_id
+            'model_used': model_key
         })
-
+    
     except Exception as e:
         logger.error(f"Error in LLM rewrite route: {str(e)}")
-        import traceback
-        logger.error(traceback.format_exc())
         return jsonify({'error': f'Error rewriting text: {str(e)}'}), 500
 
 # --- NEW ROUTES FOR EDITING & BULK UPLOAD ---
@@ -1588,23 +1632,38 @@ def process_all_batches():
 def download_text(file_type, filename):
     """Downloads text files (original, anonymized, LLM)"""
     try:
-        # Map file types to folders
+        from process import ANONYM_FOLDER, LLM_ANONYM_FOLDER
+        
+        # ✅ FIX: Use absolute paths from process.py
         folder_map = {
-            'original': app.config['UPLOAD_FOLDER'], # Assuming original is saved here or in a specific folder
-            'bert': ANONYM_FOLDER,
-            'llm': LLM_ANONYM_FOLDER
+            'original': app.config['UPLOAD_FOLDER'],
+            'bert': str(ANONYM_FOLDER.absolute()),
+            'llm': str(LLM_ANONYM_FOLDER.absolute())
         }
         
         if file_type not in folder_map:
             return jsonify({'error': 'Invalid file type'}), 400
-            
-        base_path = folder_map[file_type]
-        file_path = os.path.join(base_path, secure_filename(filename))
         
+        base_path = folder_map[file_type]
+        safe_filename = secure_filename(filename)
+        file_path = os.path.join(base_path, safe_filename)
+        
+        # Verify file exists within allowed directory
         if not os.path.exists(file_path):
-            return jsonify({'error': 'File not found'}), 404
-            
-        return send_file(file_path, as_attachment=True, download_name=filename)
+            logger.warning(f"File not found: {file_path}")
+            # Debug: Return what folders actually exist
+            return jsonify({
+                'error': 'File not found',
+                'file_path': file_path,
+                'exists': os.path.exists(file_path),
+                'base_path': base_path,
+                'available_folders': {
+                    'uploads': list(os.listdir(app.config['UPLOAD_FOLDER'])),
+                    'anonym': list(os.listdir(ANONYM_FOLDER)) if ANONYM_FOLDER.exists() else []
+                }
+            }), 404
+        
+        return send_file(file_path, as_attachment=True, download_name=safe_filename)
     except Exception as e:
         logger.error(f"Error downloading text: {e}")
         return jsonify({'error': str(e)}), 500
