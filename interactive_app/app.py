@@ -1677,7 +1677,7 @@ def generate_beep_route():
         return jsonify({'error': str(e)}), 500
 
 
-def _cleanup_expired_sessions():
+def cleanup_expired_sessions():
     """Background task to remove expired sessions periodically."""
     MAX_SESSION_AGE_SECONDS = int(os.getenv('SESSION_MAX_AGE_SECONDS', 3600))
     CLEANUP_INTERVAL_SECONDS = int(os.getenv('SESSION_CLEANUP_INTERVAL', 300))  # ← Use env var
