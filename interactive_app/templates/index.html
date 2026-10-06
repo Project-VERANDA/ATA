@@ -970,6 +970,7 @@
             const file = fileInput.files[0];
             if (file) {
                 audioBlob = null; uploadedFile = file;
+                currentAudioFilename = file.name;  // ← STORE THIS
                 filenameDisplay.textContent = `Selected file: ${file.name}`;
                 updateUIForTranscription();
             }
@@ -1045,7 +1046,7 @@
                 const result = await response.json();
                 
                 if (response.ok && result.status === 'success') {
-                    // ✅ FIX: Store session_id for surrogate button to use
+                    // Store session_id for surrogate button to use
                     currentSessionId = result.session_id;
                     console.log('✅ Session ID stored:', currentSessionId);
                     
@@ -1065,6 +1066,11 @@
                     
                     // Schedule survey popup
                     scheduleSurveyModal();
+
+                    // Save audio filename
+                    currentAudioFilename = result.audio_name ? 
+                    Path.basename(result.audio_name, Path.extname(result.audio_name)) + '.txt' : 
+                    null;
                 } else {
                     // Handle server error
                     throw new Error(result.error || "Anonymization failed.");
@@ -1079,29 +1085,59 @@
                 anonymizeBtn.disabled = false;
             }
         }
-
         async function generateSpeech() {
             const text = anonymizedText.value;
-            if (!text.trim()) { updateStatus("No text to generate speech from.", true); return; }
-            showLoader(true); generateSpeechBtn.disabled = true;
+            if (!text.trim()) { 
+                updateStatus("No text to generate speech from.", true); 
+                return; 
+            }
+            showLoader(true); 
+            generateSpeechBtn.disabled = true;
 
             try {
                 const response = await fetch('/generate_speech', {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ text, lang: transcriptionLanguageSelect.value, randomize_voices: true })
+                    method: 'POST', 
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        text, 
+                        lang: transcriptionLanguageSelect.value, 
+                        randomize_voices: true 
+                    })
                 });
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                
+                console.log('Speech response status:', response.status);
+                
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error('Speech API error:', errorText);
+                    throw new Error(`HTTP ${response.status}: ${errorText}`);
+                }
+                
                 const audioBlob = await response.blob();
-                if (audioBlob.size < 100) throw new Error("Generated audio too small");
+                console.log('Audio blob size:', audioBlob.size);
+                
+                if (audioBlob.size < 100) {
+                    throw new Error("Generated audio too small (" + audioBlob.size + " bytes)");
+                }
+                
+                // Force visible
                 audioPlayer.src = URL.createObjectURL(audioBlob);
                 audioPlayer.classList.remove('hidden');
+                audioPlayer.style.display = 'block';  // Additional guarantee
                 audioPlayer.load();
+                
                 downloadSpeechBtn.disabled = false;
-                updateStatus("Speech generated successfully!", false);
+                updateStatus("Speech generated successfully! Click play button below.", false);
+                
+                // Auto-play to test
+                // audioPlayer.play().catch(e => console.warn('Auto-play blocked:', e));
+                
             } catch (error) {
+                console.error('Speech generation error:', error);
                 updateStatus(`Speech generation failed: ${error.message}`, true);
             } finally {
-                showLoader(false); generateSpeechBtn.disabled = false;
+                showLoader(false); 
+                generateSpeechBtn.disabled = false;
             }
         }
 
@@ -1123,8 +1159,39 @@
             downloadBertBtn.disabled = !anonymizedText.value.trim().length;
             downloadSpeechBtn.disabled = !anonymizedText.value.trim().length;
         });
-        downloadOriginalBtn.addEventListener('click', () => window.open('/download_text/original/transcription.txt'));
-        downloadBertBtn.addEventListener('click', () => window.open('/download_text/bert/anonymized.txt'));
+        // Helper function to download text directly from textarea
+        function downloadTextContent(content, filename) {
+            const blob = new Blob([content], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        downloadOriginalBtn.addEventListener('click', () => {
+            const filename = audioName ? audioName.replace(/\.[^/.]+$/, '') + '_transcription.txt' : 'transcription.txt';
+            downloadTextContent(transcribedText.value, filename);
+        });
+
+        downloadBertBtn.addEventListener('click', () => {
+            const filename = audioName ? audioName.replace(/\.[^/.]+$/, '') + '_anon.txt' : 'anonymized.txt';
+            downloadTextContent(anonymizedText.value, filename);
+        });
+
+        downloadSpeechBtn.addEventListener('click', () => { 
+            if (audioPlayer.src) {
+                const a = document.createElement('a');
+                a.href = audioPlayer.src;
+                a.download = 'synthetic_speech.wav';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+            }
+        });
         downloadSpeechBtn.addEventListener('click', () => { if (audioPlayer.src) window.open(audioPlayer.src); });
 
         loadModels();
