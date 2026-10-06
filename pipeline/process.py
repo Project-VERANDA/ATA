@@ -38,8 +38,15 @@ except ImportError:
 # This MUST run BEFORE any whisperx/pyannote imports that trigger cuDNN init
 # =============================================================================
 import torch
-if args.verbose:
-    warnings.filterwarnings("ignore", category=UserWarning, module="pyannote")
+import warnings
+
+# Only apply verbose filters when running as main script (args exists)
+try:
+    if args.verbose:  # This will fail during import if args not defined
+        warnings.filterwarnings("ignore", category=UserWarning, module="pyannote")
+except NameError:
+    # Safe to ignore - this only applies when running as main script
+    pass
 
 # Disable cuDNN to avoid CUDNN_STATUS_NOT_INITIALIZED with WhisperX + Pyannote
 torch.backends.cudnn.enabled = True
