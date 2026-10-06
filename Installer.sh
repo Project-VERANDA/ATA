@@ -615,12 +615,12 @@ if [ "$NO_MODELS" = true ]; then
     log_info "Skipping model downloads (--no-models)"
 else
     declare -A MODEL_MAP
-    MODEL_MAP["tiny"]="Systran/faster-whisper-tiny"
-    MODEL_MAP["base"]="Systran/faster-whisper-base"
-    MODEL_MAP["small"]="Systran/faster-whisper-small"
-    MODEL_MAP["medium"]="Systran/faster-whisper-medium"
-    MODEL_MAP["large"]="Systran/faster-whisper-large-v3"
-    MODEL_MAP["large-turbo"]="Systran/faster-whisper-large-v3-turbo"
+    MODEL_MAP["tiny"]="faster-whisper-tiny"
+    MODEL_MAP["base"]="faster-whisper-base"
+    MODEL_MAP["small"]="faster-whisper-small"
+    MODEL_MAP["medium"]="faster-whisper-medium"
+    MODEL_MAP["large"]="faster-whisper-large-v3"
+    MODEL_MAP["large-turbo"]="faster-whisper-large-v3-turbo"
     
     WHISPER_PRIMARY_PATH=""
     

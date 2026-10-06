@@ -56,22 +56,14 @@ create_version_backup() {
     local timestamp=$(date +%Y%m%d_%H%M%S)
     local backup_dir="$CURRENT_DIR/backups/$timestamp"
     
-    # Create backups parent directory if needed
-    if [ ! -d "$CURRENT_DIR/backups" ]; then
-        log_info "Creating backups directory..."
-        mkdir -p "$CURRENT_DIR/backups" || {
-            log_warn "Cannot create backups directory - disabling backup feature"
-            return 0
-        }
-        # Fix permissions
-        chmod 755 "$CURRENT_DIR/backups" 2>/dev/null || true
-    fi
-    
-    # Create timestamped backup subdirectory
-    mkdir -p "$backup_dir" || {
+    # Create backup directory (creates parent if needed too)
+    if ! mkdir -p "$backup_dir" 2>/dev/null; then
         log_warn "Cannot create backup directory at $backup_dir - disabling backup feature"
         return 0
-    }
+    fi
+    
+    # Fix permissions on parent directory
+    chmod 755 "$CURRENT_DIR/backups" 2>/dev/null || true
     
     log_info "Creating version backup at $backup_dir..."
     
@@ -623,12 +615,12 @@ if [ "$NO_MODELS" = true ]; then
     log_info "Skipping model downloads (--no-models)"
 else
     declare -A MODEL_MAP
-    MODEL_MAP["tiny"]="Systran/faster-whisper-tiny"
-    MODEL_MAP["base"]="Systran/faster-whisper-base"
-    MODEL_MAP["small"]="Systran/faster-whisper-small"
-    MODEL_MAP["medium"]="Systran/faster-whisper-medium"
-    MODEL_MAP["large"]="Systran/faster-whisper-large-v3"
-    MODEL_MAP["large-turbo"]="Systran/faster-whisper-large-v3-turbo"
+    MODEL_MAP["tiny"]="faster-whisper-tiny"
+    MODEL_MAP["base"]="faster-whisper-base"
+    MODEL_MAP["small"]="faster-whisper-small"
+    MODEL_MAP["medium"]="faster-whisper-medium"
+    MODEL_MAP["large"]="faster-whisper-large-v3"
+    MODEL_MAP["large-turbo"]="faster-whisper-large-v3-turbo"
     
     WHISPER_PRIMARY_PATH=""
     
