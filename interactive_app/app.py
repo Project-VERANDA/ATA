@@ -210,16 +210,24 @@ CHAT_AI_ENDPOINT = os.getenv('CHAT_AI_ENDPOINT', 'https://llm.cloud.cci.charite.
 
 # Faker Surrogate processing
 try:
-    from process import apply_surrogate_substitution, SURROGATES, TAG_TO_SURROGATE_CATEGORY
+    from process import (
+        apply_surrogate_substitution, 
+        SURROGATES, 
+        TAG_TO_SURROGATE_CATEGORY,
+        ANONYM_FOLDER,
+        LLM_ANONYM_FOLDER
+    )
     HAS_FAKER = True
-    logger.info("✅ Successfully imported apply_surrogate_substitution from process.py")
+    logger.info("✅ Successfully imported surrogate functions from process.py")
 except ImportError as e:
     HAS_FAKER = False
     SURROGATES = {}
     TAG_TO_SURROGATE_CATEGORY = {}
     apply_surrogate_substitution = None
-    logger.error(f"❌ Failed to import surrogate functions from process.py: {e}")
-    logger.warning("Surrogate button will be disabled. Install Faker in the shared environment.")
+    ANONYM_FOLDER = Path('anonym')
+    LLM_ANONYM_FOLDER = Path('LLM-Anon')
+    logger.error(f"❌ Failed to import from process.py: {e}")
+    logger.warning("Some features may be disabled.")
 
 # Model mappings for the UI
 
