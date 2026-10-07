@@ -240,7 +240,7 @@ replacer = AudioBeepReplacer(beep_freq=1000, beep_gain_db=-6) output_file = repl
 The BERT anonymization model detects and replaces the following entity types:
 
 |Tag |	Description	| Replacement|
-
+----|----|----
 PERSON|Names|[**PERSON**]
 PERSON_EMAIL |	Email addresses |	[**EMAIL**]
 PERSON_SOCIAL_RELATION |	Family/Social relations	| [**NAME_RELATIVE**]
@@ -266,7 +266,7 @@ These are set via CLI arguments, not `.env`:
 
 Example output:
 - Original:`James Bond` → `[PERSON]` → Surrogate: `"Max Müller"`
-- Original: `Hamburg` →`[CITY]` → Surrogate: `"Berlin"`
+- Original: `London` →`[CITY]` → Surrogate: `"Berlin"`
 
 # 🐞 Troubleshooting Issue: 
 
