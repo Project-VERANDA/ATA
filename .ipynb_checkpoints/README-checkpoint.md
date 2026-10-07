@@ -242,7 +242,6 @@ The BERT anonymization model detects and replaces the following entity types:
 |Tag |	Description	| Replacement|
 
 PERSON|Names|[**PERSON**]
-----|----|----
 PERSON_EMAIL |	Email addresses |	[**EMAIL**]
 PERSON_SOCIAL_RELATION |	Family/Social relations	| [**NAME_RELATIVE**]
 ORG |	Organizations |	[**ORGANISATION**]
