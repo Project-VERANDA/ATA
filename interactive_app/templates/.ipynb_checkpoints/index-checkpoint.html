@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' blob: data:; media-src 'self' blob: data:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';">
     <title>Speech Anonymizer</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -581,6 +582,7 @@
     <!-- ROW 7: Download Results (no annotation) -->
     <div class="section-row">
         <div></div>
+        <div class="section-cell"> 
             <div class="section sec-download">
                 <h3>Download Results</h3>
                 <p style="color: #009AA9; margin-bottom: 15px; font-size: 0.95em;">
@@ -617,14 +619,21 @@
                 <p>Estimated time: <strong>10-15 minutes</strong>.</p>
             </div>
             <div class="modal-footer">
-                <a href="https://example.com/survey" target="_blank" class="modal-cta-btn" id="survey-link">Take Survey →</a>
+                <a href="https://survey.charite.de/InterviewTranscriber_UserSurvey/" target="_blank" class="modal-cta-btn" id="survey-link">Take Survey →</a>
                 <span class="modal-dismiss-link" id="modal-dismiss-link">Maybe later</span>
             </div>
         </div>
     </div>
 
     <script>
+        let currentSessionId = null;
+    let audioBlob = null;
+    let uploadedFile = null;
+    let offsetData = null;
+    let audioName = null;
     document.addEventListener('DOMContentLoaded', () => {
+        console.log('📦 DOMContentLoaded fired');
+        loadModels();
         // === MODAL FUNCTIONS ===
         const surveyModal = document.getElementById('survey-modal');
         const modalCloseBtn = document.getElementById('modal-close-btn');
@@ -727,7 +736,6 @@
                 setTimeout(() => { statusDiv.style.display = 'none'; }, 5000);
             }
         }
-        }
 
         function showLoader(show) { loader.style.display = show ? 'block' : 'none'; }
 
@@ -766,6 +774,80 @@
             }
         }
 
+        document.getElementById('surrogate-btn').addEventListener('click', async () => {
+            const text = anonymizedText.value;
+            if (!text.trim()) {
+                updateStatus("No text to process.", true);
+                return;
+            }
+            if (!currentSessionId) {
+                updateStatus("No active session - please run anonymization first", true);
+                return;
+            }
+            
+            showLoader(true);
+            try {
+                const response = await fetch('/surrogate_text', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        text, 
+                        session_id: currentSessionId, 
+                        lang: transcriptionLanguageSelect.value 
+                    })
+                });
+                
+                const result = await response.json();
+                if (result.success) {
+                    anonymizedText.value = result.surrogated_text;
+                    updateStatus("Surrogates applied successfully!", false);
+                    // Reload download buttons
+                    downloadBertBtn.disabled = false;
+                } else {
+                    updateStatus(`Error: ${result.error}`, true);
+                }
+            } catch (error) {
+                updateStatus(`Request failed: ${error.message}`, true);
+            } finally {
+                showLoader(false);
+            }
+        });
+
+        // Rephrase button - Use LLM to paraphrase text
+        document.getElementById('rephrase-btn').addEventListener('click', async () => {
+            const text = anonymizedText.value;
+            if (!text.trim()) {
+                updateStatus("No text to rephrase.", true);
+                return;
+            }
+            
+            showLoader(true);
+            try {
+                const response = await fetch('/llm_rewrite', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        text,
+                        model: 'medgemma',  // Or let user select model
+                        enabled: true
+                    })
+                });
+                
+                const result = await response.json();
+                if (result.success) {
+                    anonymizedText.value = result.rewritten_text;
+                    updateStatus("Text rephrased successfully!", false);
+                    downloadBertBtn.disabled = false;
+                } else {
+                    updateStatus(`Rephrase error: ${result.error}`, true);
+                }
+            } catch (error) {
+                updateStatus(`Request failed: ${error.message}`, true);
+            } finally {
+                showLoader(false);
+            }
+        });
+
         function getSelectedPiiTags() {
             return Array.from(piiTagGrid.querySelectorAll('input[type="checkbox"]:checked')).map(cb => cb.value);
         }
@@ -774,21 +856,66 @@
         piiClearAllBtn.addEventListener('click', () => piiTagGrid.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false));
 
         async function loadModels() {
+            console.log('🔍 loadModels() called');
+            
             try {
-                const transResp = await fetch(window.location.origin + '/transcription_models');
-                const transData = await transResp.json();
-                if (transData.whisper_models) {
-                    whisperModelSelect.innerHTML = '';
-                    transData.whisper_models.forEach(([value, label]) => {
-                        const option = document.createElement('option');
-                        option.value = value;
-                        option.textContent = label;
-                        if (value === transData.default_whisper_model) option.selected = true;
-                        whisperModelSelect.appendChild(option);
-                    });
+                const baseUrl = window.location.origin || 'https://transcriber.cloud.cci.charite.de';
+                console.log('Fetching models from:', baseUrl + '/transcription_models');
+
+                const response = await fetch(baseUrl + '/transcription_models', {
+                    method: 'GET',
+                    headers: { 'Accept': 'application/json' }
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                 }
+
+                const data = await response.json();
+
+                if (!data.whisper_models || !Array.isArray(data.whisper_models)) {
+                    console.warn('Invalid response format or empty array:', data);
+                    const option = document.createElement('option');
+                    option.value = '';
+                    option.textContent = 'Error loading models';
+                    option.disabled = true;
+                    whisperModelSelect.appendChild(option);
+                    return;
+                }
+
+                // Clear existing options
+                whisperModelSelect.innerHTML = '';
+
+                // Check if we have a saved preference
+                const savedPreference = localStorage.getItem('preferredWhisperModel');
+                console.log('Saved preference:', savedPreference);
+
+                data.whisper_models.forEach(function(model) {
+                    const option = document.createElement('option');
+                    option.value = model.key;
+                    option.textContent = model.label;
+                    
+                    // ✅ FIX: Use saved preference OR server default
+                    if (model.key === savedPreference || model.key === data.default_whisper_model) {
+                        option.selected = true;
+                        console.log('✓ Selected:', model.key);
+                    }
+                    
+                    whisperModelSelect.appendChild(option);
+                });
+
+                // Listen for changes and save preference
+                whisperModelSelect.addEventListener('change', function() {
+                    const selectedModel = this.value;
+                    localStorage.setItem('preferredWhisperModel', selectedModel);
+                    console.log('✓ Saved preference:', selectedModel);
+                });
+
+                console.log('✓ Dropdown populated with', data.whisper_models.length, 'models');
+
             } catch (error) {
-                console.error("Error in loadModels:", error);
+                console.error('Error in loadModels:', error);
+                updateStatus(`Failed to load models: ${error.message}`, true);
             }
         }
 
@@ -839,6 +966,7 @@
             const file = fileInput.files[0];
             if (file) {
                 audioBlob = null; uploadedFile = file;
+                currentAudioFilename = file.name;  // ← STORE THIS
                 filenameDisplay.textContent = `Selected file: ${file.name}`;
                 updateUIForTranscription();
             }
@@ -886,59 +1014,189 @@
 
         async function anonymizeText() {
             const text = transcribedText.value;
-            if (!text.trim()) { updateStatus("No text to anonymize.", true); return; }
-            showLoader(true); anonymizeBtn.disabled = true;
-            updateStatus("Anonymization in progress...", false);
+            if (!text.trim()) {
+                updateStatus("No text to anonymize.", true);
+                return;
+            }
+            
+            // Get selected PII tags
+            const selectedTags = getSelectedPiiTags();
+            
+            showLoader(true);
+            anonymizeBtn.disabled = true;
+            
+            // Set persistent status during long-running operation
+            updateStatus("Anonymization in progress...", false, true);
 
             try {
                 const response = await fetch('/anonymize', {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ 
                         transcript: text,
                         lang: transcriptionLanguageSelect.value,
-                        include_tags: getSelectedPiiTags().length > 0 ? getSelectedPiiTags() : undefined
+                        include_tags: selectedTags.length > 0 ? selectedTags : undefined
                     })
                 });
+                
                 const result = await response.json();
+                
                 if (response.ok && result.status === 'success') {
+                    // Store session_id for surrogate button to use
+                    currentSessionId = result.session_id;
+                    console.log('✅ Session ID stored:', currentSessionId);
+                    
+                    // Update UI with anonymized text
                     anonymizedText.value = result.anonymized || result.text || '';
                     ttsContainer.classList.remove('hidden');
+                    
+                    // Enable download buttons
                     downloadBertBtn.disabled = false;
-                    updateStatus("Anonymization successful!", false);
+                    downloadOriginalBtn.disabled = false;
+                    
+                    // Enable surrogate button (now has session_id)
+                    document.getElementById('surrogate-btn').disabled = false;
+                    
+                    // Show entity count
+                    updateStatus(`Anonymization successful! ${result.entity_count || 0} entities detected`, false);
+                    
+                    // Schedule survey popup
                     scheduleSurveyModal();
-                } else throw new Error(result.error || "Anonymization failed.");
+
+                    // Save audio filename
+                    currentAudioFilename = result.audio_name ? 
+                    Path.basename(result.audio_name, Path.extname(result.audio_name)) + '.txt' : 
+                    null;
+                } else {
+                    // Handle server error
+                    throw new Error(result.error || "Anonymization failed.");
+                }
             } catch (error) {
+                console.error('Anonymization error:', error);
                 updateStatus(`Anonymization failed: ${error.message}`, true);
+                // Clear any stale session
+                currentSessionId = null;
             } finally {
-                showLoader(false); anonymizeBtn.disabled = false;
+                showLoader(false);
+                anonymizeBtn.disabled = false;
             }
         }
-
         async function generateSpeech() {
             const text = anonymizedText.value;
-            if (!text.trim()) { updateStatus("No text to generate speech from.", true); return; }
-            showLoader(true); generateSpeechBtn.disabled = true;
+            if (!text.trim()) { 
+                updateStatus("No text to generate speech from.", true); 
+                return; 
+            }
+            
+            showLoader(true); 
+            generateSpeechBtn.disabled = true;
+            updateStatus("Generating speech... please wait (may take 30+ seconds for long texts)", false, true);
 
             try {
+                console.log('🎵 Generating speech...');
+                
                 const response = await fetch('/generate_speech', {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ text, lang: transcriptionLanguageSelect.value, randomize_voices: true })
+                    method: 'POST', 
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        text, 
+                        lang: transcriptionLanguageSelect.value, 
+                        randomize_voices: true 
+                    })
                 });
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                
+                console.log('Speech response status:', response.status);
+                
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error('Speech API error:', errorText);
+                    throw new Error(`HTTP ${response.status}: ${errorText}`);
+                }
+                
+                // ✅ Get content-type header
+                const contentType = response.headers.get('content-type');
+                console.log('Response content-type:', contentType);
+                
                 const audioBlob = await response.blob();
-                if (audioBlob.size < 100) throw new Error("Generated audio too small");
-                audioPlayer.src = URL.createObjectURL(audioBlob);
+                console.log('Audio blob size:', audioBlob.size, 'bytes');
+                console.log('Audio blob type:', audioBlob.type);
+                
+                if (audioBlob.size < 1000) {
+                    throw new Error("Generated audio too small (" + audioBlob.size + " bytes). Server may have returned an error as audio.");
+                }
+                
+                // ✅ Create URL object
+                const audioUrl = URL.createObjectURL(audioBlob);
+                console.log('Created audio URL:', audioUrl);
+                
+                // ✅ Set src and force load
+                audioPlayer.src = audioUrl;
                 audioPlayer.classList.remove('hidden');
-                audioPlayer.load();
+                audioPlayer.style.display = 'block';
+                audioPlayer.setAttribute('controls', '');
+                
+                // ✅ Wait for metadata before attempting play
+                await new Promise((resolve, reject) => {
+                    const timeout = setTimeout(() => {
+                        console.warn('Timeout waiting for audio metadata');
+                        resolve(); // Don't fail, just continue
+                    }, 5000);
+                    
+                    audioPlayer.onloadedmetadata = () => {
+                        clearTimeout(timeout);
+                        console.log('✅ Audio metadata loaded');
+                        console.log('   Duration:', audioPlayer.duration, 'seconds');
+                        console.log('   Can play:', audioPlayer.canPlayType('audio/wav'));
+                        resolve();
+                    };
+                    
+                    audioPlayer.onerror = (e) => {
+                        clearTimeout(timeout);
+                        console.error('Audio load error:', e);
+                        resolve(); // Continue anyway
+                    };
+                });
+                
+                // ✅ Try auto-play (may be blocked by browser policy)
+                try {
+                    await audioPlayer.play();
+                    console.log('✅ Auto-play succeeded!');
+                    updateStatus("Speech generated and playing!", false);
+                } catch (playError) {
+                    console.warn('Auto-play blocked (browser policy):', playError);
+                    updateStatus("Speech generated successfully! Click the play button below.", false);
+                }
+                
                 downloadSpeechBtn.disabled = false;
-                updateStatus("Speech generated successfully!", false);
+                
+                // ✅ Store blob for download button
+                window.currentAudioBlob = audioBlob;
+                
             } catch (error) {
+                console.error('Speech generation error:', error);
                 updateStatus(`Speech generation failed: ${error.message}`, true);
             } finally {
-                showLoader(false); generateSpeechBtn.disabled = false;
+                showLoader(false); 
+                generateSpeechBtn.disabled = false;
             }
         }
 
+        // ✅ Fix download button to use stored blob
+        downloadSpeechBtn.addEventListener('click', () => {
+            if (window.currentAudioBlob) {
+                const url = URL.createObjectURL(window.currentAudioBlob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `synthetic_speech_${Date.now()}.wav`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                updateStatus("Download started!", false);
+            } else {
+                updateStatus("No audio to download - please generate first.", true);
+            }
+        });
         recordBtn.addEventListener('click', toggleRecording);
         fileInput.addEventListener('change', handleFileUpload);
         transcribeBtn.addEventListener('click', transcribe);
@@ -957,8 +1215,39 @@
             downloadBertBtn.disabled = !anonymizedText.value.trim().length;
             downloadSpeechBtn.disabled = !anonymizedText.value.trim().length;
         });
-        downloadOriginalBtn.addEventListener('click', () => window.open('/download_text/original/transcription.txt'));
-        downloadBertBtn.addEventListener('click', () => window.open('/download_text/bert/anonymized.txt'));
+        // Helper function to download text directly from textarea
+        function downloadTextContent(content, filename) {
+            const blob = new Blob([content], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        downloadOriginalBtn.addEventListener('click', () => {
+            const filename = audioName ? audioName.replace(/\.[^/.]+$/, '') + '_transcription.txt' : 'transcription.txt';
+            downloadTextContent(transcribedText.value, filename);
+        });
+
+        downloadBertBtn.addEventListener('click', () => {
+            const filename = audioName ? audioName.replace(/\.[^/.]+$/, '') + '_anon.txt' : 'anonymized.txt';
+            downloadTextContent(anonymizedText.value, filename);
+        });
+
+        downloadSpeechBtn.addEventListener('click', () => { 
+            if (audioPlayer.src) {
+                const a = document.createElement('a');
+                a.href = audioPlayer.src;
+                a.download = 'synthetic_speech.wav';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+            }
+        });
         downloadSpeechBtn.addEventListener('click', () => { if (audioPlayer.src) window.open(audioPlayer.src); });
 
         loadModels();
