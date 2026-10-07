@@ -478,20 +478,33 @@ def sanitize_filename(filename):
         sanitized = sanitized[:200]
     return sanitized
 
-def validate_path(path, base):
-    resolved = path.resolve()
-    base_resolved = base.resolve()
+def validate_path(path, base, check_exists=True):
+    """
+    Validates paths for security (prevent directory traversal).
     
-    if not resolved.is_relative_to(base_resolved):
+    Args:
+        path: The path to validate
+        base: The allowed base directory
+        check_exists: Whether to check if the path exists (default: True)
+                     Set to False when validating NEW files to be created
+    """
+    try:
+        resolved = path.resolve()
+        base_resolved = base.resolve()
+        
+        if not resolved.is_relative_to(base_resolved):
+            return False
+        
+        if check_exists and not resolved.exists():
+            return False
+        
+        if resolved.is_symlink():
+            return False
+        
+        return True
+    except (OSError, RuntimeError) as e:
+        logger.debug(f"Path validation error: {e}")
         return False
-    
-    if not resolved.exists():
-        return False
-    
-    if resolved.is_symlink():
-        return False  # Block symlinks
-    
-    return True
 
 def merge_consecutive_speaker_segments(segments, max_gap_seconds=2.0):
     """
@@ -2410,7 +2423,7 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
                 output_filename = f"{base_name}_anon.txt"
                 output_path = ANONYM_FOLDER / output_filename
                 
-                if not validate_path(output_path, ANONYM_FOLDER):
+                if not validate_path(output_path, ANONYM_FOLDER, check_exists=False):
                     logger.error(f"Security Alert: Output path traversal detected for {output_filename}. Skipping save.")
                     failed_count += 1
                     continue
@@ -2474,7 +2487,7 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
                         llm_filename = f"{base_name}_llm_{timestamp}.txt"
                         llm_path = LLM_ANONYM_FOLDER / llm_filename
                         
-                        if not validate_path(llm_path, LLM_ANONYM_FOLDER):
+                        if not validate_path(llm_path, LLM_ANONYM_FOLDER, check_exists=False):
                             logger.error(f"Security Alert: LLM output path traversal detected for {llm_filename}. Skipping.")
                             llm_failed_count += 1
                             continue
