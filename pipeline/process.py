@@ -2512,6 +2512,19 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
         "llm_failed": llm_failed_count
     }
 
+# ============================================================================
+# USER STUDY NOTICE
+# ============================================================================
+
+def display_user_study_notice():
+    """Brief notice for user study recruitment."""
+    print("\n" + "=" * 60)
+    print("📢 PARTICIPATE IN OUR USER STUDY!")
+    print("   Do you find this tool helpful? Contribute to our anonymous user study and help us make it better!")
+    print("   Link: https://survey.charite.de/InterviewTranscriber_UserSurvey/")
+    print("   Contact: luke.flanagan@bih-charite.de")
+    print("=" * 60 + "\n")
+
 # --- Main Execution ---
 
 if __name__ == "__main__":
@@ -2676,6 +2689,8 @@ Examples:
     pipeline_duration = time.time() - pipeline_start
     logger.info(f"Pipeline total duration: {pipeline_duration:.2f}s ({pipeline_duration/60:.1f} minutes)")
     logger.info(f"   Output size: {file_size:.1f} KB")
+    # Show user study notice
+    display_user_study_notice()
     session_logger.finish()
 
 

@@ -3,7 +3,6 @@
 # =============================================================================
 import os
 import sys
-import tempfile
 import time
 import re
 import subprocess
@@ -11,8 +10,6 @@ import logging
 import gc
 import argparse
 import json
-import random
-import asyncio
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from io import BytesIO
@@ -28,13 +25,28 @@ import spacy
 from dotenv import load_dotenv
 from werkzeug.utils import secure_filename
 from openai import OpenAI
+try:
+    from faker import Faker
+    HAS_FAKER = True
+except ImportError:
+    HAS_FAKER = False
+    logger.warning("Faker not installed. Surrogate substitution will be disabled.")
 
 # =============================================================================
-# CRITICAL: cuDNN DISABLE FIX
+# cuDNN DISABLE FIX
 # =============================================================================
 # This MUST run BEFORE any whisperx/pyannote imports that trigger cuDNN init
 # =============================================================================
 import torch
+import warnings
+
+# Only apply verbose filters when running as main script (args exists)
+try:
+    if args.verbose:  # This will fail during import if args not defined
+        warnings.filterwarnings("ignore", category=UserWarning, module="pyannote")
+except NameError:
+    # Safe to ignore - this only applies when running as main script
+    pass
 
 # Disable cuDNN to avoid CUDNN_STATUS_NOT_INITIALIZED with WhisperX + Pyannote
 torch.backends.cudnn.enabled = True
@@ -64,6 +76,14 @@ from pipeline.tts.tts_engine import (
     TTS_BACKEND,
     TTS_ENABLED,
 )
+
+# --- Surrogate Consistency Support ---
+
+FAKER_LOCALE_MAP = {
+    'EN': 'en_US', 'DE': 'de_DE', 'FR': 'fr_FR', 'ES': 'es_ES',
+    'IT': 'it_IT', 'PL': 'pl_PL', 'PT': 'pt_BR', 'FI': 'fi_FI',
+    'TR': 'tr_TR', 'AR': 'ar_AA', 'HI': 'hi_IN'
+}
 
 # =============================================================================
 # ENVIRONMENT CONFIGURATION
@@ -101,6 +121,9 @@ try:
 except ImportError:
     logging.warning("audio_utils not found. Beep replacement features disabled.")
     AudioBeepReplacer = None
+
+SEGMENT_MERGE_THRESHOLD = 2.0  # Seconds - set to None for unconditional merge
+AUDIO_EDIT_SUPPORT = True      # Enable audio offset manipulation features
 
 # =============================================================================
 # END OF IMPORT SECTION
@@ -172,36 +195,43 @@ class SessionLogger:
             f.write(f"Session ID: {self.session_id}\n")
             f.write(f"Start Time: {self.start_time.strftime('%Y-%m-%d %H:%M:%S')}\n")
             f.write(f"Script Path: {Path(__file__).resolve()}\n")
-            f.write("-" * 60 + "\n")
-            f.write("SETTINGS:\n")
+            f.write(f"Settings logged in finish()\n")  # Placeholder
             f.write("-" * 60 + "\n")
 
     def log_settings(self, settings_dict):
-        """Logs the configuration settings used for this run."""
-        self.settings = settings_dict
-        with open(self.log_file_path, "a", encoding="utf-8") as f:
-            for key, value in settings_dict.items():
-                f.write(f"  {key}: {value}\n")
-            f.write("\n")
+        """
+        Stores configuration settings for later writing in finish().
+        Settings are no longer written immediately to avoid fragmentation.
+        """
+        self.settings = settings_dict  # Store only, don't write yet
 
     def log_stats_update(self, **kwargs):
-        """Updates the stats dictionary and writes a brief update to the log."""
+        """Updates the stats dictionary."""
         for key, value in kwargs.items():
             if key in self.stats:
                 self.stats[key] = value
 
     def log_error(self, error_msg):
-        """Logs an error message."""
+        """Logs an error message to internal storage."""
         self.stats["errors"].append(error_msg)
-        with open(self.log_file_path, "a", encoding="utf-8") as f:
-            f.write(f"[ERROR] {error_msg}\n")
 
     def finish(self):
-        """Finalizes the log file with end time, duration, and summary."""
+        """
+        Writes the complete session log in one operation.
+        Consolidates all settings and stats into unified output.
+        """
         end_time = datetime.now()
         duration = end_time - self.start_time
         
         with open(self.log_file_path, "a", encoding="utf-8") as f:
+            # Write all settings at once (consolidated)
+            f.write("SETTINGS:\n")
+            f.write("-" * 60 + "\n")
+            for key, value in self.settings.items():
+                f.write(f"  {key}: {value}\n")
+            f.write("\n")
+            
+            # Write execution summary
             f.write("-" * 60 + "\n")
             f.write("EXECUTION SUMMARY:\n")
             f.write("-" * 60 + "\n")
@@ -209,6 +239,8 @@ class SessionLogger:
             f.write(f"Total Duration: {duration}\n")
             f.write(f"Duration (Seconds): {duration.total_seconds():.2f}\n")
             f.write("\n")
+            
+            # Write stats
             f.write("FILES PROCESSED:\n")
             f.write(f"  Videos Extracted: {self.stats['videos_processed']}\n")
             f.write(f"  Audios Transcribed: {self.stats['audios_processed']}\n")
@@ -219,6 +251,7 @@ class SessionLogger:
             f.write(f"  LLM Rewrites Failed: {self.stats['llm_rewrites_failed']}\n")
             f.write(f"  Adversarial Iterations: {self.stats['adversarial_iterations']}\n")
             
+            # Write errors (if any)
             if self.stats["errors"]:
                 f.write("\nERRORS ENCOUNTERED:\n")
                 for err in self.stats["errors"]:
@@ -227,7 +260,7 @@ class SessionLogger:
             f.write("\n" + "=" * 60 + "\n")
             f.write("SESSION COMPLETE\n")
             f.write("=" * 60 + "\n")
-
+        
         logger.info(f"Session log saved to: {self.log_file_path}")
         return self.log_file_path
 
@@ -446,44 +479,235 @@ def sanitize_filename(filename):
     return sanitized
 
 def validate_path(path, base):
-    """Ensures the resolved path is within the base directory."""
     resolved = path.resolve()
     base_resolved = base.resolve()
-    try:
-        resolved.relative_to(base_resolved)
-        return True
-    except ValueError:
+    
+    if not resolved.is_relative_to(base_resolved):
         return False
+    
+    if not resolved.exists():
+        return False
+    
+    if resolved.is_symlink():
+        return False  # Block symlinks
+    
+    return True
 
-def merge_all_consecutive_speakers(segments):
+def merge_consecutive_speaker_segments(segments, max_gap_seconds=2.0):
     """
-    Simple, reliable merge of ALL consecutive segments from the same speaker.
-    No timing thresholds — if adjacent speakers are identical, merge them.
+    Merges consecutive segments spoken by the same speaker.
+    Allows configurable silence threshold between segments to control merging.
+    
+    Args:
+        segments: List of dicts with 'start', 'end', 'speaker', 'text'
+        max_gap_seconds: Maximum silence allowed between segments to merge them.
+                         Set to None to merge ALL consecutive same-speaker segments
+                         regardless of timing gap.
     """
-    if len(segments) < 2:
-        return segments
-    
-    merged = []
-    # Ensure first segment has speaker key
-    current = segments[0].copy()
-    current["speaker"] = current.get("speaker", "SPEAKER_00")
-    
-    for next_seg in segments[1:]:
-        next_speaker = next_seg.get("speaker", "SPEAKER_00")
-        current_speaker = current.get("speaker", "SPEAKER_00")
-        
-        if next_speaker == current_speaker:
-            current["text"] += " " + next_seg.get("text", "")
-            current["end"] = next_seg.get("end", current["end"])
+    if not segments:
+        return []
+
+    merged_segments = []
+    current_segment = None
+
+    for segment in segments:
+        speaker = segment.get("speaker", "Unknown")
+        text = segment.get("text", "")
+        start = segment.get("start", 0)
+        end = segment.get("end", 0)
+
+        if current_segment is None:
+            # First segment
+            current_segment = {
+                "speaker": speaker,
+                "text": text,
+                "start": start,
+                "end": end
+            }
         else:
-            merged.append(current)
-            # Ensure new segment has speaker key
-            current = next_seg.copy()
-            current["speaker"] = current.get("speaker", "SPEAKER_00")
+            # Check if same speaker and gap is small enough (or no threshold)
+            if current_segment["speaker"] == speaker:
+                gap = start - current_segment["end"]
+                if max_gap_seconds is None or gap <= max_gap_seconds:
+                    # Merge: extend text and end time
+                    current_segment["text"] += " " + text
+                    current_segment["end"] = end
+                else:
+                    # Gap too large: finalize current, start new
+                    merged_segments.append(current_segment)
+                    current_segment = {
+                        "speaker": speaker,
+                        "text": text,
+                        "start": start,
+                        "end": end
+                    }
+            else:
+                # Different speaker: finalize current, start new
+                merged_segments.append(current_segment)
+                current_segment = {
+                    "speaker": speaker,
+                    "text": text,
+                    "start": start,
+                    "end": end
+                }
+
+    # Append the last segment
+    if current_segment:
+        merged_segments.append(current_segment)
+
+    return merged_segments
+
+
+# =============================================================================
+# SECTION 2: AUDIO OFFSET MODIFICATION FUNCTIONS (NEW)
+# =============================================================================
+
+def adjust_segment_offsets(segments, offset_map):
+    """
+    Applies time offset adjustments to transcript segments for audio editing.
+    Supports cuts, inserts, and absolute shifts.
     
-    merged.append(current)
+    Args:
+        segments: List of segment dicts with 'start', 'end', 'speaker', 'text'
+        offset_map: Dict specifying time adjustments:
+            {
+                "absolute_shift": float,          # Shift all segments by N seconds
+                "cut_ranges": [(start, end), ...], # Time ranges to remove
+                "insert_points": [(position, duration), ...]  # Silent insertions
+            }
     
-    return merged
+    Returns:
+        tuple: (adjusted_segments, removed_count)
+        adjusted_segments: Modified segments with corrected timestamps
+        removed_count: Number of segments completely removed by cuts
+    
+    Note:
+        For HPC/slurm environments, ensure offset calculations use float precision
+        to avoid cumulative rounding errors in long audio files.
+    """
+    import bisect
+    
+    adjusted_segments = []
+    removed_count = 0
+    
+    for segment in segments:
+        new_start = segment["start"]
+        new_end = segment["end"]
+        
+        # Apply absolute shift if specified
+        if "absolute_shift" in offset_map:
+            shift = offset_map["absolute_shift"]
+            new_start += shift
+            new_end += shift
+        
+        # Handle cut ranges (removal of time spans)
+        if "cut_ranges" in offset_map:
+            total_cut_before = 0.0
+            for cut_start, cut_end in offset_map["cut_ranges"]:
+                if new_start >= cut_end:
+                    # Segment completely after cut region
+                    cut_duration = cut_end - cut_start
+                    new_start -= cut_duration
+                    new_end -= cut_duration
+                    total_cut_before += cut_duration
+                elif new_end <= cut_start:
+                    # Segment completely before cut region - no adjustment needed
+                    pass
+                elif new_start >= cut_start and new_end <= cut_end:
+                    # Segment completely inside cut region - remove it
+                    new_start = None
+                    new_end = None
+                    removed_count += 1
+                    break
+                elif new_start < cut_start < new_end < cut_end:
+                    # Cut removes beginning of segment
+                    cut_from_start = cut_end - cut_start
+                    new_end -= cut_from_start
+                elif cut_start < new_start < cut_end < new_end:
+                    # Cut removes end of segment  
+                    cut_from_end = cut_end - cut_start
+                    new_start -= cut_from_end
+            
+            # Apply insertions after cuts (cumulative shift calculation needed)
+            if "insert_points" in offset_map:
+                for insert_pos, insert_duration in offset_map["insert_points"]:
+                    if new_start >= insert_pos:
+                        new_start += insert_duration
+                    if new_end > insert_pos:
+                        new_end += insert_duration
+        
+        # Store adjusted segment if not fully removed
+        if new_start is not None:
+            adjusted_segments.append({
+                **segment,
+                "start": new_start,
+                "end": new_end
+            })
+    
+    return adjusted_segments, removed_count
+
+def generate_audio_edit_script(segments, output_file):
+    """
+    Generates FFmpeg filter script for applying audio edits based on segments.
+    Produces a standalone script executable with ffprobe/ffmpeg.
+    
+    Args:
+        segments: List of adjusted segment dicts (from adjust_segment_offsets)
+        output_file: Path to save the edit script (bash/FFmpeg filter format)
+    
+    Returns:
+        str: Path to generated script file
+    
+    Note:
+        Script includes validation checks for segment continuity and detects
+        gaps/overlaps. Suitable for batch processing on Slurm cluster nodes.
+    """
+    if not segments:
+        logger.warning("No segments provided for audio edit script.")
+        return None
+    
+    # Validate segment continuity
+    gaps = []
+    overlaps = []
+    for i in range(1, len(segments)):
+        prev_end = segments[i-1]["end"]
+        curr_start = segments[i]["start"]
+        if curr_start > prev_end:
+            gaps.append((segments[i-1]["speaker"], prev_end, curr_start))
+        elif curr_start < prev_end:
+            overlaps.append((segments[i-1]["speaker"], prev_end, curr_start))
+    
+    if gaps:
+        logger.warning(f"Detected {len(gaps)} audio gaps between segments")
+    if overlaps:
+        logger.warning(f"Detected {len(overlaps)} overlapping segments")
+    
+    # Generate FFmpeg filter chains
+    filter_chains = []
+    for idx, segment in enumerate(segments):
+        # Use atemporal filters to handle variable segment durations
+        chain = (
+            f"[0:a]atrim=start={segment['start']:.6f},end={segment['end']:.6f},"
+            f"asetpts=PTS-STARTPTS[seg{idx}]"
+        )
+        filter_chains.append(chain)
+    
+    # Build concat operation
+    concat_inputs = ",".join([f"[seg{i}]" for i in range(len(segments))])
+    concat_filter = f"{concat_inputs}concat=n={len(segments)}:v=0:a=1[out]"
+    
+    # Write script with metadata header
+    with open(output_file, "w") as f:
+        f.write(f"# Audio Edit Script - Generated {datetime.now().isoformat()}\n")
+        f.write(f"# Total segments: {len(segments)}\n")
+        f.write(f"# Gaps detected: {len(gaps)}, Overlaps: {len(overlaps)}\n\n")
+        f.write("# Input: ffmpeg -i input.wav -filter_complex \"FILTERS\" output.wav\n\n")
+        for chain in filter_chains:
+            f.write(f"# {chain}\n")
+        f.write(f"# Final: ffmpeg -i input.wav -filter_complex \"{';'.join(filter_chains)}{concat_filter}\" output.wav\n")
+    
+    logger.info(f"Audio edit script saved to: {output_file}")
+    return str(output_file)
 
 def cleanup_gpu_resources(*objects_to_delete):
     """Aggressively clears GPU memory and runs garbage collection."""
@@ -641,10 +865,9 @@ def process_videos(file_list=None):
         
     return processed_count
 
-def process_audios(enable_diarization=True, lang_code=None, file_list=None):
+def process_audios(enable_diarization=True, lang_code=None, file_list=None, args=None):
     """Process audio files: transcribe and optionally diarize."""
-    check_gpu_resources() 
-
+    file_start = time.time()
     force_language = lang_code
     
     whisper_code = None
@@ -659,8 +882,6 @@ def process_audios(enable_diarization=True, lang_code=None, file_list=None):
     
     if not enable_diarization:
         logger.info("⚠️  Speaker diarization DISABLED. Using generic speaker labels.")
-    else:
-        logger.info("✅ Speaker diarization ENABLED.")
 
     try:
         device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -801,7 +1022,10 @@ def process_audios(enable_diarization=True, lang_code=None, file_list=None):
                 for i, seg in enumerate(result["segments"]):
                     seg["speaker"] = f"SPEAKER_{i%2:02d}"
 
-            result["segments"] = merge_all_consecutive_speakers(result["segments"])
+            result["segments"] = merge_consecutive_speaker_segments(
+                result["segments"], 
+                max_gap_seconds=SEGMENT_MERGE_THRESHOLD
+            )
             
             base_name = sanitize_filename(input_file.stem)
             transcript_file = TRANSCRIPTS_FOLDER / f"{base_name}.txt"
@@ -812,19 +1036,20 @@ def process_audios(enable_diarization=True, lang_code=None, file_list=None):
                     if text:
                         f.write(f"{segment.get('speaker', 'Unknown')}: {text}\n")
             
-            logger.info(f"✅ COMPLETED: {input_file.name} -> {transcript_file.name}")
-
         except Exception as e:
             logger.error(f"❌ FAILED: {input_file.name} - {e}")
             import traceback
             logger.error(traceback.format_exc())
         
         finally:
+            logger.info(f"✅ COMPLETED: {input_file.name} -> {transcript_file.name}")
+            logger.info(f"   Duration: {time.time() - file_start:.2f}s")
             gc.collect()
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
             time.sleep(0.1)
-
+    
+    # AFTER the loop completes:
     cleanup_gpu_resources()
     logger.info("Stream processing finished.")
     return len(files_to_process)
@@ -833,10 +1058,27 @@ def process_audios(enable_diarization=True, lang_code=None, file_list=None):
 _loaded_whisper_model = None
 _loaded_diarize_model = None
 
-def load_models():
+def load_models(whisper_model_override=None):
     """Loads models globally for reuse across both process_audios() and transcribe_audio_locally()."""
     global _loaded_whisper_model, _loaded_diarize_model
     
+    # Reset global cache on reload attempt
+    _loaded_whisper_model = None
+    _loaded_diarize_model = None
+    
+    # Determine which Whisper model to use
+    model_name = whisper_model_override or os.getenv('WHISPER_MODEL', 'large')
+    model_map = {
+        'large': 'Systran--faster-whisper-large-v3',
+        'medium': 'Systran--faster-whisper-medium',
+        'small': 'Systran--faster-whisper-small',
+        'base': 'Systran--faster-whisper-base',
+        'tiny': 'Systran--faster-whisper-tiny',
+    }
+    
+    model_folder_name = model_map.get(model_name, f'Systran--faster-whisper-{model_name}')
+    whisper_model_path = MODEL_FOLDER / model_folder_name
+
     check_gpu_resources()
     
     device_str = "cuda" if torch.cuda.is_available() else "cpu"
@@ -869,24 +1111,34 @@ def load_models():
             # Re-enable TF32 (pyannote disables it by default)
             torch.backends.cuda.matmul.allow_tf32 = True
             torch.backends.cudnn.allow_tf32 = True
+            
+            # Step 1: Load the model first
             _loaded_diarize_model = Pipeline.from_pretrained(str(DIARIZATION_MODEL_PATH))
             
-            if device_str == "cuda":
+            # Step 2: Verify model loaded successfully BEFORE device operations
+            if _loaded_diarize_model is None:
+                logger.error("Diarization Pipeline returned None after loading.")
+                _loaded_diarize_model = None
+            elif device_str == "cuda":  # ← FIXED: Check if model exists first
                 _loaded_diarize_model.to(torch.device(device_str))
                 logger.info("✅ Diarization Pipeline moved to GPU.")
             else:
                 logger.warning("⚠️  Diarization Pipeline loaded on CPU (will be slower).")
                 
-            # Set diarization thresholds (matching process_audios)
-            _loaded_diarize_model.min_duration_on = 3.0
-            _loaded_diarize_model.min_duration_off = 4.0
-        except Exception as e:
+            # Step 3: Set diarization thresholds (only if model is valid)
+            if _loaded_diarize_model is not None:
+                _loaded_diarize_model.min_duration_on = 3.0
+                _loaded_diarize_model.min_duration_off = 4.0
+                
+            logger.info("✅ Diarization Pipeline initialized successfully.")
+            
+        except Exception as e:  # ← Now only catches genuine loading failures
             logger.error(f"Failed to load Diarization Pipeline: {e}")
             logger.error(f"   Diarization model path: {DIARIZATION_MODEL_PATH}")
             logger.error(f"   Model exists: {DIARIZATION_MODEL_PATH.exists()}")
             import traceback
             logger.error(f"   Full traceback:\n{traceback.format_exc()}")
-            _loaded_diarize_model = None
+            _loaded_diarize_model = None  # ← Safe fallback on genuine error
     else:
         logger.warning("⚠️  Diarization model not found. Speaker diarization will be disabled.")
         _loaded_diarize_model = None
@@ -894,23 +1146,27 @@ def load_models():
     logger.info("Models loaded successfully.")
     return _loaded_whisper_model, _loaded_diarize_model
 
-def transcribe_audio_locally(audio_path, language=None):
+def transcribe_audio_locally(audio_path, language=None, whisper_model_name=None):
     """
     Transcribes a single audio file using cached global models.
+    
+    Args:
+        audio_path: Path to audio file
+        language: Language code ('auto', 'DE', 'EN', etc.)
+        whisper_model_name: Optional override (e.g., 'large-v3', 'base', 'tiny')
     
     Returns:
         tuple: (transcription_text, wordOffsets)
     """
     global _loaded_whisper_model, _loaded_diarize_model
     
-    logger.info(f"--- Starting transcription for: {os.path.basename(audio_path)} ---")
-    
-    # Load models if not already loaded
-    if not _loaded_whisper_model:
-        _loaded_whisper_model, _loaded_diarize_model = load_models()
+    # Load models if not already loaded OR if model was switched
+    if not _loaded_whisper_model or whisper_model_name:
+        _loaded_whisper_model, _loaded_diarize_model = load_models(whisper_model_override=whisper_model_name)
     
     if not _loaded_whisper_model:
-        return "Error: WhisperX model not loaded.", []
+        logger.error("Error: WhisperX model not loaded.")
+        return None, None
 
     try:
         audio = whisperx.load_audio(audio_path)
@@ -989,7 +1245,11 @@ def transcribe_audio_locally(audio_path, language=None):
                     segment["speaker"] = f"SPEAKER_{i % 2:02d}"
 
         # === SEGMENT MERGING (same as process_audios) ===
-        result["segments"] = merge_all_consecutive_speakers(result["segments"])
+        gap_threshold = globals().get('SEGMENT_MERGE_THRESHOLD', 2.0)
+        result["segments"] = merge_consecutive_speaker_segments(
+            result["segments"], 
+            max_gap_seconds=gap_threshold
+        )
 
         # === CONVERT TO TEXT FORMAT ===
         result_lines = [f"{seg.get('speaker', 'SPEAKER_00')}: {seg.get('text', '').strip()}" for seg in result["segments"] if seg.get('text', '').strip()]
@@ -1099,24 +1359,50 @@ def merge_adjacent_tags(text):
     return out_str
     
 def reconstruct_text_from_predictions(original_sentences, predictions, speaker_map):
-    """Reconstructs the text from predictions, merging consecutive same-speaker sentences."""
+    """Reconstructs the text from predictions, merging consecutive same-speaker sentences.
+        Returns:
+        tuple: (reconstructed_text, entity_occurrences)
+        entity_occurrences = {tag: [original_text, ...]} in document order.
+        Consecutive words with the same tag are merged into single occurrences.
+        Enables downstream surrogate substitution to map identical entities
+        consistently (e.g., "Max Mustermann" → "[PERSON_001]" everywhere).
+    """
     reconstructed_blocks = []
+    entity_occurrences = {}
+    
     current_speaker = None
     current_text_parts = []
 
     for i, (speaker, tokens) in enumerate(original_sentences):
         labels = predictions[i] if i < len(predictions) else []
         reconstructed_words = []
-        
-        for w_idx, word in enumerate(tokens):
+
+        # Align tokens with labels, merging consecutive same-tag words
+        w_idx = 0
+        n_tokens = len(tokens)
+        while w_idx < n_tokens:
             tag = labels[w_idx] if w_idx < len(labels) else "O"
+
             if not tag or tag == "O":
-                reconstructed_words.append(word)
-            else:
-                reconstructed_words.append(tag)
-        
+                reconstructed_words.append(tokens[w_idx])
+                w_idx += 1
+                continue
+
+            # Merge consecutive words with same tag into single entity occurrence
+            span_words = [tokens[w_idx]]
+            j = w_idx + 1
+            while j < n_tokens and (labels[j] if j < len(labels) else "O") == tag:
+                span_words.append(tokens[j])
+                j += 1
+
+            # Track original entity text for surrogate mapping
+            entity_occurrences.setdefault(tag, []).append(" ".join(span_words))
+            reconstructed_words.append(tag)
+            w_idx = j
+
         sentence_text = " ".join(reconstructed_words)
         
+        # Merge consecutive sentences from same speaker
         if speaker == current_speaker:
             current_text_parts.append(sentence_text)
         else:
@@ -1126,11 +1412,12 @@ def reconstruct_text_from_predictions(original_sentences, predictions, speaker_m
             current_speaker = speaker
             current_text_parts = [sentence_text]
 
+    # Append final block
     if current_speaker and current_text_parts:
         full_text = " ".join(current_text_parts)
         reconstructed_blocks.append(f"{current_speaker}: {full_text}")
         
-    return "\n".join(reconstructed_blocks)
+    return "\n".join(reconstructed_blocks), entity_occurrences
 
 def predict_sentences_simple(sentences_tokens, model, tokenizer, id_to_tag_map, device="cpu"):
     """Simple sentence-level NER prediction without FLERT context windowing."""
@@ -1230,6 +1517,22 @@ class AnonymizationEngine:
 
     def _load_model(self):
         """Loads the multilingual_DialogPII_NER model with proper CRF support."""
+        
+        # Validate required modules early
+        required_modules = {'transformers': 'AutoModel, AutoTokenizer', 'torchcrf': 'CRF'}
+
+        for module, feature in required_modules.items():
+            try:
+                __import__(module)
+            except ImportError:
+                print(f"ERROR: {module} module not found.")
+                print(f"To install: pip install {'pytorch-crf' if module == 'torchcrf' else module}")
+                sys.exit(1)
+
+        # Now import safely
+        from transformers import AutoModel, AutoTokenizer
+        from torchcrf import CRF
+
         if not self.model_path.exists():
             logger.error(f"Model path not found: {self.model_path}")
             logger.error(f"Available folders in MODEL_FOLDER: {list(MODEL_FOLDER.iterdir()) if MODEL_FOLDER.exists() else 'Folder missing'}")
@@ -1237,8 +1540,6 @@ class AnonymizationEngine:
             return
 
         try:
-            from transformers import AutoModel, AutoTokenizer
-            from torchcrf import CRF
             import torch.nn as nn
             import json
             
@@ -1320,14 +1621,20 @@ class AnonymizationEngine:
             logger.error(traceback.format_exc())
             self.method = None
 
-    def anonymize(self, text):
-        """Anonymizes text using simple sentence-level splitting (no FLERT context)."""
+    def anonymize(self, text, use_surrogates=False, surrogate_seed=None, surrogate_locales='de_DE,en_US'):
+        """
+        Anonymizes text using simple sentence-level splitting.
+        Returns:
+            tuple: (anonymized_text, success, message, entity_map)
+            entity_map enables consistent surrogate substitution downstream.
+         """
+    
         if not self.method or not self.model or not self.tokenizer:
-            return None, False, "Anonymization model not loaded."
+            return None, False, "Anonymization model not loaded.", {}
 
         sentences_data = split_dialogue_into_sentences(text)
         if not sentences_data:
-            return text, False, "No sentences detected."
+            return text, False, "No sentences detected.", {}
 
         sentences_tokens = [tokens for _, tokens in sentences_data]
         
@@ -1341,13 +1648,29 @@ class AnonymizationEngine:
             )
         except Exception as e:
             logger.error(f"Inference failed: {e}")
-            return text, False, str(e)
+            return text, False, str(e), {}
 
-        reconstructed_text = reconstruct_text_from_predictions(sentences_data, predictions, {})
+        # Returns (text, entity_map) tuple now
+        reconstructed_text, entity_map = reconstruct_text_from_predictions(
+            sentences_data, predictions, {}
+        )
         reconstructed_text = normalize_punctuation(reconstructed_text)
         reconstructed_text = merge_adjacent_tags(reconstructed_text)
 
-        return reconstructed_text, True, "Success"
+        surrogate_registry = {}
+        if use_surrogates:
+            reconstructed_text, surrogate_registry = apply_surrogate_substitution(
+                reconstructed_text,
+                entity_map,
+                use_surrogates=True,
+                seed=surrogate_seed,
+                locales=surrogate_locales
+            )
+
+        if use_surrogates and surrogate_registry:
+            return reconstructed_text, True, "Success", entity_map, surrogate_registry
+        else:
+            return reconstructed_text, True, "Success", entity_map, {}
 
 # --- LLM Rewrite Features ---
 
@@ -1475,10 +1798,21 @@ def call_llm_rewriter(text, model_id, system_prompt=None):
         return rewritten_text, "Success"
 
     except Exception as e:
-        logger.error(f"LLM Rewriter failed for model {final_model}: {e}")
+        logger.error(f"LLM Rewriter failed for model {final_model}: {type(e).__name__}")
+        if hasattr(e, 'response'):
+            logger.error(f"  HTTP status: {e.response.status_code}")
+            logger.error(f"  Endpoint: {CHAT_AI_ENDPOINT}")
+            logger.error(f"  Response: {e.response.text[:200]}")
+        elif hasattr(e, 'request'):
+            logger.error(f"  Endpoint: {CHAT_AI_ENDPOINT}")
+            logger.error(f"  Request error: {e.request}")
+        else:
+            logger.error(f"  Endpoint: {CHAT_AI_ENDPOINT}")
+            logger.error(f"  Error details: {str(e)[:200]}")
         return None, str(e)
 
-# --- ADVERSARIAL ANONYMIZATION (Restored Feature) ---
+
+# --- ADVERSARIAL ANONYMIZATION ---
 
 def run_adversarial_anonymization(text, model_id, iterations=3):
     """
@@ -1592,7 +1926,7 @@ def run_adversarial_anonymization(text, model_id, iterations=3):
 
     return current_text, iteration_log
 
-def normalize_punctuation(text):
+def normalize_punctuation(text) -> str:
     """Fixes punctuation spacing issues."""
     if not text:
         return text
@@ -1636,6 +1970,299 @@ def normalize_punctuation(text):
         normalized_lines.append(f"{speaker}: {content}")
 
     return "\n".join(normalized_lines)
+
+# ============================================================================
+# SURROGATE POOLS FOR FAKE DATA GENERATION
+# ============================================================================
+
+SURROGATES = {
+    "EN": {
+        "PERSON": [
+            "John Smith", "Emma Johnson", "Michael Brown", "Sophia Miller",
+            "Daniel Wilson", "Olivia Moore", "James Taylor", "Emily Davis",
+            "Benjamin Clark", "Charlotte White", "Henry Walker", "Mia Harris",
+            "Alexander Hall", "Amelia Young", "David Allen", "Ella King",
+            "Joseph Wright", "Grace Scott", "Samuel Green", "Lily Baker"
+        ],
+        "CITY": [
+            "Berlin", "London", "New York", "Chicago", "Boston",
+            "Seattle", "Munich", "Hamburg", "Paris", "Vienna",
+            "Toronto", "Dublin", "Leeds", "Bristol", "Manchester",
+            "Frankfurt", "Cologne", "Zurich", "Amsterdam", "Prague"
+        ],
+        "ZIP": [
+            "10001", "20095", "75008", "10115", "50667",
+            "80331", "SW1A1AA", "94105", "60601", "33101",
+            "70173", "01067", "28195", "4000", "8001",
+            "1010", "2000", "80333", "04109", "90402"
+        ],
+        "AGE": [
+            "21", "24", "27", "30", "33",
+            "36", "39", "42", "45", "48",
+            "51", "54", "57", "60", "63",
+            "66", "69", "72", "75", "78"
+        ],
+        "EMAIL": [
+            "john@example.com", "emma@test.com", "michael@mail.com",
+            "sophia@demo.org", "daniel@company.net", "olivia@example.org",
+            "james@sample.com", "emily@test.org", "ben@demo.net",
+            "charlotte@mail.org", "henry@example.net", "mia@test.com",
+            "alex@sample.org", "amelia@demo.com", "david@mail.net",
+            "ella@example.org", "joseph@test.net", "grace@sample.com",
+            "samuel@demo.org", "lily@mail.com"
+        ],
+        "PHONE": [
+            "+1 202 555 0101", "+1 202 555 0102", "+1 202 555 0103",
+            "+44 20 7946 0001", "+44 20 7946 0002",
+            "+49 30 123456", "+49 40 987654",
+            "+33 1 23456789", "+41 44 1234567", "+43 1 987654",
+            "+1 303 555 1212", "+1 404 555 2323", "+49 89 456789",
+            "+44 161 555 1000", "+33 4 11111111",
+            "+1 212 555 8888", "+49 221 987654",
+            "+43 662 123456", "+41 31 7654321", "+1 617 555 0909"
+        ],
+        "PROFESSION": [
+            "doctor", "teacher", "engineer", "lawyer", "designer",
+            "developer", "nurse", "scientist", "manager", "architect",
+            "chef", "journalist", "consultant", "photographer", "pilot",
+            "researcher", "pharmacist", "electrician", "mechanic", "writer"
+        ],
+        "ORGANISATION": [
+            "Acme Corporation", "Global Tech Solutions", "Green Valley Hospital",
+            "Sunrise Medical Center", "Northbridge University", "Blue River Consulting",
+            "United Logistics Group", "Pioneer Software Ltd.", "Metro Insurance Services",
+            "Future Energy Systems", "City Health Network", "Bright Education Trust",
+            "National Research Institute", "Western Manufacturing Inc.",
+            "Community Care Foundation", "Summit Financial Partners",
+            "Digital Innovation Labs", "Central Public Library",
+            "Evergreen Construction", "International Trade Association"
+        ],
+        "URL": [
+            "https://example.com", "https://test.org", "https://demo.net",
+            "https://sample.com", "https://mywebsite.org",
+            "https://company.net", "https://homepage.com",
+            "https://service.org", "https://product.net",
+            "https://info.com", "https://data.org",
+            "https://project.net", "https://alpha.com",
+            "https://beta.org", "https://gamma.net",
+            "https://delta.com", "https://epsilon.org",
+            "https://zeta.net", "https://theta.com", "https://lambda.org"
+        ],
+        "PRODUCT": [
+            "iPhone", "ThinkPad", "Galaxy Tablet", "MacBook",
+            "Surface Pro", "PlayStation", "AirPods", "Kindle",
+            "GoPro", "Fitbit", "Nikon Camera", "Dell Monitor",
+            "HP Printer", "Canon Lens", "Dyson Vacuum",
+            "Sony Headphones", "Bose Speaker", "Apple Watch",
+            "Nintendo Switch", "Pixel Phone"
+        ],
+        "STREET": [
+            "Main Street", "Oak Avenue", "Maple Road", "Pine Street",
+            "Cedar Lane", "Elm Street", "Washington Avenue",
+            "Lakeview Drive", "Hillcrest Road", "Sunset Boulevard",
+            "Park Avenue", "River Road", "King Street",
+            "Queen Street", "Church Lane", "Station Road",
+            "Mill Road", "Victoria Street", "Bridge Street", "High Street"
+        ]
+    },
+    "DE": {
+        "PERSON": [
+            "Max Müller", "Anna Schmidt", "Peter Weber", "Laura Fischer",
+            "Thomas Wagner", "Julia Becker", "Lukas Hoffmann", "Sarah Koch",
+            "Felix Bauer", "Leonie Richter", "Jonas Klein", "Marie Wolf",
+            "Paul Schröder", "Lisa Neumann", "Tim Braun", "Nina Hartmann",
+            "David Lange", "Sophie Krüger", "Jan Meier", "Eva Schulz"
+        ],
+        "CITY": [
+            "Berlin", "Hamburg", "München", "Köln", "Frankfurt",
+            "Stuttgart", "Dresden", "Leipzig", "Bremen", "Hannover",
+            "Düsseldorf", "Dortmund", "Essen", "Bonn", "Mannheim",
+            "Nürnberg", "Augsburg", "Karlsruhe", "Potsdam", "Freiburg"
+        ],
+        "ZIP": [
+            "10115", "20095", "80331", "50667", "60311",
+            "70173", "01067", "04109", "28195", "30159",
+            "40213", "44135", "45127", "53111", "68159",
+            "90402", "86150", "76133", "14467", "79098"
+        ],
+        "AGE": [
+            "18", "22", "25", "28", "31",
+            "34", "37", "40", "43", "46",
+            "49", "52", "55", "58", "61",
+            "64", "67", "70", "73", "76"
+        ],
+        "EMAIL": [
+            "max@beispiel.de", "anna@test.de", "peter@mail.de",
+            "laura@firma.de", "thomas@demo.de", "julia@beispiel.org",
+            "lukas@test.org", "sarah@mail.org", "felix@demo.net",
+            "leonie@firma.com", "jonas@test.com", "marie@example.de",
+            "paul@beispiel.com", "lisa@demo.org", "tim@mail.net",
+            "nina@test.net", "david@firma.org", "sophie@example.com",
+            "jan@beispiel.net", "eva@test.de"
+        ],
+        "PHONE": [
+            "+49 30 123456", "+49 40 987654", "+49 89 456789",
+            "+49 221 111111", "+49 711 222222",
+            "+49 351 333333", "+49 341 444444", "+49 421 555555",
+            "+49 511 666666", "+49 211 777777",
+            "+49 231 888888", "+49 201 999999",
+            "+49 228 123123", "+49 621 321321",
+            "+49 911 456456", "+49 821 654654",
+            "+49 761 789789", "+49 331 987987",
+            "+49 69 135791", "+49 731 246810"
+        ],
+        "PROFESSION": [
+            "Arzt", "Lehrer", "Ingenieur", "Anwalt", "Designer",
+            "Entwickler", "Krankenpfleger", "Wissenschaftler", "Manager",
+            "Architekt", "Koch", "Journalist", "Berater", "Fotograf",
+            "Pilot", "Forscher", "Apotheker", "Elektriker",
+            "Mechaniker", "Schriftsteller"
+        ],
+        "ORGANISATION": [
+            "Universitätsklinikum Berlin", "Technische Universität München",
+            "Stadtwerke Hamburg", "Muster GmbH", "Beispiel AG",
+            "Forschungszentrum Leipzig", "Klinikum Stuttgart",
+            "Deutsches Institut für Informatik", "Berliner Verkehrsbetriebe",
+            "Münchner Versicherungsgruppe", "Norddeutsche Logistik GmbH",
+            "Gesundheitszentrum Köln", "Innovationslabor Dresden",
+            "Rhein-Main Consulting", "Bildungswerk Frankfurt",
+            "Sozialverband Deutschland", "Energieversorgung Bayern",
+            "MediCare Krankenhausverbund", "Industrieverband Nordrhein",
+            "Wissenschaftsakademie Freiburg"
+        ],
+        "URL": [
+            "https://beispiel.de", "https://test.org", "https://demo.net",
+            "https://firma.de", "https://webseite.org",
+            "https://projekt.net", "https://daten.de",
+            "https://service.org", "https://produkt.net",
+            "https://info.de", "https://alpha.org",
+            "https://beta.net", "https://gamma.de",
+            "https://delta.org", "https://epsilon.net",
+            "https://zeta.de", "https://theta.org",
+            "https://lambda.net", "https://omega.de", "https://portal.org"
+        ],
+        "PRODUCT": [
+            "iPhone", "ThinkPad", "Galaxy Tablet", "MacBook",
+            "Surface Pro", "PlayStation", "AirPods", "Kindle",
+            "GoPro", "Fitbit", "Nikon Kamera", "Dell Monitor",
+            "HP Drucker", "Canon Objektiv", "Dyson Staubsauger",
+            "Sony Kopfhörer", "Bose Lautsprecher", "Apple Watch",
+            "Nintendo Switch", "Pixel Smartphone"
+        ],
+        "STREET": [
+            "Hauptstraße", "Bahnhofstraße", "Gartenweg", "Schillerstraße",
+            "Goethestraße", "Bergstraße", "Dorfstraße", "Mühlenweg",
+            "Kirchstraße", "Lindenweg", "Parkstraße", "Wiesenweg",
+            "Waldstraße", "Ringstraße", "Schulstraße", "Mozartstraße",
+            "Lessingstraße", "Friedhofsweg", "Birkenweg", "Ahornstraße"
+        ]
+    }
+}
+
+# --- Surrogate Substitution ---
+
+TAG_TO_SURROGATE_CATEGORY = {
+    'PERSON': 'PERSON',
+    'PERSON_EMAIL': 'EMAIL',
+    'PERSON_SOCIAL_RELATION': 'PERSON',
+    'ORG': 'ORGANISATION',
+    'LOC_CITY': 'CITY',
+    'LOC_COUNTRY': 'CITY',
+    'LOC_STREET': 'STREET',
+    'LOC_ZIP': 'ZIP',
+    'LOC_HOUSENUMBER': 'ZIP',
+    'LOC_OTHER': 'CITY',
+    'DATETIME': 'AGE',
+    'DATETIME_AGE': 'AGE',
+    'CODE_PHONE': 'PHONE',
+    'CODE_URL': 'URL',
+    'PROFESSION': 'PROFESSION',
+    'PRODUCT': 'PRODUCT',
+}
+
+def apply_surrogate_substitution(text, entity_map, 
+                                  use_surrogates=False,
+                                  seed=None,
+                                  locales='en_US'):
+    """
+    Applies consistent Faker-based surrogate substitution to anonymized text.
+    ✅ FIXED: Now searches for [TAG] placeholders directly, regardless of entity_map keys.
+    """
+
+    if not HAS_FAKER:
+        logger.error("Faker library not installed. Install with: pip install faker")
+        return text, {}
+    
+    if not use_surrogates:
+        return text, {}
+    
+    if not text or '[' not in text:
+        logger.debug("No placeholders found in text, skipping surrogate substitution.")
+        return text, {}
+    
+    try:
+        fake = Faker(locales.split(','))
+        if seed is not None:
+            fake.seed_instance(seed)
+            logger.info(f"Faker seeded with value: {seed} for reproducibility")
+    except Exception as e:
+        logger.error(f"Failed to initialize Faker: {e}")
+        return text, {}
+    
+    # Map BERT tags → SURROGATES pools → Faker generators
+    TAG_TO_FAKER_METHOD = {
+        'PERSON': lambda: fake.name(),
+        'PERSON_EMAIL': lambda: fake.email(),
+        'PERSON_SOCIAL_RELATION': lambda: fake.name(),
+        'ORG': lambda: fake.company(),
+        'LOC_CITY': lambda: fake.city(),
+        'LOC_COUNTRY': lambda: fake.country(),
+        'LOC_STREET': lambda: fake.street_address(),
+        'LOC_ZIP': lambda: fake.postcode(),
+        'LOC_HOUSENUMBER': lambda: str(fake.random_int(1, 999)),
+        'LOC_OTHER': lambda: fake.city(),
+        'DATETIME': lambda: fake.date(),
+        'DATETIME_AGE': lambda: str(fake.random_int(18, 90)),
+        'CODE': lambda: fake.uuid4()[:8].upper(),
+        'CODE_PHONE': lambda: fake.phone_number(),
+        'CODE_URL': lambda: fake.url(),
+        'PROFESSION': lambda: fake.job(),
+        'PRODUCT': lambda: fake.catch_phrase(),
+        'QUANTITY': lambda: str(fake.random_int(1, 1000)),
+        'MISC': lambda: fake.word(),
+    }
+    
+    # Track substitutions for consistency
+    used_values = defaultdict(list)
+    registry = defaultdict(list)
+    
+    def replacer(match):
+        tag = match.group(1)  # e.g., 'PERSON'
+        
+        if tag not in TAG_TO_FAKER_METHOD:
+            # No surrogate pool for this tag - keep placeholder
+            return match.group(0)
+        
+        # Get surrogate value
+        faker_func = TAG_TO_FAKER_METHOD[tag]
+        value = faker_func()
+        
+        # Avoid immediate repetition
+        if value in used_values[tag][-3:]:
+            value = faker_func()
+        
+        used_values[tag].append(value)
+        registry[tag].append(value)
+        
+        logger.debug(f"Surrogate: [{tag}] → '{value}'")
+        return value
+    
+    # Replace ALL [TAG] placeholders
+    s_text = re.sub(r'\[([A-Z_]+)\]', replacer, text)
+    
+    entities_replaced = sum(len(v) for v in registry.values())
+    logger.info(f"Applied surrogate substitution: {entities_replaced} entities replaced")
+    return s_text, dict(registry)
 
 def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert=False, 
                           adversarial_mode=False, include_tags=None, exclude_tags=None, file_list=None):
@@ -1751,12 +2378,34 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
                 continue
 
             if not skip_bert:
-                anonymized_text, success, msg = anonymizer.anonymize(text_content)
+                anon_start = time.time()
+                anonymized_text, success, msg, entity_map, surrogate_registry = anonymizer.anonymize(
+                    text_content,
+                    use_surrogates=args.enable_surrogates,
+                    surrogate_seed=args.surrogate_seed,
+                    surrogate_locales=args.surrogate_language
+                )
                 
                 if not success or not anonymized_text:
                     logger.warning(f"BERT Anonymization failed for {base_name}: {msg}")
                     failed_count += 1
                     continue
+                
+                logger.info(f"  Entities detected: {len(entity_map)}")
+                logger.info(f"  Tags found: {', '.join(entity_map.keys()) if entity_map else 'None'}")
+                
+                # Save entity map for audit/debugging
+                entity_map_path = ANONYM_FOLDER / f"{base_name}_anon_entitymap.json"
+                with open(entity_map_path, "w", encoding="utf-8") as f:
+                    json.dump(entity_map, f, indent=2, ensure_ascii=False)
+                logger.debug(f"Entity map saved: {entity_map_path}")
+                
+                # Save surrogate registry if generated
+                if surrogate_registry and args.enable_surrogates:
+                    surrogate_path = ANONYM_FOLDER / f"{base_name}_anon_surrogates.json"
+                    with open(surrogate_path, "w", encoding="utf-8") as f:
+                        json.dump(surrogate_registry, f, indent=2, ensure_ascii=False)
+                    logger.info(f"Surrogate registry saved: {surrogate_path}")
 
                 output_filename = f"{base_name}_anon.txt"
                 output_path = ANONYM_FOLDER / output_filename
@@ -1771,12 +2420,17 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
                 logger.info(f"BERT Anonymized transcript saved to: {output_path}")
                 processed_count += 1
                 
+                anon_duration = time.time() - anon_start
+                logger.info(f"  BERT Anonymization took: {anon_duration:.2f}s")
+
                 text_for_llm = anonymized_text
             else:
                 text_for_llm = text_content
                 logger.info(f"Using existing anonymized content from {file.name} for LLM step.")
 
+            llm_start = None 
             if use_llm:
+                llm_start = time.time()
                 if adversarial_mode:
                     logger.info(f"Running ADVERSARIAL LOOP (3 iterations) on {base_name} with model {target_llm_model}...")
                     
@@ -1833,12 +2487,16 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
                         logger.warning(f"LLM rewrite failed for {base_name}: {status}")
                         llm_failed_count += 1
 
+            if llm_start:  # Only calculate if timing was set
+                llm_duration = time.time() - llm_start
+                logger.info(f"  LLM Rewrite took: {llm_duration:.2f}s")
+
         except Exception as e:
             logger.error(f"Error processing file {file.name}: {e}")
             import traceback
             logger.error(traceback.format_exc())
             failed_count += 1
-
+    
     logger.info(f"Anonymization phase complete.")
     if not skip_bert:
         logger.info(f"  BERT Processed: {processed_count}, Failed: {failed_count}")
@@ -1854,33 +2512,25 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
         "llm_failed": llm_failed_count
     }
 
-def anonymize_text_locally(text, include_tags=None):
-    """Wrapper function to anonymize text using the local BERT model."""
-    try:
-        engine = AnonymizationEngine(
-            method="local_mmbert", 
-            level="standard", 
-            model_path=MODEL_FOLDER / "multilingual_DialogPII_NER",
-            include_tags=include_tags
-        )
-        
-        if not engine.method:
-            return None, False, "Anonymization engine failed to initialize (method not set)."
+# ============================================================================
+# USER STUDY NOTICE
+# ============================================================================
 
-        result_text, success, msg = engine.anonymize(text)
-        
-        if success:
-            return result_text, True, "Success"
-        else:
-            return None, False, msg
-            
-    except Exception as e:
-        logger.error(f"Error in anonymize_text_locally: {e}", exc_info=True)
-        return None, False, str(e)
+def display_user_study_notice():
+    """Brief notice for user study recruitment."""
+    print("\n" + "=" * 60)
+    print("📢 PARTICIPATE IN OUR USER STUDY!")
+    print("   Do you find this tool helpful? Contribute to our anonymous user study and help us make it better!")
+    print("   Link: https://survey.charite.de/InterviewTranscriber_UserSurvey/")
+    print("   Contact: luke.flanagan@bih-charite.de")
+    print("=" * 60 + "\n")
 
 # --- Main Execution ---
 
 if __name__ == "__main__":
+    
+    pipeline_start = time.time()
+    
     parser = argparse.ArgumentParser(
         description="Audio Anonymization Pipeline with Granular Step Control",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -1933,6 +2583,17 @@ Examples:
     parser.add_argument('--enable-tts', action='store_true',
                     help='Enable multi-speaker TTS generation after transcription. '
                          'Voice count is derived from diarization; assignments are randomized.')
+    parser.add_argument('--merge-threshold', type=float, default=SEGMENT_MERGE_THRESHOLD,
+                    help=f"Maximum gap in seconds between segments to merge (default: {SEGMENT_MERGE_THRESHOLD}). "
+                         "Set to 0 for immediate consecutive merge only.")
+    parser.add_argument('--audio-edit', type=str, default=None,
+                        help='Apply audio offset modifications based on JSON config file')
+    parser.add_argument('--enable-surrogates', action='store_true',
+                        help='Enable Faker-based surrogate substitution (e.g., "Max Mustermann" → "Axel Schneider")')
+    parser.add_argument('--surrogate-seed', type=int, default=None,
+                        help='Seed for Faker RNG (for reproducible surrogates). Default: random.')
+    parser.add_argument('--surrogate-language', type=str, default='de_DE,en_US',
+                        help='Faker locale(s) for surrogate generation (comma-separated). Default: de_DE,en_US')
     
     args = parser.parse_args()
     
@@ -1972,6 +2633,9 @@ Examples:
     logger.info(f"  Transcription & Diarization:       {'✅ ENABLED' if run_transcription else '❌ DISABLED'}")
     if run_transcription:
         logger.info(f"    └─ Speaker Diarization:        {'✅ ENABLED' if run_diarization else '❌ DISABLED'}")
+    logger.info(f"  Segment Merge Threshold:         {SEGMENT_MERGE_THRESHOLD}s" if args.merge_threshold == SEGMENT_MERGE_THRESHOLD else f"  Segment Merge Threshold:         {args.merge_threshold}s")
+    if args.audio_edit:
+        logger.info(f"  Audio Edit Config:             {args.audio_edit}")
     logger.info(f"  BERT Anonymization:                {'✅ ENABLED' if run_anonymization and not skip_bert_for_llm else '❌ DISABLED (or Skipped for LLM-only)'}")
     logger.info(f"  LLM Indirect Identifier Removal:   {'✅ ENABLED' if run_llm else '❌ DISABLED'}")
     if skip_bert_for_llm:
@@ -2022,6 +2686,11 @@ Examples:
             logger.warning("⚠️  LLM rewrite requested but BERT anonymization is disabled...")
     
     logger.info("Pipeline finished.")
+    pipeline_duration = time.time() - pipeline_start
+    logger.info(f"Pipeline total duration: {pipeline_duration:.2f}s ({pipeline_duration/60:.1f} minutes)")
+    logger.info(f"   Output size: {file_size:.1f} KB")
+    # Show user study notice
+    display_user_study_notice()
     session_logger.finish()
 
 
@@ -2037,8 +2706,9 @@ __all__ = [
     'load_models',
     'transcribe_audio_locally',
     'AnonymizationEngine',
-    'anonymize_text_locally',
     'process_anonymization',
+    'generate_audio_edit_script',
+    'AUDIO_EDIT_SUPPORT',
     
     # LLM functions
     'call_llm_rewriter',
@@ -2051,6 +2721,11 @@ __all__ = [
     'synthesize_segment',
     'get_available_tts_voices',
     'get_tts_status',
+
+    # Surrogate functions
+    'apply_surrogate_substitution',
+    'SURROGATES',
+    'TAG_TO_SURROGATE_CATEGORY',
     
     # Configuration variables
     'TTS_BACKEND',
