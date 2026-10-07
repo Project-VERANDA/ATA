@@ -642,12 +642,18 @@ else
             hf_repo="${MODEL_MAP[$model_name]}"
             target_dir="$CURRENT_DIR/pipeline/model/Systran--${hf_repo}"
             
-            if [ ! -d "$target_dir" ] || [ -z "$(ls -A "$target_dir" 2>/dev/null)" ]; then
-                log_info "Downloading ${hf_repo}..."
-                
-                # Write Python to temp file to avoid variable expansion issues
-                python_script=$(mktemp --suffix=.py)
-                cat > "$python_script" << PYEOF
+            # FIX: Check directory exists AND contains files BEFORE attempting download
+            if [ -d "$target_dir" ] && [ -n "$(ls -A "$target_dir" 2>/dev/null)" ]; then
+                log_success "${model_name} already exists"
+                [ "$model_name" = "large" ] && WHISPER_PRIMARY_PATH="$target_dir"
+                continue
+            fi
+            
+            log_info "Downloading ${hf_repo}..."
+            
+            # Write Python to temp file to avoid variable expansion issues
+            python_script=$(mktemp --suffix=.py)
+            cat > "$python_script" << PYEOF
 from huggingface_hub import snapshot_download
 import sys
 import os
@@ -658,30 +664,22 @@ repo = 'Systran/$hf_repo'
 os.makedirs(target, exist_ok=True)
 
 try:
-    snapshot_download(
-        repo_id=repo,
-        local_dir=target,
-        local_dir_use_symlink=False
-    )
-    print(f"✓ Downloaded {repo} to {target}")
+    snapshot_download(repo_id=repo, local_dir=target)
+    print(f"Downloaded {repo}")
     sys.exit(0)
 except Exception as e:
-    print(f"✗ ERROR: {e}", file=sys.stderr)
+    print(f"ERROR: {e}", file=sys.stderr)
     sys.exit(1)
 PYEOF
-                
-                # Run WITHOUT 2>/dev/null to see actual errors
-                if python "$python_script"; then
-                    log_success "${model_name} downloaded successfully"
-                else
-                    log_error "Download failed for ${hf_repo}"
-                fi
-                
-                rm "$python_script"
+            
+            # Run without 2>/dev/null to see actual errors
+            if python "$python_script"; then
+                log_success "${model_name} downloaded successfully"
             else
-                log_success "${model_name} already exists"
+                log_error "Download failed for ${hf_repo}"
             fi
             
+            rm "$python_script"
             [ "$model_name" = "large" ] && WHISPER_PRIMARY_PATH="$target_dir"
         done
     fi
