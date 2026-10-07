@@ -615,12 +615,12 @@ if [ "$NO_MODELS" = true ]; then
     log_info "Skipping model downloads (--no-models)"
 else
     declare -A MODEL_MAP
-    MODEL_MAP["tiny"]="Systran/faster-whisper-tiny"
-    MODEL_MAP["base"]="Systran/faster-whisper-base"
-    MODEL_MAP["small"]="Systran/faster-whisper-small"
-    MODEL_MAP["medium"]="Systran/faster-whisper-medium"
-    MODEL_MAP["large"]="Systran/faster-whisper-large-v3"
-    MODEL_MAP["large-turbo"]="Systran/faster-whisper-large-v3-turbo"
+    MODEL_MAP["tiny"]="Systran--faster-whisper-tiny"
+    MODEL_MAP["base"]="Systran--faster-whisper-base"
+    MODEL_MAP["small"]="Systran--faster-whisper-small"
+    MODEL_MAP["medium"]="Systran--faster-whisper-medium"
+    MODEL_MAP["large"]="Systran--faster-whisper-large-v3"
+    MODEL_MAP["large-turbo"]="Systran--faster-whisper-large-v3-turbo"
     
     WHISPER_PRIMARY_PATH=""
     
@@ -640,8 +640,7 @@ else
             [ -z "${MODEL_MAP[$model_name]}" ] && continue
             
             hf_repo="${MODEL_MAP[$model_name]}"
-            # ✅ FIX: Add Systran-- prefix with double dashes
-            target_dir="$CURRENT_DIR/pipeline/model/Systran--${hf_repo//\/--}"
+            target_dir="$CURRENT_DIR/pipeline/model/Systran--${hf_repo#*/}"
             
             if [ ! -d "$target_dir" ] || [ -z "$(ls -A "$target_dir" 2>/dev/null)" ]; then
                 log_info "Downloading ${hf_repo}..."
