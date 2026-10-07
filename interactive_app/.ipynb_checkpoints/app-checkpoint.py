@@ -99,11 +99,11 @@ try:
         AVAILABLE_LLM_MODELS, 
         CHAT_AI_API_KEY, 
         CHAT_AI_ENDPOINT,
-        anonymize_text_locally,
         MODEL_FOLDER as PROCESS_MODEL_FOLDER,
         LLM_ANONYM_FOLDER,
         ANONYM_FOLDER,
         BASE_PATH,
+        AnonymizationEngine
     )
 except ImportError as e:
     logging.critical(f"Failed to import from process.py: {e}")
@@ -123,20 +123,6 @@ try:
 except ImportError as e:
     logging.critical(f"Failed to import tts_engine: {e}")
     sys.exit(1)
-
-# Import Anonymization engine
-global_anonymizer = None
-try:
-    from process import AnonymizationEngine, MODEL_FOLDER
-    global_anonymizer = AnonymizationEngine(
-        method="local_mmbert",
-        level="standard",
-        model_path=MODEL_FOLDER / "multilingual_DialogPII_NER"
-    )
-    logger.info(f"✅ AnonymizationEngine pre-loaded successfully. Method: {global_anonymizer.method}")
-except Exception as e:
-    logger.error(f"⚠️ Failed to pre-load AnonymizationEngine: {e}")
-    global_anonymizer = None
 
 # Verify model path consistency
 if MODEL_FOLDER != PROCESS_MODEL_FOLDER:
@@ -176,6 +162,19 @@ import torch
 from flask import Flask, render_template, request, jsonify, send_file
 
 app = Flask(__name__)
+@app.after_request
+def add_security_headers(response):
+    """Add security headers including CSP that allows blob URLs for audio."""
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['Content-Security-Policy'] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "media-src 'self' blob: data:; "
+        "img-src 'self' data: https:;"
+    )
+    return response
 app.config['MAX_CONTENT_LENGTH'] = 5 * 1024 * 1024 * 1024
 app.config['UPLOAD_FOLDER'] = 'uploads'
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
@@ -208,6 +207,27 @@ def transcribe_audio(audio_path, language='auto'):
 # --- CONFIGURATION ---
 CHAT_AI_API_KEY = os.getenv('CHAT_AI_API_KEY')
 CHAT_AI_ENDPOINT = os.getenv('CHAT_AI_ENDPOINT', 'https://llm.cloud.cci.charite.de/v1')
+
+# Faker Surrogate processing
+try:
+    from process import (
+        apply_surrogate_substitution, 
+        SURROGATES, 
+        TAG_TO_SURROGATE_CATEGORY,
+        ANONYM_FOLDER,
+        LLM_ANONYM_FOLDER
+    )
+    HAS_FAKER = True
+    logger.info("✅ Successfully imported surrogate functions from process.py")
+except ImportError as e:
+    HAS_FAKER = False
+    SURROGATES = {}
+    TAG_TO_SURROGATE_CATEGORY = {}
+    apply_surrogate_substitution = None
+    ANONYM_FOLDER = Path('anonym')
+    LLM_ANONYM_FOLDER = Path('LLM-Anon')
+    logger.error(f"❌ Failed to import from process.py: {e}")
+    logger.warning("Some features may be disabled.")
 
 # Model mappings for the UI
 
@@ -578,14 +598,31 @@ def anonymize():
         if not transcript_text:
             logger.warning("No transcript provided to /anonymize")
             return jsonify({'error': 'No transcript provided'}), 400
+
+        if not hasattr(app, 'global_anonymizer') or app.global_anonymizer is None:
+            try:
+                app.global_anonymizer = AnonymizationEngine(
+                    method="local_mmbert",
+                    level="standard",
+                    model_path=MODEL_FOLDER / "multilingual_DialogPII_NER",
+                    include_tags=include_tags
+                )
+                if not app.global_anonymizer.method:
+                    raise ValueError("Anonymization engine failed to initialize")
+            except Exception as e:
+                logger.error(f"Failed to initialize AnonymizationEngine: {e}")
+                return jsonify({
+                    'error': 'Anonymization service unavailable',
+                    'details': str(e)
+                }), 500
         
-        # Pass include_tags to anonymization engine
-        result_text, success, msg = anonymize_text_locally(
-            transcript_text, 
-            include_tags=include_tags
+        # Call .anonymize() using app instance
+        result_text, success, msg, entity_map, surrogate_registry = app.global_anonymizer.anonymize(
+            transcript_text,
+            use_surrogates=False
         )
         
-        logger.info(f"Anonymization result: success={success}, text_len={len(result_text) if result_text else 0}, tags={include_tags}")
+        logger.info(f"Anonymization result: success={success}, text_len={len(result_text) if result_text else 0}")
         
         if not success or result_text is None:
             logger.error(f"Anonymization FAILED: {msg}")
@@ -595,17 +632,45 @@ def anonymize():
                 'original_length': len(transcript_text)
             }), 500
         
+        # SESSION EXPIRATION CLEANUP LOGIC
+        MAX_SESSION_AGE_SECONDS = 3600  # 1 hour
+        
+        if hasattr(app, 'session_entity_maps'):
+            current_time = time.time()
+            expired_sessions = [
+                sid for sid, record in app.session_entity_maps.items()
+                if current_time - record.get('timestamp', 0) > MAX_SESSION_AGE_SECONDS
+            ]
+            for sid in expired_sessions:
+                del app.session_entity_maps[sid]
+                logger.debug(f"Cleaned up expired session: {sid[:8]}...")
+        
+        # Now save the new session
+        session_id = request.headers.get('X-Session-ID', str(int(time.time())))
+        if not hasattr(app, 'session_entity_maps'):
+            app.session_entity_maps = {}
+        
+        app.session_entity_maps[session_id] = {
+            'entity_map': entity_map,
+            'timestamp': time.time(),
+            'original_length': len(transcript_text)
+        }
+        
         logger.info(f"Anonymization SUCCESS: {len(transcript_text)} → {len(result_text)} chars")
+        logger.info(f"Session ID: {session_id} | Entity map entries: {sum(len(v) for v in entity_map.values())}")
+        
         return jsonify({
             'status': 'success',
             'original': transcript_text,
             'anonymized': result_text,
             'chars_original': len(transcript_text),
-            'chars_anonymized': len(result_text)
+            'chars_anonymized': len(result_text),
+            'session_id': session_id,
+            'entity_count': sum(len(v) for v in entity_map.values()),
         })
-        
+    
     except TypeError as e:
-        logger.error(f"TUPLE UNPACKING ERROR - check anonymize_text_locally return type: {e}")
+        logger.error(f"Anonymization tuple unpacking error: {e}")
         import traceback
         logger.error(traceback.format_exc())
         return jsonify({'error': f'Server configuration error: {str(e)}'}), 500
@@ -701,12 +766,32 @@ def get_models():
 
 @app.route('/transcription_models')
 def get_transcription_models():
-    # DEBUG: Print to server console
-    print(f"DEBUG: WHISPER_MODELS content: {list(WHISPER_MODELS.items())}")
+    # Scan MODEL_FOLDER for actual available Whisper models
+    model_map = {
+        'large': 'faster-whisper-large-v3',
+        'large-turbo': 'faster-whisper-large-v3-turbo',
+        'medium': 'faster-whisper-medium',
+        'small': 'faster-whisper-small',
+        'base': 'faster-whisper-base',
+        'tiny': 'faster-whisper-tiny',
+    }
+    
+    available_models = {}
+    for ui_key, folder_name in model_map.items():
+        model_path = MODEL_FOLDER / f"Systran--{folder_name}"
+        if model_path.exists():
+            available_models[ui_key] = model_map[ui_key]  # Store UI key + label
+    
+    if not available_models:
+        logger.warning("No Whisper models found in MODEL_FOLDER!")
+        available_models = {'base': 'Base (Fallback)'}
     
     return jsonify({
-        'whisper_models': list(WHISPER_MODELS.items()),
-        'default_whisper_model': 'base'
+        'whisper_models': [
+            {'key': k, 'label': f'{k.title()}' if k != 'large-turbo' else 'Large Turbo'}
+            for k, v in available_models.items()
+        ],
+        'default_whisper_model': 'large' if 'large' in available_models else 'base'
     })
 
 @app.route('/available_tags')
@@ -760,6 +845,9 @@ def upload_file():
         language = request.form.get('language', None)
         if not language or language == 'auto':
             language = None
+
+        language = request.form.get('language', None)
+        whisper_model = request.form.get('whisper_model', 'large')
         
         if file and allowed_file(file.filename):
             filename = secure_filename(file.filename)
@@ -767,7 +855,11 @@ def upload_file():
             file.save(filepath)
             
             logger.info(f"Transcribing file: {filename} in language: {language}")
-            transcription, wordOffS = transcribe_audio_locally(filepath, language=language)
+            transcription, wordOffS = transcribe_audio_locally(
+                filepath, 
+                language=language,
+                whisper_model_name=whisper_model
+            )
             
             # Check if transcription resulted in an error message
             if not isinstance(transcription, str):
@@ -885,26 +977,92 @@ def transcribe_recording():
 
 @app.route('/surrogate_text', methods=['POST'])
 def surrogate_text():
+    """Replace [TAG] placeholders with realistic surrogate values using process.py function."""
     try:
+        if not apply_surrogate_substitution:
+            return jsonify({'error': 'Surrogate substitution not available. Check server logs.'}), 500
+        
         data = request.get_json()
         if not data or 'text' not in data:
             return jsonify({'error': 'No text provided'}), 400
-        
+
         text = data['text']
-        la = data['lang']
+        lang_input = data.get('lang', 'EN')  # Get original value
+        session_id = data.get('session_id')
+
+        # ✅ FIX: Normalize lang to valid code
+        lang_mapping = {
+            'auto': 'EN',
+            'AUTO': 'EN',
+            'EN': 'EN',
+            'DE': 'DE',
+            'FR': 'FR',
+            'ES': 'ES',
+            'SP': 'ES',  # Spanish alternative
+        }
+        lang = lang_mapping.get(lang_input, 'EN').upper()
+
+        # Retrieve entity_map from session storage
+        if not session_id:
+            return jsonify({'error': 'No session_id provided'}), 400
         
-        s_text = replace_surrogates(text, la)
+        if not hasattr(app, 'session_entity_maps'):
+            return jsonify({'error': 'No active sessions found'}), 400
         
+        session_data = app.session_entity_maps.get(session_id)
+        if not session_data:
+            return jsonify({'error': 'Session expired or not found'}), 404
+        
+        entity_map = session_data.get('entity_map', {})
+        if not entity_map:
+            return jsonify({
+                'success': True,
+                'surrogated_text': text,
+                'entities_replaced': 0,
+                'note': 'No entities detected in original anonymization.'
+            })
+
+        logger.info(
+            f"Surrogate request for session {session_id[:8]}... "
+            f"Entity map entries: {sum(len(v) for v in entity_map.values())}, Lang: {lang}"
+        )
+        lang_to_locale = {
+            'EN': 'en_US',
+            'DE': 'de_DE',
+            'FR': 'fr_FR',
+            'ES': 'es_ES',
+        }
+        primary_locale = lang_to_locale.get(lang, 'en_US')
+        # Use clean format without spaces/hyphens
+        locales = primary_locale  # e.g., "en_US" only, not "en_US,en-US en_US"
+        
+        logger.debug(f"Surrogate locales: {locales}")
+
+        # Call imported function from process.py
+        s_text, surrogate_registry = apply_surrogate_substitution(
+            text=text,
+            entity_map=entity_map,
+            use_surrogates=True,
+            seed=None,
+            locales=locales  # ← Clean locale string
+        )
+
+        entities_replaced = sum(len(v) for v in surrogate_registry.values())
+        logger.info(
+            f"Surrogate substitution complete: {entities_replaced} entities replaced. "
+            f"Session: {session_id[:8]}, Locales: {locales}"
+        )
+
         return jsonify({
-            'success': True, 
+            'success': True,
             'surrogated_text': s_text,
-            'tts_available': TTS_AVAILABLE,
-            'tts_backend': TTS_BACKEND,
+            'entities_replaced': entities_replaced,
+            'surrogate_registry': surrogate_registry,
         })
-    
+
     except Exception as e:
-        logger.error(f"Error in anonymize route: {str(e)}")
-        return jsonify({'error': f'Error anonymizing text: {str(e)}'}), 500
+        logger.error(f"Error in surrogate_text route: {str(e)}", exc_info=True)
+        return jsonify({'error': f'Error generating surrogates: {str(e)}'}), 500        
 
 @app.route('/rephrase_text', methods=['POST'])
 def rephrase_text():
@@ -980,29 +1138,47 @@ def generate_speech_api():
         data = request.get_json()
         text = data.get('text', '').strip()
         lang = data.get('lang', 'en')
-        randomize_voices = data.get('randomize_voices', True)  # Always randomize per spec
         
         if not text:
             return jsonify({'error': 'No text provided'}), 400
         
-        logger.info(f"🎵 Speech request: {len(text)} chars, multi-speaker=True")
+        logger.info(f"🎵 Speech request: {len(text)} chars")
         
-        # Generate multi-speaker TTS
         output_path, voice_mapping = generate_multi_speaker_tts(
             transcript_text=text,
-            word_offsets=[],  # Would pass from earlier transcription if available
+            word_offsets=[],
             audio_source_path=None
         )
         
+        # ✅ CRITICAL VERIFICATION
         if output_path is None:
-            logger.error("Speech generation failed")
-            return jsonify({'error': 'Speech generation failed'}), 500
+            logger.error("TTS returned None output path")
+            return jsonify({'error': 'TTS returned no output path'}), 500
+        
+        if not os.path.exists(output_path):
+            logger.error(f"TTS file not found: {output_path}")
+            return jsonify({'error': 'Generated file does not exist'}), 500
+        
+        file_size = os.path.getsize(output_path)
+        if file_size == 0:
+            logger.error(f"TTS file is empty: {output_path}")
+            # Debug: Log TTS engine status
+            from pipeline.tts.tts_engine import get_tts_status
+            tts_status = get_tts_status()
+            logger.error(f"TTS Status: {tts_status}")
+            return jsonify({
+                'error': 'Generated file is empty',
+                'file_path': output_path,
+                'tts_status': tts_status
+            }), 500
+        
+        logger.info(f"✅ Generated speech: {file_size} bytes")
         
         return send_file(
             output_path,
             mimetype='audio/wav',
             as_attachment=True,
-            download_name=f'multi_speaker_tts_{int(time.time())}.wav'
+            download_name=f'tts_{int(time.time())}.wav'
         )
         
     except Exception as e:
@@ -1146,7 +1322,7 @@ def llm_rewrite_route():
             return jsonify({'error': 'No text provided'}), 400
         
         text = data['text']
-        model_key = data.get('model', 'medgemma') 
+        model_key = data.get('model', 'medgemma')  # ← Use 'model' instead of 'lang'
         enabled = data.get('enabled', True)
 
         if not enabled:
@@ -1155,18 +1331,7 @@ def llm_rewrite_route():
         if not CHAT_AI_API_KEY:
             return jsonify({'error': 'LLM API Key not configured on server'}), 500
 
-        model_id = AVAILABLE_MODELS.get(model_key, model_key)
-        
-        # DEBUG: Log what we're actually sending
-        logger.info(f"Web Interface: Model key={model_key}")
-        logger.info(f"Web Interface: Mapped model_id={model_id}")
-        logger.info(f"Web Interface: Endpoint={CHAT_AI_ENDPOINT}")
-        logger.info(f"Web Interface: API Key length={len(CHAT_AI_API_KEY) if CHAT_AI_API_KEY else 0}")
-        logger.info(f"Web Interface: Text length={len(text)}")
-        
-        rewritten_text, status = call_llm_rewriter(text, model_id)
-        
-        logger.info(f"DEBUG: call_llm_rewriter returned: status={status}, len(text)={len(rewritten_text) if rewritten_text else 0}")
+        rewritten_text, status = call_llm_rewriter(text, model_key)  # Pass model_key directly
         
         if not rewritten_text:
             return jsonify({'error': f'LLM rewrite failed: {status}'}), 500
@@ -1174,13 +1339,11 @@ def llm_rewrite_route():
         return jsonify({
             'success': True,
             'rewritten_text': rewritten_text,
-            'model_used': model_id
+            'model_used': model_key
         })
-
+    
     except Exception as e:
         logger.error(f"Error in LLM rewrite route: {str(e)}")
-        import traceback
-        logger.error(traceback.format_exc())
         return jsonify({'error': f'Error rewriting text: {str(e)}'}), 500
 
 # --- NEW ROUTES FOR EDITING & BULK UPLOAD ---
@@ -1434,23 +1597,38 @@ def process_all_batches():
 def download_text(file_type, filename):
     """Downloads text files (original, anonymized, LLM)"""
     try:
-        # Map file types to folders
+        from process import ANONYM_FOLDER, LLM_ANONYM_FOLDER
+        
+        # ✅ FIX: Use absolute paths from process.py
         folder_map = {
-            'original': app.config['UPLOAD_FOLDER'], # Assuming original is saved here or in a specific folder
-            'bert': ANONYM_FOLDER,
-            'llm': LLM_ANONYM_FOLDER
+            'original': app.config['UPLOAD_FOLDER'],
+            'bert': str(ANONYM_FOLDER.absolute()),
+            'llm': str(LLM_ANONYM_FOLDER.absolute())
         }
         
         if file_type not in folder_map:
             return jsonify({'error': 'Invalid file type'}), 400
-            
-        base_path = folder_map[file_type]
-        file_path = os.path.join(base_path, secure_filename(filename))
         
+        base_path = folder_map[file_type]
+        safe_filename = secure_filename(filename)
+        file_path = os.path.join(base_path, safe_filename)
+        
+        # Verify file exists within allowed directory
         if not os.path.exists(file_path):
-            return jsonify({'error': 'File not found'}), 404
-            
-        return send_file(file_path, as_attachment=True, download_name=filename)
+            logger.warning(f"File not found: {file_path}")
+            # Debug: Return what folders actually exist
+            return jsonify({
+                'error': 'File not found',
+                'file_path': file_path,
+                'exists': os.path.exists(file_path),
+                'base_path': base_path,
+                'available_folders': {
+                    'uploads': list(os.listdir(app.config['UPLOAD_FOLDER'])),
+                    'anonym': list(os.listdir(ANONYM_FOLDER)) if ANONYM_FOLDER.exists() else []
+                }
+            }), 404
+        
+        return send_file(file_path, as_attachment=True, download_name=safe_filename)
     except Exception as e:
         logger.error(f"Error downloading text: {e}")
         return jsonify({'error': str(e)}), 500
@@ -1523,8 +1701,56 @@ def generate_beep_route():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+
+def cleanup_expired_sessions():
+    """Background task to remove expired sessions periodically."""
+    MAX_SESSION_AGE_SECONDS = int(os.getenv('SESSION_MAX_AGE_SECONDS', 3600))
+    CLEANUP_INTERVAL_SECONDS = int(os.getenv('SESSION_CLEANUP_INTERVAL', 300))  # ← Use env var
+    
+    while True:
+        time.sleep(CLEANUP_INTERVAL_SECONDS) 
+        
+        try:
+            if not hasattr(app, 'session_entity_maps'):
+                continue
+            
+            current_time = time.time()
+            expired_sessions = [
+                sid for sid, record in app.session_entity_maps.items()
+                if current_time - record.get('timestamp', 0) > MAX_SESSION_AGE_SECONDS
+            ]
+            
+            if expired_sessions:
+                count = len(expired_sessions)
+                for sid in expired_sessions:
+                    del app.session_entity_maps[sid]
+                
+                logger.info(f"Background cleanup: removed {count} expired session(s)")
+        
+        except Exception as e:
+            logger.error(f"Error in background session cleanup: {e}")
+
+@app.route('/debug/sessions')
+def debug_session_count():
+    """Healthcheck endpoint to monitor session memory usage."""
+    session_count = len(getattr(app, 'session_entity_maps', {}))
+    total_memory_mb = sum(
+        sys.getsizeof(record['entity_map']) / (1024 * 1024)
+        for record in getattr(app, 'session_entity_maps', {}).values()
+    )
+    return jsonify({
+        'active_sessions': session_count,
+        'estimated_memory_mb': round(total_memory_mb, 2)
+    })
+
+# Start background cleaner (non-blocking)
+
 if __name__ == '__main__':
     use_https = os.getenv('USE_HTTPS', 'true').lower() == 'true'
+    import threading
+    session_cleanup_thread = threading.Thread(target=cleanup_expired_sessions, daemon=True)
+    session_cleanup_thread.start()
+    logger.info("Session cleanup thread started (every 5 minutes)")
     
     if use_https:
         cert_to_use = None

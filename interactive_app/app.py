@@ -778,7 +778,7 @@ def get_transcription_models():
     
     available_models = {}
     for ui_key, folder_name in model_map.items():
-        model_path = MODEL_FOLDER / folder_name
+        model_path = MODEL_FOLDER / f"Systran--{folder_name}"
         if model_path.exists():
             available_models[ui_key] = model_map[ui_key]  # Store UI key + label
     
