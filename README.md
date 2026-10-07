@@ -204,7 +204,8 @@ python -c "import torch; print('**CUDA** Available:', torch.cuda.is_available())
 ├── videos/          # Input video files │   
 ├── audios/          # Extracted WAV files │   
 ├── transcripts/     # Raw transcription files (.txt) │   
-├── anonym/          # BERT-anonymized transcripts (_anon.txt) │   ├── LLM-Anon/    # LLM-rewritten transcripts (_llm_.txt, _adversarial_.txt) 
+├── anonym/          # BERT-anonymized transcripts (_anon.txt) │   
+├── LLM-Anon/    # LLM-rewritten transcripts (_llm_.txt, _adversarial_.txt) 
 │   
 ├── uploads/         # Temporary storage for web uploads (includes _beeped.wav files) 
 │   ├── model/           # Downloaded AI models 

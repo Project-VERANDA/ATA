@@ -2688,7 +2688,7 @@ Examples:
     logger.info("Pipeline finished.")
     pipeline_duration = time.time() - pipeline_start
     logger.info(f"Pipeline total duration: {pipeline_duration:.2f}s ({pipeline_duration/60:.1f} minutes)")
-    logger.info(f"   Output size: {file_size:.1f} KB")
+    #logger.info(f"   Output size: {file_size:.1f} KB")
     # Show user study notice
     display_user_study_notice()
     session_logger.finish()
