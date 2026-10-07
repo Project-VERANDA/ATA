@@ -167,6 +167,8 @@ Create a .env file in the ATA root directory to configure optional features:
 
 ## LLM API Configuration (Required for LLM Rewrite & Adversarial Mode)
 
+Update the .env file and change the below variables.
+
 ```
 CHAT_AI_API_KEY=your_api_key_here 
 CHAT_AI_ENDPOINT=https://your-api-endpoint.com/v1
@@ -184,11 +186,8 @@ USE_HTTPS=true
 |Component|CPU Only|With NVIDIA GPU|
 ----|----|----
 | WhisperX Transcription|~13x slower|Optimal|
-----|----|----|
 |Speaker DiarizatioN|~13x slower|Optimal|
-----|----|----
 |Memory (**RAM**)|**8GB** minimum|**16GB** recommended|
-----|----|----
 |Storage (Models)|~**30GB**|	~**30GB**|
 
 
@@ -245,28 +244,30 @@ The BERT anonymization model detects and replaces the following entity types:
 PERSON|Names|[**PERSON**]
 ----|----|----
 PERSON_EMAIL |	Email addresses |	[**EMAIL**]
-----|----|----
-PERSON_SOCIAL_RELATION |	Family/Social relations	| [NAME_RELATIVE]
-----|----|----
+PERSON_SOCIAL_RELATION |	Family/Social relations	| [**NAME_RELATIVE**]
 ORG |	Organizations |	[**ORGANISATION**]
-----|----|----
 LOC_CITY | Cities |	[**CITY**]
-----|----|----
 LOC_COUNTRY	| Countries |	[**COUNTRY**]
-----|----|----
 LOC_STREET	| Street addresses	| [**STREET**]
-----|----|----
 DATETIME	| Dates/Times |	[**DATETIME**]
-----|----|----
 DATETIME_AGE |	Age references |	[**AGE**]
-----|----|----
 CODE_PHONE	| Phone numbers	| [**PHONE**]
-----|----|----
 CODE_URL |	URLs |	[**URL**]
-----|----|----
-**PROFESSION** |	Job titles |	[**PROFESSION**]
+PROFESSION |	Job titles |	[**PROFESSION**]
 
 Use --include-tags or --exclude-tags to customize which tags are anonymized. 
+
+## Surrogate Substitution Settings (Optional)
+
+These are set via CLI arguments, not `.env`:
+
+- `--enable-surrogates`: Activate Faker-based fake data generation
+- `--surrogate-seed <INT>`: Fixed seed for reproducible surrogates (default: random)
+- `--surrogate-language <LOCALE>`: Comma-separated Faker locales (default: `de_DE,en_US`)
+
+Example output:
+- Original:`James Bond` → `[PERSON]` → Surrogate: `"Max Müller"`
+- Original: `Hamburg` →`[CITY]` → Surrogate: `"Berlin"`
 
 # 🐞 Troubleshooting Issue: 
 
@@ -398,6 +399,7 @@ This project utilizes:
     Pyannote.audio
     Hugging Face Transformers (mmbert_multilingual_pii_ner)
     Flask
+    Faker
 
 Developed for privacy-preserving audio analysis.
 
