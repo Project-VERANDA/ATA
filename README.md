@@ -8,7 +8,7 @@ Ideal for: Interviews, therapy sessions, legal consultations, and any conversati
     
   Video to Audio Extraction: Automatically isolates audio from video files (MP4, MKV, etc.).
   
-  * High-Accuracy Transcription: Powered by WhisperX (Faster-Whisper) with support for 12+ languages.
+  * High-Accuracy Transcription: Powered by WhisperX (Faster-Whisper) with support for 11 languages.
   
   * Speaker Diarization: Identifies and separates speakers using Pyannote.audio.
   
