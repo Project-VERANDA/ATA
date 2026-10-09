@@ -13,7 +13,20 @@ import json
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from io import BytesIO
-from collections import OrderedDict, defaultdict
+from collections import defaultdict
+from typing import Optional, List, Tuple
+
+# =============================================================================
+# LOGGING SETUP
+# =============================================================================
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+    ]
+)
+logger = logging.getLogger(__name__)
 
 # =============================================================================
 # THIRD-PARTY IMPORTS
@@ -25,6 +38,7 @@ import spacy
 from dotenv import load_dotenv
 from werkzeug.utils import secure_filename
 from openai import OpenAI
+import random
 try:
     from faker import Faker
     HAS_FAKER = True
@@ -40,13 +54,7 @@ except ImportError:
 import torch
 import warnings
 
-# Only apply verbose filters when running as main script (args exists)
-try:
-    if args.verbose:  # This will fail during import if args not defined
-        warnings.filterwarnings("ignore", category=UserWarning, module="pyannote")
-except NameError:
-    # Safe to ignore - this only applies when running as main script
-    pass
+warnings.filterwarnings("ignore", category=UserWarning, module="pyannote")
 
 # Disable cuDNN to avoid CUDNN_STATUS_NOT_INITIALIZED with WhisperX + Pyannote
 torch.backends.cudnn.enabled = True
@@ -94,20 +102,11 @@ CHAT_AI_API_KEY = os.getenv('CHAT_AI_API_KEY')
 CHAT_AI_ENDPOINT = os.getenv('CHAT_AI_ENDPOINT', 'https://llm.cloud.cci.charite.de/v1')
 
 # =============================================================================
-# LOGGING SETUP
-# =============================================================================
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
-
-# =============================================================================
 # GLOBAL CONSTANTS & PATHS
 # =============================================================================
 BASE_PATH = Path(__file__).parent
 MODEL_FOLDER = BASE_PATH / 'pipeline' / 'model'
-WHISPERX_MODEL_PATH = MODEL_FOLDER / 'Systran--faster-whisper-large-v3'
+WHISPERX_MODEL_PATH = Path(os.getenv('WHISPERX_MODEL_PATH', str(MODEL_FOLDER / 'Systran--faster-whisper-large-v3')))
 
 script_dir = Path(__file__).resolve().parent.parent  # ATA/ root
 interactive_app_path = script_dir / "interactive_app"
@@ -267,15 +266,6 @@ class SessionLogger:
 # --- Configuration & Security ---
 
 # Setup Logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-    ]
-)
-logger = logging.getLogger(__name__)
-
 logger.info(f"DEBUG: API Key loaded? {'YES' if os.getenv('CHAT_AI_API_KEY') else 'NO'}")
 
 # Path Definitions
@@ -318,8 +308,8 @@ COMPUTE_TYPE = "float16"
 MIN_SPEAKERS = 2
 MAX_SPEAKERS = 4
 
-# Local Model Paths - CORRECTED
-WHISPERX_MODEL_PATH = MODEL_FOLDER / "Systran--faster-whisper-large-v3"
+# Local Model Paths
+WHISPERX_MODEL_PATH = Path(os.getenv('WHISPERX_MODEL_PATH', str(MODEL_FOLDER / 'Systran--faster-whisper-large-v3')))
 DIARIZATION_MODEL_PATH = MODEL_FOLDER / "models--pyannote--speaker-diarization-community-1"
 
 # System prompts per language
@@ -793,7 +783,7 @@ def convert_numpy(obj):
 
 # --- Extract Audio ---
 
-def process_videos(file_list=None):
+def process_videos(file_list: Optional[List[str]] = None) -> int:
     """Extracts audio from video files in VIDEOS_FOLDER."""
     if not VIDEOS_FOLDER.exists():
         logger.warning(f"No 'videos' folder found at {VIDEOS_FOLDER}. Skipping audio extraction.")
@@ -879,7 +869,12 @@ def process_videos(file_list=None):
     return processed_count
 
 def process_audios(enable_diarization=True, lang_code=None, file_list=None, args=None):
-    """Process audio files: transcribe and optionally diarize."""
+    """Process audio files: transcribe and optionally diarize.
+    
+    Returns:
+        tuple: (processed_count, detected_languages) where detected_languages is
+               {filename: detected_language_code, ...}
+    """
     file_start = time.time()
     force_language = lang_code
     
@@ -888,7 +883,7 @@ def process_audios(enable_diarization=True, lang_code=None, file_list=None, args
         whisper_code = WHISPER_LANG_MAP.get(force_language)
         if not whisper_code:
             logger.error(f"Invalid language code: {force_language}")
-            return
+            return 0, {}
         logger.info(f"Language forced to: {SUPPORTED_LANGUAGES[force_language]} ({whisper_code})")
     else:
         logger.info("Language set to Auto-Detect.")
@@ -908,7 +903,7 @@ def process_audios(enable_diarization=True, lang_code=None, file_list=None, args
         logger.info("WhisperX model loaded successfully.")
     except Exception as e:
         logger.critical(f"Failed to load WhisperX model: {e}")
-        return
+        return 0, {}
 
     if enable_diarization:
         try:
@@ -933,9 +928,12 @@ def process_audios(enable_diarization=True, lang_code=None, file_list=None, args
 
     if not files_to_process:
         logger.info("No files found to process.")
-        return
+        return 0, {}
 
     logger.info(f"Found {len(files_to_process)} files to process. Starting stream...")
+    
+    # Track detected languages for downstream anonymization
+    detected_languages = {}
 
     for idx, input_file in enumerate(files_to_process, 1):
         if not input_file.exists():
@@ -1000,14 +998,21 @@ def process_audios(enable_diarization=True, lang_code=None, file_list=None, args
             
             result = model.transcribe(**transcribe_kwargs)
             
-            if result.get("language"):
+            # Capture detected language from WhisperX
+            detected_language = result.get("language", 'en')
+            detected_languages[input_file.name] = detected_language.upper()
+            logger.info(f"   Detected language: {detected_language.upper()}")
+            
+            # Word alignment
+            if detected_language:
                 try:
                     align_device = "cuda" if torch.cuda.is_available() else "cpu"
-                    model_a, metadata = whisperx.load_align_model(language_code=result["language"], device=align_device)
+                    model_a, metadata = whisperx.load_align_model(language_code=detected_language, device=align_device)
                     result = whisperx.align(result["segments"], model_a, metadata, audio, align_device, return_char_alignments=False)
                 except Exception as e:
                     logger.warning(f"Alignment failed: {e}")
 
+            # Speaker diarization (unchanged)
             if enable_diarization and diarize_model:
                 try:
                     diarize_output = diarize_model(str(actual_audio_path))
@@ -1043,17 +1048,20 @@ def process_audios(enable_diarization=True, lang_code=None, file_list=None, args
             base_name = sanitize_filename(input_file.stem)
             transcript_file = TRANSCRIPTS_FOLDER / f"{base_name}.txt"
             
+            # Write transcript WITH LANGUAGE METADATA HEADER
             with open(transcript_file, "w", encoding="utf-8") as f:
+                f.write(f"# LANG: {detected_language.upper()}\n")  # ← Metadata line for downstream
                 for segment in result["segments"]:
                     text = segment.get("text", "").strip()
                     if text:
                         f.write(f"{segment.get('speaker', 'Unknown')}: {text}\n")
             
+            logger.info(f"   ✅ Transcript saved with language metadata")
+            
         except Exception as e:
             logger.error(f"❌ FAILED: {input_file.name} - {e}")
             import traceback
             logger.error(traceback.format_exc())
-        
         finally:
             logger.info(f"✅ COMPLETED: {input_file.name} -> {transcript_file.name}")
             logger.info(f"   Duration: {time.time() - file_start:.2f}s")
@@ -1062,10 +1070,9 @@ def process_audios(enable_diarization=True, lang_code=None, file_list=None, args
                 torch.cuda.empty_cache()
             time.sleep(0.1)
     
-    # AFTER the loop completes:
     cleanup_gpu_resources()
     logger.info("Stream processing finished.")
-    return len(files_to_process)
+    return len(files_to_process), detected_languages
     
 # --- Global model cache ---
 _loaded_whisper_model = None
@@ -1169,7 +1176,7 @@ def transcribe_audio_locally(audio_path, language=None, whisper_model_name=None)
         whisper_model_name: Optional override (e.g., 'large-v3', 'base', 'tiny')
     
     Returns:
-        tuple: (transcription_text, wordOffsets)
+        tuple: (transcription_text, wordOffsets, detected_language)
     """
     global _loaded_whisper_model, _loaded_diarize_model
     
@@ -1179,12 +1186,12 @@ def transcribe_audio_locally(audio_path, language=None, whisper_model_name=None)
     
     if not _loaded_whisper_model:
         logger.error("Error: WhisperX model not loaded.")
-        return None, None
+        return "", [], None
 
     try:
         audio = whisperx.load_audio(audio_path)
         
-        # === SAME TRANSCRIPTION PARAMETERS AS process_audios ===
+        # === TRANSCRIPTION PARAMETERS ===
         transcribe_kwargs = {
             "audio": audio,
             "batch_size": BATCH_SIZE,
@@ -1198,8 +1205,10 @@ def transcribe_audio_locally(audio_path, language=None, whisper_model_name=None)
         
         result = _loaded_whisper_model.transcribe(**transcribe_kwargs)
         
-        # === WORD ALIGNMENT (same as process_audios) ===
+        # === CAPTURE DETECTED LANGUAGE EARLY ===
         detected_language = result.get("language", 'en')
+        
+        # === WORD ALIGNMENT ===
         if detected_language:
             try:
                 align_device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -1210,10 +1219,9 @@ def transcribe_audio_locally(audio_path, language=None, whisper_model_name=None)
             except Exception as e:
                 logger.warning(f"Alignment failed: {e}")
 
-        # === SPEAKER DIARIZATION (same as process_audios) ===
+        # === SPEAKER DIARIZATION ===
         if _loaded_diarize_model:
             try:
-                # Load audio as numpy, convert to torch tensor for pyannote
                 audio_np = whisperx.load_audio(audio_path)
                 
                 diarization_audio = {
@@ -1257,7 +1265,7 @@ def transcribe_audio_locally(audio_path, language=None, whisper_model_name=None)
                 if "speaker" not in segment:
                     segment["speaker"] = f"SPEAKER_{i % 2:02d}"
 
-        # === SEGMENT MERGING (same as process_audios) ===
+        # === SEGMENT MERGING ===
         gap_threshold = globals().get('SEGMENT_MERGE_THRESHOLD', 2.0)
         result["segments"] = merge_consecutive_speaker_segments(
             result["segments"], 
@@ -1276,11 +1284,11 @@ def transcribe_audio_locally(audio_path, language=None, whisper_model_name=None)
         resultOffset = convert_numpy(result.get("segments", []))
         
         logger.info(f"Transcription complete: {len(result_text)} chars, {len(result['segments'])} segments")
-        return result_text, resultOffset
+        return result_text, resultOffset, detected_language.upper()  # ← CONSISTENT: Always 3 values
 
     except Exception as e:
         logger.error(f"Transcription failed: {e}", exc_info=True)
-        return f"Transcription failed: {e}", []
+        return f"Transcription failed: {e}", [], None  # ← Error case also returns 3 values
 
 # --- Anonymization Engine (V2-style, simplified with DFKI-SLT model) ---
 
@@ -1634,7 +1642,7 @@ class AnonymizationEngine:
             logger.error(traceback.format_exc())
             self.method = None
 
-    def anonymize(self, text, use_surrogates=False, surrogate_seed=None, surrogate_locales='de_DE,en_US'):
+    def anonymize(self, text, use_surrogates=False, surrogate_seed=None, surrogate_locales='de_DE,en_US', lang='DE'):
         """
         Anonymizes text using simple sentence-level splitting.
         Returns:
@@ -1672,9 +1680,12 @@ class AnonymizationEngine:
 
         surrogate_registry = {}
         if use_surrogates:
+            if lang is None:
+                lang = 'EN'
             reconstructed_text, surrogate_registry = apply_surrogate_substitution(
                 reconstructed_text,
                 entity_map,
+                lang=lang,
                 use_surrogates=True,
                 seed=surrogate_seed,
                 locales=surrogate_locales
@@ -1988,6 +1999,31 @@ def normalize_punctuation(text) -> str:
 # SURROGATE POOLS FOR FAKE DATA GENERATION
 # ============================================================================
 
+LANG_ALIASES = {"SP": "ES"}
+DEFAULT_FAKER_LOCALE = "en_US"
+
+DATE_PATTERNS = {
+    "DE": "%d.%m.%Y",
+    "FR": "%d/%m/%Y",
+    "ES": "%d/%m/%Y",
+    "EN": "%m/%d/%Y",
+}
+
+RELATION_SURROGATES = {
+    "EN": ["mother", "father", "sister", "brother", "wife", "husband",
+           "daughter", "son", "grandmother", "grandfather", "aunt", "uncle",
+           "cousin", "friend", "colleague", "neighbor", "partner"],
+    "DE": ["Mutter", "Vater", "Schwester", "Bruder", "Ehefrau", "Ehemann",
+           "Tochter", "Sohn", "Großmutter", "Großvater", "Tante", "Onkel",
+           "Cousine", "Freund", "Kollege", "Nachbar", "Partner"],
+    "FR": ["mère", "père", "sœur", "frère", "épouse", "mari",
+           "fille", "fils", "grand-mère", "grand-père", "tante", "oncle",
+           "cousine", "ami", "collègue", "voisin", "partenaire"],
+    "ES": ["madre", "padre", "hermana", "hermano", "esposa", "esposo",
+           "hija", "hijo", "abuela", "abuelo", "tía", "tío",
+           "prima", "amigo", "colega", "vecino", "pareja"],
+}
+
 SURROGATES = {
     "EN": {
         "PERSON": [
@@ -2174,10 +2210,12 @@ SURROGATES = {
 
 # --- Surrogate Substitution ---
 
+_faker_instances = {}
+
 TAG_TO_SURROGATE_CATEGORY = {
     'PERSON': 'PERSON',
     'PERSON_EMAIL': 'EMAIL',
-    'PERSON_SOCIAL_RELATION': 'PERSON',
+    'PERSON_SOCIAL_RELATION': 'PERSON_SOCIAL_RELATION',
     'ORG': 'ORGANISATION',
     'LOC_CITY': 'CITY',
     'LOC_COUNTRY': 'CITY',
@@ -2193,15 +2231,88 @@ TAG_TO_SURROGATE_CATEGORY = {
     'PRODUCT': 'PRODUCT',
 }
 
-def apply_surrogate_substitution(text, entity_map, 
+def normalize_lang(lang):
+    """Normalize language code (handles legacy aliases like SP→ES)."""
+    lang = (lang or "EN").upper()
+    return LANG_ALIASES.get(lang, lang)
+
+def get_faker(lang):
+    """Get or create cached Faker instance for locale."""
+    locale = FAKER_LOCALE_MAP.get(normalize_lang(lang), DEFAULT_FAKER_LOCALE)
+    if locale not in _faker_instances:
+        _faker_instances[locale] = Faker(locale)
+    return _faker_instances[locale]
+
+def generate_surrogate_value(fake, tag, lang, original_text=None):
+    """Shape-aware surrogate: matches form of original mention."""
+    tag_upper = tag.upper()
+    
+    if tag_upper == "PERSON":
+        if original_text and len(original_text.split()) == 1:
+            return fake.first_name()
+        return fake.name()
+    if tag_upper == "PERSON_SOCIAL_RELATION":
+        relations = RELATION_SURROGATES.get(normalize_lang(lang), RELATION_SURROGATES["EN"])
+        return random.choice(relations)
+    if tag_upper == "EMAIL":
+        return fake.email()
+    if tag_upper == "ORGANISATION":
+        return fake.company()
+    if tag_upper in ("CITY", "LOCATION"):
+        return fake.city()
+    if tag_upper == "COUNTRY":
+        return fake.country()
+    if tag_upper == "STREET":
+        return fake.street_name()
+    if tag_upper == "HOUSENUMBER":
+        return str(random.randint(1, 200))
+    if tag_upper == "ZIP":
+        return fake.postcode()
+    if tag_upper == "PHONE":
+        return fake.phone_number()
+    if tag_upper == "URL":
+        return fake.url()
+    if tag_upper == "PROFESSION":
+        return fake.job()
+    if tag_upper == "PRODUCT":
+        norm = normalize_lang(lang)
+        pool = SURROGATES.get(norm, SURROGATES["EN"]).get("PRODUCT", SURROGATES["EN"]["PRODUCT"])
+        return random.choice(pool)
+    if tag_upper == "CODE":
+        return fake.bothify("??-#####").upper()
+    if tag_upper == "DATETIME":
+        if original_text and any(ch.isdigit() for ch in original_text):
+            pattern = DATE_PATTERNS.get(normalize_lang(lang), DATE_PATTERNS["EN"])
+            return fake.date(pattern=pattern)
+        return fake.day_of_week()
+    if tag_upper == "AGE":
+        return str(random.randint(18, 90))
+    if tag_upper == "QUANTITY":
+        return str(random.randint(1, 100))
+    # Fallback for MISC or unknown tags
+    return fake.word().capitalize()
+
+def apply_surrogate_substitution(text, entity_map, lang="DE", 
                                   use_surrogates=False,
                                   seed=None,
                                   locales='en_US'):
     """
-    Applies consistent Faker-based surrogate substitution to anonymized text.
-    ✅ FIXED: Now searches for [TAG] placeholders directly, regardless of entity_map keys.
+    Applies consistent Faker-based surrogate substitution.
+    
+    Uses entity_map={tag: [original_text, ...]} to ensure:
+    - Same original entity → same surrogate everywhere
+    - Shape awareness (single word → single word surrogate)
+    
+    Args:
+        text: Anonymized text with [TAG] placeholders
+        entity_map: {tag: [original_text_1, original_text_2, ...]} in document order
+        use_surrogates: Enable/disable surrogate generation
+        seed: Optional seed for reproducibility
+        locales: Comma-separated Faker locales
+    
+    Returns:
+        tuple: (text_with_surrogates, registry_dict)
     """
-
     if not HAS_FAKER:
         logger.error("Faker library not installed. Install with: pip install faker")
         return text, {}
@@ -2212,9 +2323,11 @@ def apply_surrogate_substitution(text, entity_map,
     if not text or '[' not in text:
         logger.debug("No placeholders found in text, skipping surrogate substitution.")
         return text, {}
+
+    logger.info(f"Generating surrogates for language: {lang}")
     
     try:
-        fake = Faker(locales.split(','))
+        fake = get_faker(lang)
         if seed is not None:
             fake.seed_instance(seed)
             logger.info(f"Faker seeded with value: {seed} for reproducibility")
@@ -2222,51 +2335,40 @@ def apply_surrogate_substitution(text, entity_map,
         logger.error(f"Failed to initialize Faker: {e}")
         return text, {}
     
-    # Map BERT tags → SURROGATES pools → Faker generators
-    TAG_TO_FAKER_METHOD = {
-        'PERSON': lambda: fake.name(),
-        'PERSON_EMAIL': lambda: fake.email(),
-        'PERSON_SOCIAL_RELATION': lambda: fake.name(),
-        'ORG': lambda: fake.company(),
-        'LOC_CITY': lambda: fake.city(),
-        'LOC_COUNTRY': lambda: fake.country(),
-        'LOC_STREET': lambda: fake.street_address(),
-        'LOC_ZIP': lambda: fake.postcode(),
-        'LOC_HOUSENUMBER': lambda: str(fake.random_int(1, 999)),
-        'LOC_OTHER': lambda: fake.city(),
-        'DATETIME': lambda: fake.date(),
-        'DATETIME_AGE': lambda: str(fake.random_int(18, 90)),
-        'CODE': lambda: fake.uuid4()[:8].upper(),
-        'CODE_PHONE': lambda: fake.phone_number(),
-        'CODE_URL': lambda: fake.url(),
-        'PROFESSION': lambda: fake.job(),
-        'PRODUCT': lambda: fake.catch_phrase(),
-        'QUANTITY': lambda: str(fake.random_int(1, 1000)),
-        'MISC': lambda: fake.word(),
-    }
-    
     # Track substitutions for consistency
-    used_values = defaultdict(list)
-    registry = defaultdict(list)
+    occurrence_counters = defaultdict(int)  # {tag: occurrence_index}
+    consistent_cache = {}  # {(tag, original_text_lower): surrogate_value}
+    registry = defaultdict(list)  # {tag: [surrogate_value_1, ...]}
     
     def replacer(match):
         tag = match.group(1)  # e.g., 'PERSON'
         
-        if tag not in TAG_TO_FAKER_METHOD:
-            # No surrogate pool for this tag - keep placeholder
-            return match.group(0)
+        # Get the nth occurrence of this tag
+        idx = occurrence_counters[tag]
+        occurrence_counters[tag] += 1
         
-        # Get surrogate value
-        faker_func = TAG_TO_FAKER_METHOD[tag]
-        value = faker_func()
+        # Look up original text from entity_map (keys are bracketed)
+        bracketed_tag = f"[{tag}]"
+        originals = entity_map.get(bracketed_tag, [])
+        original_text = originals[idx] if idx < len(originals) else None
         
-        # Avoid immediate repetition
-        if value in used_values[tag][-3:]:
-            value = faker_func()
+        # Create cache key for consistent substitution
+        cache_key = (tag, original_text.lower().strip()) if original_text else None
         
-        used_values[tag].append(value)
+        # Return cached value if exists (consistency)
+        if cache_key and cache_key in consistent_cache:
+            logger.debug(f"Surrogate (cached): [{tag}] → '{consistent_cache[cache_key]}'")
+            registry[tag].append(consistent_cache[cache_key])
+            return consistent_cache[cache_key]
+        
+        # Generate new surrogate with shape awareness
+        value = generate_surrogate_value(fake, tag, lang, original_text)
+        
+        # Cache for future occurrences
+        if cache_key:
+            consistent_cache[cache_key] = value
+        
         registry[tag].append(value)
-        
         logger.debug(f"Surrogate: [{tag}] → '{value}'")
         return value
     
@@ -2278,10 +2380,17 @@ def apply_surrogate_substitution(text, entity_map,
     return s_text, dict(registry)
 
 def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert=False, 
-                          adversarial_mode=False, include_tags=None, exclude_tags=None, file_list=None):
+                          adversarial_mode=False, include_tags=None, exclude_tags=None, file_list=None,
+                          enable_surrogates=False, surrogate_seed=None, surrogate_language='de_DE,en_US',
+                          lang=None):
     """
     Reads raw transcripts, anonymizes them with BERT, and optionally rewrites with LLM.
     Supports adversarial_mode which runs a 3-iteration Red Team vs. Blue Team loop.
+    
+    Args:
+        ... existing args ...
+        lang: Primary language for anonymization and surrogate generation. If None,
+              will be read from transcript file header (# LANG: XX) or default to 'EN'.
     """
     if not TRANSCRIPTS_FOLDER.exists() and not skip_bert:
         logger.warning(f"No 'transcripts' folder found at {TRANSCRIPTS_FOLDER}. Skipping anonymization.")
@@ -2296,6 +2405,26 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
         logger.warning("LLM rewrite requested but no API key found. Disabling LLM step.")
         use_llm = False
         adversarial_mode = False
+
+    # Helper to read language from transcript metadata
+    def read_language_from_transcript(file_path, user_lang=None):
+        """Read language from # LANG: XX header line, or use user override."""
+        if user_lang:
+            return user_lang.upper()
+        
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                first_line = f.readline().strip()
+                if first_line.startswith("# LANG:"):
+                    detected = first_line.split(":")[1].strip().upper()
+                    logger.debug(f"Read language from transcript: {detected}")
+                    return detected
+        except Exception as e:
+            logger.warning(f"Failed to read language metadata from {file_path}: {e}")
+        
+        # Default fallback
+        logger.warning(f"Language metadata not found in {file_path.name}, defaulting to 'EN'")
+        return 'EN'
 
     anonymizer = None
     if not skip_bert:
@@ -2382,6 +2511,10 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
             
         logger.info(f"Processing file: {file.name}")
 
+        # Read language for THIS file (priority: user override > file metadata > default)
+        file_lang = read_language_from_transcript(file, user_lang=lang)
+        logger.info(f"  Using language: {file_lang}")
+
         try:
             with open(file, "r", encoding="utf-8") as f:
                 text_content = f.read()
@@ -2394,9 +2527,10 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
                 anon_start = time.time()
                 anonymized_text, success, msg, entity_map, surrogate_registry = anonymizer.anonymize(
                     text_content,
-                    use_surrogates=args.enable_surrogates,
-                    surrogate_seed=args.surrogate_seed,
-                    surrogate_locales=args.surrogate_language
+                    use_surrogates=enable_surrogates,
+                    surrogate_seed=surrogate_seed,
+                    surrogate_locales=surrogate_language,
+                    lang=file_lang  # ← Pass file-specific language
                 )
                 
                 if not success or not anonymized_text:
@@ -2414,7 +2548,7 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
                 logger.debug(f"Entity map saved: {entity_map_path}")
                 
                 # Save surrogate registry if generated
-                if surrogate_registry and args.enable_surrogates:
+                if surrogate_registry and enable_surrogates:
                     surrogate_path = ANONYM_FOLDER / f"{base_name}_anon_surrogates.json"
                     with open(surrogate_path, "w", encoding="utf-8") as f:
                         json.dump(surrogate_registry, f, indent=2, ensure_ascii=False)
@@ -2500,7 +2634,7 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
                         logger.warning(f"LLM rewrite failed for {base_name}: {status}")
                         llm_failed_count += 1
 
-            if llm_start:  # Only calculate if timing was set
+            if llm_start:
                 llm_duration = time.time() - llm_start
                 logger.info(f"  LLM Rewrite took: {llm_duration:.2f}s")
 
@@ -2612,6 +2746,8 @@ Examples:
     
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
+        # Enable additional debug filters if needed
+        logger.info("Verbose mode enabled - debug logging active")
 
     session_logger = SessionLogger(BASE_PATH)
     session_logger.log_settings({
@@ -2673,11 +2809,12 @@ Examples:
     
     # Step 2: Transcription & Diarization (WAV → Transcript)
     if run_transcription:
-        process_audios(
+        processed_count, detected_languages = process_audios(
             enable_diarization=run_diarization, 
             lang_code=args.lang,
             file_list=input_file_list if input_file_list else None
         )
+        logger.info(f"Transcribed {processed_count} files, detected languages: {detected_languages}")
     
     include_tags = args.include_tags
     exclude_tags = args.exclude_tags
@@ -2691,7 +2828,10 @@ Examples:
             adversarial_mode=is_adversarial,
             include_tags=include_tags,
             exclude_tags=exclude_tags,
-            file_list=input_file_list if input_file_list else None
+            file_list=input_file_list if input_file_list else None,
+            enable_surrogates=args.enable_surrogates,
+            surrogate_seed=args.surrogate_seed,
+            surrogate_language=args.surrogate_language
         )
     else:
         logger.info("⏭️  Skipping anonymization (--disable-anonymization)")
