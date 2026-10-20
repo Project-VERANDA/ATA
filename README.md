@@ -14,51 +14,26 @@ Ideal for: Interviews, therapy sessions, legal consultations, and any conversati
   
   * Text Anonymization (BERT): Detects and replaces PII (names, emails, locations, phone numbers, etc.) using a multilingual BERT model.
   
-   * 🆕 Audio Anonymization (Beep Replacement): Maps identified PII to audio timestamps and replaces sensitive segments with beeps, preserving the rest of the conversation.
+   * Audio Anonymization (Beep Replacement): Maps identified PII to audio timestamps and replaces sensitive segments with beeps, preserving the rest of the conversation.
   
   * LLM Rewriting: Uses Large Language Models to generalize indirect identifiers (e.g., specific job titles, rare locations) that BERT might miss.
   
-  * Adversarial Mode: Optional Red Team vs. Blue Team loop to iteratively improve anonymization quality.
+  * Adversarial Mode: Looping LLMs across the script to identify and remove identifiers that went undetected by the BERT model.
   
   * Web Interface: User-friendly GUI for uploading, recording, editing, and downloading anonymized results.
   
-  * Bulk Processing: Supports batch processing via command line or ZIP file uploads.
+  * Bulk Processing: Supports batch processing via command line or file uploads.
 
-  * TTS Backends:
-    
-  * Piper TTS (Recommended)
-- Fast offline synthesis
-- 30+ languages
-- GPL v3 license
-- Voice: en_US-lessac-medium
-
-  * Coqui XTTS v2
-- Voice cloning support
-- 17 languages
-- CPML license (non-commercial)
-- Model: ~2GB download
+  * Text-to-speech with Piper TTS for fast offline synthesis
 
 # 📦 Installation Prerequisites
 
-    Python 3.8+
-    FFmpeg: Required for audio/video conversion.
-    Ubuntu/Debian: sudo apt-get install ffmpeg
-    macOS: brew install ffmpeg
-    Windows: Download from ffmpeg.org and add to **PATH**.
+    Python 3.12
     **NVIDIA** **GPU** (Optional but Recommended): For 10x faster processing.
 
 **Step-by-Step Setup**
 
-  Clone the repository:
-```
-    git clone https://github.com/Project-VERANDA/ATA/
-    cd ATA
-``` 
-   Run the setup script:
-```
-    ./Installer.sh
-```
-   Follow the prompts.
+
 
    * Choose y to install Flask (Web Interface) if you plan to use the **GUI**.
    * Input n if you only need the command-line interface.
@@ -78,6 +53,17 @@ Ideal for: Interviews, therapy sessions, legal consultations, and any conversati
    * Create a .env file in the ATA root directory (see Configuration below).
    
    * This is required for the LLM rewriting and adversarial features.
+
+  Clone the repository:
+```
+    git clone https://github.com/Project-VERANDA/ATA/
+    cd ATA
+```
+   Run the setup script:
+```
+    ./Installer.sh
+```
+   Follow the prompts.
 
 
 
@@ -157,7 +143,7 @@ Argument	Description
    
    * Anonymize: Click Anonymize Text to apply BERT and/or LLM.
    
-   * 🆕 Generate Anonymized Audio: Click this button to replace PII segments with beeps.
+   * Generate Anonymized Audio: Click this button to replace PII segments with beeps.
    
    * Download: Download the text transcript and the _beeped.wav audio file.
 
@@ -191,12 +177,6 @@ USE_HTTPS=true
 |Storage (Models)|~**30GB**|	~**30GB**|
 
 
-### Verify **GPU** Availability:
-
-```
-python -c "import torch; print('**CUDA** Available:', torch.cuda.is_available())"
-```
-
 # 📂 Output Directory Structure
 
 **ATA**/ 
@@ -208,8 +188,8 @@ python -c "import torch; print('**CUDA** Available:', torch.cuda.is_available())
 ├── LLM-Anon/    # LLM-rewritten transcripts (_llm_.txt, _adversarial_.txt) 
 │   
 ├── uploads/         # Temporary storage for web uploads (includes _beeped.wav files) 
-│   ├── model/           # Downloaded AI models 
-│    └── logs/            # Session logs (session_YYYY-MM-DD_HH-MM-SS.txt) 
+├── model/           # Downloaded AI models 
+├──  logs/            # Session logs (session_YYYY-MM-DD_HH-MM-SS.txt) 
 └── interactive_app/     # Web interface files
 
 Note on Audio Outputs:
@@ -217,9 +197,11 @@ Note on Audio Outputs:
     Anonymized audio files generated via the web interface are saved in pipeline/uploads/ with the suffix _beeped.wav (e.g., interview_beeped.wav).
     These files are temporary; download them via the web interface or move them manually.
 
-🎙️ New Feature: Audio Beep Replacement
+Audio Beep Replacement
 
-The pipeline now supports audio-level anonymization. ### How It Works
+The pipeline now supports audio-level anonymization. 
+
+### How It Works
 
     Transcription & Identification: The system transcribes audio and identifies **PII** entities using the **BERT** model.
     Offset Mapping: The system maps the text-based **PII** tags back to their precise time offsets in the original audio file.
