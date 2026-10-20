@@ -56,7 +56,7 @@ Ideal for: Interviews, therapy sessions, legal consultations, and any conversati
 ``` 
    Run the setup script:
 ```
-    ./ATA_Setup.sh
+    ./Installer.sh
 ```
    Follow the prompts.
 
