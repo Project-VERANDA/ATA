@@ -214,11 +214,11 @@ If you are integrating this into your own scripts:
 
 from audio_utils import AudioBeepReplacer
 
-# 'offsets' must be obtained from the transcription step (returned by transcribe_audio_locally)
+'offsets' must be obtained from the transcription step (returned by transcribe_audio_locally)
 
 replacer = AudioBeepReplacer(beep_freq=1000, beep_gain_db=-6) output_file = replacer.replace_offsets_with_beeps(input.wav, offsets, output_beeped.wav)
 
-🛡️ Supported **PII** Tags
+# 🛡️ Supported **PII** Tags
 
 The BERT anonymization model detects and replaces the following entity types:
 
