@@ -1,3 +1,5 @@
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/Project-VERANDA/ATA)
+
 # Audio-Transcript-Anonymizer (ATA)
 
 A comprehensive pipeline for privacy-preserving audio processing. This tool accepts audio or video files, transcribes the content using WhisperX, applies speaker diarization via Pyannote, and anonymizes Personally Identifiable Information (PII) using BERT and LLMs. It uniquely supports audio-level anonymization, replacing sensitive spoken segments with beeps to create fully anonymized audio files.
