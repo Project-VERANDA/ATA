@@ -8,7 +8,7 @@ import wave
 
 import numpy as np
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "interactive_app"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".", "interactive_app"))
 import audio_utils as au  # noqa: E402
 
 HAVE_FFMPEG = au.ffmpeg_available()
