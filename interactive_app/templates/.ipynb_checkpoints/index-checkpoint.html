@@ -578,6 +578,9 @@
                         redaction. Click a span to select it, then delete it below.
                     </p>
                     <div style="display:flex; gap:10px; justify-content:center; margin-top:10px;">
+                        <button id="editor-zoom-in"  class="button secondary">Zoom In +</button>
+                        <button id="editor-zoom-out" class="button secondary">Zoom Out −</button>
+                        <button id="editor-zoom-reset" class="button secondary">Reset View</button>
                         <button id="editor-delete-span" class="button secondary" disabled>Delete Selected Span</button>
                         <button id="editor-apply" class="button">Apply Redaction</button>
                         <button id="editor-close" class="button secondary">Close Editor</button>
@@ -651,6 +654,13 @@
         let currentAudioFilename = null;
     document.addEventListener('DOMContentLoaded', () => {
         console.log('📦 DOMContentLoaded fired');
+        // Guarded event binding: never let one missing element kill init.
+        function on(id, fn, opts) {
+            const el = document.getElementById(id);
+            if (el) el.addEventListener('click', fn, opts);
+            else console.warn('⚠️ Missing element, skipping listener:', id);
+        }
+
         // === MODAL FUNCTIONS ===
         const surveyModal = document.getElementById('survey-modal');
         const modalCloseBtn = document.getElementById('modal-close-btn');
@@ -795,7 +805,7 @@
             }
         }
 
-        document.getElementById('surrogate-btn').addEventListener('click', async () => {
+        on('surrogate-btn', async () => {
             const text = anonymizedText.value;
             if (!text.trim()) {
                 updateStatus("No text to process.", true);
