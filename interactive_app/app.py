@@ -130,6 +130,19 @@ except ImportError as e:
     logging.critical(f"Failed to import tts_engine: {e}")
     sys.exit(1)
 
+import wave
+
+MIN_TTS_WAV_SECONDS = 1.0   # a multi-minute transcript must yield far more than this
+
+
+def _wav_content_seconds(path):
+    """Audio duration measured from the WAV data chunk, independent of file size."""
+    try:
+        with wave.open(path, 'rb') as wav:
+            return wav.getnframes() / float(wav.getframerate() or 1)
+    except (wave.Error, EOFError, OSError):
+        return 0.0
+
 # Verify model path consistency
 if MODEL_FOLDER != PROCESS_MODEL_FOLDER:
     logging.warning(f"⚠️  Path mismatch detected! app.py: {MODEL_FOLDER}, process.py: {PROCESS_MODEL_FOLDER}")
@@ -939,15 +952,16 @@ def generate_speech_api():
             return jsonify({'error': 'Generated file does not exist'}), 500
         
         file_size = os.path.getsize(output_path)
-        if file_size == 0:
-            logger.error(f"TTS file is empty: {output_path}")
-            # Debug: Log TTS engine status
+        seconds = _wav_content_seconds(output_path)
+        if seconds < MIN_TTS_WAV_SECONDS:
             from pipeline.tts.tts_engine import get_tts_status
             tts_status = get_tts_status()
-            logger.error(f"TTS Status: {tts_status}")
+            logger.error("TTS produced %.2f s of audio for %d chars (file %d bytes). "
+                         "Backend: %s, status: %s", seconds, len(text),
+                         os.path.getsize(output_path), TTS_BACKEND, tts_status)
             return jsonify({
-                'error': 'Generated file is empty',
-                'file_path': output_path,
+                'error': 'TTS produced an audio file with no usable content (%.2f s). '
+                         'Check /tts/status and the server log.' % seconds,
                 'tts_status': tts_status
             }), 500
         

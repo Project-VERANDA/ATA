@@ -1143,9 +1143,11 @@ return Array.from(piiTagGrid.querySelectorAll('input[type="checkbox"]:checked'))
                 console.log('Speech response status:', response.status);
                 
                 if (!response.ok) {
-                    const errorText = await response.text();
-                    console.error('Speech API error:', errorText);
-                    throw new Error(`HTTP ${response.status}: ${errorText}`);
+                    let msg = 'HTTP ' + response.status;
+                    try { const j = await response.json(); msg = j.error || msg;
+                          if (j.tts_status) console.error('TTS status:', j.tts_status); }
+                    catch (_) { msg += ': ' + (await response.text().catch(() => '')); }
+                    throw new Error(msg);
                 }
                 
                 // ✅ Get content-type header
@@ -1273,20 +1275,19 @@ return Array.from(piiTagGrid.querySelectorAll('input[type="checkbox"]:checked'))
             downloadTextContent(anonymizedText.value, filename);
         });
 
-        /* CORRECTION 4: two legacy duplicate downloadSpeechBtn listeners were removed
-           here. Three listeners on one button fired simultaneously (blob download +
-           player-src download + window.open). The blob-based handler above is the only
-           one that downloads what was actually generated. */
-
-        // === CORRECTION 5: Waveform redaction editor ===
+        // Waveform redaction editor ===
         // Lets the user review and correct the derived redaction spans: widen/narrow,
         // delete or add spans on the waveform, then render the redacted audio.
         const MANUAL_MIN_SPAN_S = 0.02;   // must match pipeline/redaction.py MANUAL_MIN_SPAN_S
+        const MIN_VIEW_S = 0.5;           // narrowest zoom window (seconds)
         const wfCanvas = document.getElementById('wf-canvas');
         const editorPanel = document.getElementById('redaction-editor');
         const editorDeleteBtn = document.getElementById('editor-delete-span');
         const editorApplyBtn = document.getElementById('editor-apply');
-        let wfSpans = [], wfDuration = 0, wfLevels = [], wfSelected = null, wfDrag = null;
+        let wfSpans = [], wfDuration = 0, wfSelected = null, wfDrag = null;
+        // Which part of the timeline is visible, and which time range wfLevels covers.
+        let wfView = { start: 0, end: 0 };
+        let wfLevelStart = 0, wfLevelEnd = 0;
 
         function editorStatus(msg, isError = false) {
             const el = document.getElementById('editor-status');
@@ -1324,6 +1325,8 @@ return Array.from(piiTagGrid.querySelectorAll('input[type="checkbox"]:checked'))
                 if (!wf.success) throw new Error(wf.error || 'Could not load waveform.');
                 wfLevels = wf.levels || [];
                 wfDuration = wf.duration || wfDuration;
+                wfLevelStart = 0; wfLevelEnd = wfDuration;
+                wfView = { start: 0, end: wfDuration };
 
                 editorPanel.classList.remove('hidden');
                 editorPanel.scrollIntoView({ behavior: 'smooth' });
@@ -1334,29 +1337,53 @@ return Array.from(piiTagGrid.querySelectorAll('input[type="checkbox"]:checked'))
                 showLoader(false);
             }
         }
+        
+        function viewSpan() { return wfView.end - wfView.start; }
+        function timeToX(t) { return (t - wfView.start) / viewSpan() * wfCanvas.width; }
+        function xToTime(x) { return wfView.start + x / wfCanvas.width * viewSpan(); }
 
+        function clampView(start, end) {
+            end = Math.min(end, wfDuration);
+            start = Math.max(start, 0);
+            if (end - start < MIN_VIEW_S) {
+                if (start <= 0) end = Math.min(MIN_VIEW_S, wfDuration);
+                else if (end >= wfDuration) start = Math.max(wfDuration - MIN_VIEW_S, 0);
+                else end = start + MIN_VIEW_S;
+            }
+            wfView.start = start; wfView.end = end;
+        }
+        
         function drawEditor() {
             const ctx = wfCanvas.getContext('2d');
             const cw = wfCanvas.width, ch = wfCanvas.height;
             ctx.clearRect(0, 0, cw, ch);
             ctx.fillStyle = '#FFF5F4';
             ctx.fillRect(0, 0, cw, ch);
-            if (wfLevels.length && wfDuration > 0) {
-                const barW = cw / wfLevels.length;
+            if (wfLevels.length && wfLevelEnd > wfLevelStart) {
+                const barDur = (wfLevelEnd - wfLevelStart) / wfLevels.length;
                 ctx.fillStyle = '#009AA9';
                 wfLevels.forEach((lvl, i) => {
+                    const t0 = wfLevelStart + i * barDur;
+                    if (t0 + barDur < wfView.start || t0 > wfView.end) return;   // outside view
+                    const x = timeToX(t0);
+                    const w = Math.max(barDur / viewSpan() * cw - 1, 1);
                     const h = lvl * (ch - 10);
-                    ctx.fillRect(i * barW, (ch - h) / 2, Math.max(barW - 1, 1), h);
+                    ctx.fillRect(x, (ch - h) / 2, w, h);
                 });
             }
             for (const s of wfSpans) {
-                const x1 = s.start / wfDuration * cw, x2 = s.end / wfDuration * cw;
+                if (s.end < wfView.start || s.start > wfView.end) continue;      // outside view
+                const x1 = timeToX(Math.max(s.start, wfView.start));
+                const x2 = timeToX(Math.min(s.end, wfView.end));
                 ctx.fillStyle = wfSelected === s ? 'rgba(175,24,33,0.45)' : 'rgba(175,24,33,0.25)';
                 ctx.fillRect(x1, 0, x2 - x1, ch);
                 ctx.strokeStyle = '#AF1821';
                 ctx.lineWidth = wfSelected === s ? 3 : 2;
                 ctx.strokeRect(x1, 0, x2 - x1, ch);
             }
+            const lbl = document.getElementById('editor-view-label');
+            if (lbl) lbl.textContent = wfView.start.toFixed(2) + ' – ' + wfView.end.toFixed(2) +
+                ' s  (' + viewSpan().toFixed(2) + ' s shown)';
         }
 
         wfCanvas.addEventListener('pointerdown', (e) => {
@@ -1385,10 +1412,47 @@ return Array.from(piiTagGrid.querySelectorAll('input[type="checkbox"]:checked'))
             drawEditor();
         });
 
+        wfCanvas.addEventListener('pointerdown', (e) => {
+            if (wfDuration <= 0) return;
+            const rect = wfCanvas.getBoundingClientRect();
+            if (e.shiftKey) {                          // Shift+drag pans the view
+                wfDrag = { mode: 'pan', px: e.clientX, rectW: rect.width };
+                wfCanvas.setPointerCapture(e.pointerId);
+                return;
+            }
+            const t = xToTime((e.clientX - rect.left) / rect.width * wfCanvas.width);
+            const tol = 6 / rect.width * viewSpan();   // ~6 px grab tolerance
+            let hit = null;
+            for (const s of wfSpans) {
+                if (Math.abs(t - s.start) <= tol) hit = { s, mode: 'start' };
+                else if (Math.abs(t - s.end) <= tol) hit = { s, mode: 'end' };
+            }
+            if (!hit) for (const s of wfSpans) if (t > s.start && t < s.end) hit = { s, mode: 'move' };
+            wfSelected = hit ? hit.s : null;
+            if (!hit) {
+                const ns = { id: 'm' + Date.now(), start: t, end: t, source: 'manual' };
+                wfSpans.push(ns);
+                wfSelected = ns;
+                wfDrag = { s: ns, mode: 'end' };
+            } else {
+                wfDrag = hit;
+            }
+            editorDeleteBtn.disabled = !wfSelected;
+            wfCanvas.setPointerCapture(e.pointerId);
+            drawEditor();
+        });
+
         wfCanvas.addEventListener('pointermove', (e) => {
             if (!wfDrag) return;
             const rect = wfCanvas.getBoundingClientRect();
-            const t = Math.min(Math.max((e.clientX - rect.left) / rect.width * wfDuration, 0), wfDuration);
+            if (wfDrag.mode === 'pan') {
+                const dt = (e.clientX - wfDrag.px) / wfDrag.rectW * viewSpan();
+                clampView(wfDrag.start - dt, wfDrag.end - dt);
+                drawEditor();
+                scheduleWaveformRefresh();
+                return;
+            }
+            const t = Math.min(Math.max(xToTime((e.clientX - rect.left) / rect.width * wfCanvas.width), 0), wfDuration);
             if (wfDrag.mode === 'start') wfDrag.s.start = Math.min(t, wfDrag.s.end - MANUAL_MIN_SPAN_S);
             else if (wfDrag.mode === 'end') wfDrag.s.end = Math.max(t, wfDrag.s.start + MANUAL_MIN_SPAN_S);
             else {
@@ -1399,12 +1463,58 @@ return Array.from(piiTagGrid.querySelectorAll('input[type="checkbox"]:checked'))
             drawEditor();
         });
 
-        wfCanvas.addEventListener('pointerup', () => {
-            if (wfDrag) {
-                wfSpans.sort((a, b) => a.start - b.start);
-                wfDrag = null;
-                drawEditor();
-            }
+        // Mouse-wheel zoom centred on the cursor; refetches a hi-res window afterwards.
+        wfCanvas.addEventListener('wheel', (e) => {
+            if (wfDuration <= 0) return;
+            e.preventDefault();
+            const rect = wfCanvas.getBoundingClientRect();
+            const anchor = xToTime((e.clientX - rect.left) / rect.width * wfCanvas.width);
+            const factor = e.deltaY < 0 ? 0.5 : 2.0;
+            clampView(anchor - (anchor - wfView.start) * factor,
+                      anchor + (wfView.end - anchor) * factor);
+            drawEditor();
+            scheduleWaveformRefresh();
+        }, { passive: false });
+
+        // When the view narrows, refetch RMS data for just that window at higher resolution
+        // (/waveform supports start/end and up to 4000 bars — see app.py).
+        async function refreshWaveformWindow() {
+            if (!currentJobId || !currentJobToken) return;
+            const span = viewSpan();
+            if (span <= 0 || wfDuration <= 0) return;
+            const bars = Math.min(4000, Math.max(200, Math.round(wfCanvas.width * (span / wfDuration) < 1 ? span * 200 : span * 100)));
+            try {
+                const resp = await fetch('/waveform?job_id=' + encodeURIComponent(currentJobId) +
+                    '&bars=' + bars + '&start=' + wfView.start.toFixed(3) + '&end=' + wfView.end.toFixed(3),
+                    { headers: { 'X-Job-Token': currentJobToken } });
+                const wf = await resp.json();
+                if (wf.success && wf.levels) {
+                    wfLevels = wf.levels;
+                    wfLevelStart = wf.start != null ? wf.start : wfView.start;
+                    wfLevelEnd = wf.end != null ? wf.end : wfView.end;
+                    drawEditor();
+                }
+            } catch (_) { /* keep the stretched overview on failure */ }
+        }
+
+        let wfFetchTimer = null;
+        function scheduleWaveformRefresh() {
+            clearTimeout(wfFetchTimer);
+            wfFetchTimer = setTimeout(refreshWaveformWindow, 250);
+        }
+
+        document.getElementById('editor-zoom-in').addEventListener('click', () => {
+            const c = (wfView.start + wfView.end) / 2, half = viewSpan() / 4;
+            clampView(c - half, c + half); drawEditor(); scheduleWaveformRefresh();
+        });
+        document.getElementById('editor-zoom-out').addEventListener('click', () => {
+            const c = (wfView.start + wfView.end) / 2, half = viewSpan();
+            clampView(c - half, c + half); drawEditor(); scheduleWaveformRefresh();
+        });
+        document.getElementById('editor-zoom-reset').addEventListener('click', () => {
+            wfView = { start: 0, end: wfDuration };
+            wfLevelStart = 0; wfLevelEnd = wfDuration;
+            drawEditor(); scheduleWaveformRefresh();
         });
 
         editorDeleteBtn.addEventListener('click', () => {

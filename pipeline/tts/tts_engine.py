@@ -45,6 +45,18 @@ def _load_available_voices():
                 voices.append(voice_name)
     return voices
 
+_VOICE_CACHE = {}          # ← new: cache keyed by voice path
+
+def _load_voice(voice_path):   # ← new helper
+    """Loads a Piper voice once and reuses it across synthesis calls."""
+    cached = _VOICE_CACHE.get(str(voice_path))
+    if cached is None:
+        from piper import PiperVoice
+        cached = PiperVoice.load(str(voice_path))
+        _VOICE_CACHE[str(voice_path)] = cached
+    return cached
+
+
 def get_speaker_voice(speaker_id: str) -> str:
     """Get voice assignment for a specific speaker."""
     if speaker_id in SPEAKER_VOICE_MAP:
@@ -147,7 +159,7 @@ def _generate_speech_piper_python(text: str, voice_id: str) -> io.BytesIO | None
         return None
 
     try:
-        voice = PiperVoice.load(str(voice_path))
+        voice = _load_voice(voice_path)
         chunks = list(voice.synthesize(text))
 
         if not chunks:
@@ -155,7 +167,7 @@ def _generate_speech_piper_python(text: str, voice_id: str) -> io.BytesIO | None
             return None
 
         buffer = io.BytesIO()
-        sample_rate = 22050
+        sample_rate = chunks[0].sample_rate
         sample_width = chunks[0].sample_width
         channels = chunks[0].sample_channels
 
@@ -184,7 +196,8 @@ def _generate_speech_piper_cli(text: str, voice_id: str) -> io.BytesIO | None:
         logger.error(f"Voice model not found: {voice_path}")
         return None
 
-    tmp_wav = Path('/tmp/piper_output.wav')
+    import tempfile
+    tmp_wav = Path(tempfile.gettempdir()) / f"piper_{os.getpid()}_{random.randint(0, 1 << 30)}.wav"
 
     cmd = [
         str(PIPER_EXECUTABLE),
@@ -280,7 +293,7 @@ def generate_multi_speaker_tts(transcript_text: str, word_offsets: list = None,
     merged_segments = []
     current_speaker = None
     current_text = []
-    
+
     for speaker in sorted(segments_by_speaker.keys()):
         voice_id = speaker_to_voice.get(speaker, SPEAKER_VOICE_MAP['DEFAULT'])
         
@@ -291,6 +304,14 @@ def generate_multi_speaker_tts(transcript_text: str, word_offsets: list = None,
                 'text': segment_text
             })
     
+    if not merged_segments and transcript_text.strip():
+        fallback_text = re.sub(r'\[([A-Z_][A-Z0-9_]*)\]', r'\1', transcript_text)
+        merged_segments.append({
+            'speaker': 'SPEAKER_00',
+            'voice': speaker_to_voice.get('SPEAKER_00') or SPEAKER_VOICE_MAP['DEFAULT'],
+            'text': fallback_text.strip(),
+        })
+    
     # Generate audio for each segment
     import tempfile
     from pathlib import Path
@@ -300,15 +321,11 @@ def generate_multi_speaker_tts(transcript_text: str, word_offsets: list = None,
     
     # Create merged WAV
     merged_buffer = io.BytesIO()
-    sample_rate = 22050
+    sample_rate = None
     sample_width = 2
     channels = 1
     
     with wave.open(merged_buffer, 'wb') as wav:
-        wav.setnchannels(channels)
-        wav.setsampwidth(sample_width)
-        wav.setframerate(sample_rate)
-        
         for segment in merged_segments:
             logger.info(f"Generating TTS for {segment['speaker']} using voice: {segment['voice']}")
             
@@ -320,12 +337,25 @@ def generate_multi_speaker_tts(transcript_text: str, word_offsets: list = None,
             
             if audio_buffer:
                 with wave.open(audio_buffer, 'rb') as src_wav:
+                    if sample_rate is None:
+                        sample_rate = src_wav.getframerate()
+                        wav.setnchannels(channels)
+                        wav.setsampwidth(sample_width)
+                        wav.setframerate(sample_rate)
+                    elif src_wav.getframerate() != sample_rate:
+                        logger.warning("Skipping segment with mismatched rate %d != %d",
+                                       src_wav.getframerate(), sample_rate)
+                        continue
                     wav.writeframes(src_wav.readframes(src_wav.getnframes()))
                 
                 # Add small pause between segments (100ms)
                 silence = b'\x00' * (sample_rate * sample_width * channels // 10)
                 wav.writeframes(silence)
-    
+
+    if not merged_segments or not any(s['text'].strip() for s in merged_segments):
+        logger.error("No synthesizable segments for transcript of %d chars", len(transcript_text))
+        return None, speaker_to_voice
+        
     merged_buffer.seek(0)
     Path(final_output).parent.mkdir(parents=True, exist_ok=True)
     final_output.write_bytes(merged_buffer.read())
