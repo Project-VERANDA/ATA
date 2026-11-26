@@ -9,7 +9,7 @@ import tempfile
 import time
 import unittest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "."))
 
 from pipeline import jobs, secure_store as ss  # noqa: E402
 
