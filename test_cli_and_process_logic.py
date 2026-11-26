@@ -148,7 +148,8 @@ class CliWorkflow(unittest.TestCase):
         info = cli.redact_one("talk", **self.kw)
         self.assertEqual(info["spans"], 2)
         self.assertTrue(os.path.exists(info["audio"]))
-        raw = open(info["redactions_json"]).read()
+        with open(info["redactions_json"], encoding="utf-8") as fh:
+            raw = fh.read()
         self.assertNotIn("Mustermann", raw)
         self.assertNotIn("Berlin", raw)
         doc = json.loads(raw)
