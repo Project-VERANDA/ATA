@@ -8,6 +8,9 @@ import re
 import subprocess
 import logging
 import gc
+import threading
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
 import argparse
 import json
 from pathlib import Path
@@ -25,12 +28,8 @@ import spacy
 from dotenv import load_dotenv
 from werkzeug.utils import secure_filename
 from openai import OpenAI
-try:
-    from faker import Faker
-    HAS_FAKER = True
-except ImportError:
-    HAS_FAKER = False
-    logger.warning("Faker not installed. Surrogate substitution will be disabled.")
+# Faker is optional: pipeline.surrogates falls back to static pools without it
+# (HAS_FAKER is set below, once the project root is on sys.path).
 
 # =============================================================================
 # cuDNN DISABLE FIX
@@ -76,6 +75,14 @@ from pipeline.tts.tts_engine import (
     TTS_BACKEND,
     TTS_ENABLED,
 )
+from pipeline.redaction import DEFAULT_PAD_S  # noqa: E402
+from pipeline.secure_store import (  # noqa: E402
+    encrypt_bytes, ensure_private_dir, load_master_key, write_private_file)
+from pipeline.surrogates import POOLS as SURROGATES  # noqa: E402,F401  (legacy alias, new shape)
+from pipeline.surrogates import apply_surrogates, faker_available, lang_from_locales  # noqa: E402
+import pipeline.redaction_cli as redaction_cli  # noqa: E402
+
+HAS_FAKER = faker_available()
 
 # --- Surrogate Consistency Support ---
 
@@ -117,10 +124,15 @@ if str(interactive_app_path) not in sys.path:
 
 # Now import audio_utils (this will work now)
 try:
-    from audio_utils import AudioBeepReplacer
+    from audio_utils import AudioBeepReplacer, AudioError, probe_media
 except ImportError:
-    logging.warning("audio_utils not found. Beep replacement features disabled.")
+    logging.warning("audio_utils not found. Beep replacement and media validation disabled.")
     AudioBeepReplacer = None
+    probe_media = None
+
+    class AudioError(Exception):          # placeholder so ``except AudioError`` stays valid
+        code = "audio_error"
+        message = "audio utilities unavailable"
 
 SEGMENT_MERGE_THRESHOLD = 2.0  # Seconds - set to None for unconditional merge
 AUDIO_EDIT_SUPPORT = True      # Enable audio offset manipulation features
@@ -282,14 +294,13 @@ logger.info(f"DEBUG: API Key loaded? {'YES' if os.getenv('CHAT_AI_API_KEY') else
 SCRIPT_DIR = Path(__file__).resolve().parent
 BASE_PATH = SCRIPT_DIR
 
-# Traverse up until we find a folder named 'ATA' or hit the root
-while BASE_PATH.name != "ATA" and BASE_PATH != BASE_PATH.parent:
-    BASE_PATH = BASE_PATH.parent
-
-if BASE_PATH.name != "ATA":
-    logger.critical(f"Could not locate 'ATA' folder. Script expects to be run from within .../ATA/")
+# The project root is the parent of this file's folder (".../<root>/pipeline/process.py").
+# That works for any checkout name and for the Docker layout (/app/pipeline), unlike the
+# previous "walk up to a folder named ATA" logic. Override with ATA_BASE_PATH.
+BASE_PATH = Path(os.environ.get("ATA_BASE_PATH") or SCRIPT_DIR.parent).resolve()
+if not (BASE_PATH / "pipeline").is_dir():
+    logger.critical(f"Project root {BASE_PATH} has no 'pipeline' folder. Set ATA_BASE_PATH.")
     logger.critical(f"Current script location: {SCRIPT_DIR}")
-    logger.critical(f"Detected base path: {BASE_PATH}")
     sys.exit(1)
 
 logger.info(f"Base path detected: {BASE_PATH}")
@@ -303,6 +314,8 @@ TRANSCRIPTS_FOLDER = pipeline_dir / "transcripts"
 MODEL_FOLDER = pipeline_dir / "model"
 ANONYM_FOLDER = pipeline_dir / "anonym"
 LLM_ANONYM_FOLDER = pipeline_dir / "LLM-Anon"
+ENTITYMAP_FOLDER = pipeline_dir / "entitymaps"          # opt-in, private (see _save_entity_map)
+REDACTED_AUDIO_FOLDER = pipeline_dir / "audios_redacted"
 
 # Create directories if they don't exist
 for folder in [TRANSCRIPTS_FOLDER, ANONYM_FOLDER, MODEL_FOLDER, LLM_ANONYM_FOLDER]:
@@ -510,15 +523,25 @@ def merge_consecutive_speaker_segments(segments, max_gap_seconds=2.0):
     """
     Merges consecutive segments spoken by the same speaker.
     Allows configurable silence threshold between segments to control merging.
-    
+
+    Word-level timestamps (``words``) are preserved and concatenated: audio
+    redaction needs them to locate anonymized words in time.
+
     Args:
-        segments: List of dicts with 'start', 'end', 'speaker', 'text'
+        segments: List of dicts with 'start', 'end', 'speaker', 'text' and
+                  optionally 'words' (WhisperX word alignment).
         max_gap_seconds: Maximum silence allowed between segments to merge them.
                          Set to None to merge ALL consecutive same-speaker segments
                          regardless of timing gap.
+    Returns:
+        List of merged segment dicts, each with a ``words`` list (possibly empty).
     """
     if not segments:
         return []
+
+    def new_segment(speaker, text, start, end, words):
+        return {"speaker": speaker, "text": text, "start": start, "end": end,
+                "words": list(words or [])}
 
     merged_segments = []
     current_segment = None
@@ -528,43 +551,19 @@ def merge_consecutive_speaker_segments(segments, max_gap_seconds=2.0):
         text = segment.get("text", "")
         start = segment.get("start", 0)
         end = segment.get("end", 0)
+        words = segment.get("words")
 
         if current_segment is None:
-            # First segment
-            current_segment = {
-                "speaker": speaker,
-                "text": text,
-                "start": start,
-                "end": end
-            }
+            current_segment = new_segment(speaker, text, start, end, words)
+        elif current_segment["speaker"] == speaker and (
+                max_gap_seconds is None or start - current_segment["end"] <= max_gap_seconds):
+            current_segment["text"] += " " + text
+            current_segment["end"] = end
+            current_segment["words"].extend(words or [])
         else:
-            # Check if same speaker and gap is small enough (or no threshold)
-            if current_segment["speaker"] == speaker:
-                gap = start - current_segment["end"]
-                if max_gap_seconds is None or gap <= max_gap_seconds:
-                    # Merge: extend text and end time
-                    current_segment["text"] += " " + text
-                    current_segment["end"] = end
-                else:
-                    # Gap too large: finalize current, start new
-                    merged_segments.append(current_segment)
-                    current_segment = {
-                        "speaker": speaker,
-                        "text": text,
-                        "start": start,
-                        "end": end
-                    }
-            else:
-                # Different speaker: finalize current, start new
-                merged_segments.append(current_segment)
-                current_segment = {
-                    "speaker": speaker,
-                    "text": text,
-                    "start": start,
-                    "end": end
-                }
+            merged_segments.append(current_segment)
+            current_segment = new_segment(speaker, text, start, end, words)
 
-    # Append the last segment
     if current_segment:
         merged_segments.append(current_segment)
 
@@ -957,6 +956,8 @@ def process_audios(enable_diarization=True, lang_code=None, file_list=None, args
             continue
 
         logger.info(f"[{idx}/{len(files_to_process)}] Processing: {input_file.name}")
+        file_start = time.time()
+        transcript_file = None      # defined up-front so the ``finally`` block cannot fail
 
         actual_audio_path = input_file
         
@@ -1048,6 +1049,10 @@ def process_audios(enable_diarization=True, lang_code=None, file_list=None, args
                     text = segment.get("text", "").strip()
                     if text:
                         f.write(f"{segment.get('speaker', 'Unknown')}: {text}\n")
+
+            # Word-level timeline for audio redaction (same sensitivity as the transcript).
+            redaction_cli.write_words_sidecar(
+                TRANSCRIPTS_FOLDER / f"{base_name}{redaction_cli.WORDS_SUFFIX}", result["segments"])
             
         except Exception as e:
             logger.error(f"❌ FAILED: {input_file.name} - {e}")
@@ -1055,7 +1060,7 @@ def process_audios(enable_diarization=True, lang_code=None, file_list=None, args
             logger.error(traceback.format_exc())
         
         finally:
-            logger.info(f"✅ COMPLETED: {input_file.name} -> {transcript_file.name}")
+            logger.info(f"✅ COMPLETED: {input_file.name} -> {transcript_file.name if transcript_file else 'n/a'}")
             logger.info(f"   Duration: {time.time() - file_start:.2f}s")
             gc.collect()
             if torch.cuda.is_available():
@@ -1067,220 +1072,293 @@ def process_audios(enable_diarization=True, lang_code=None, file_list=None, args
     logger.info("Stream processing finished.")
     return len(files_to_process)
     
-# --- Global model cache ---
+# --- Model management & transcription ---------------------------------------------
+
+#: UI/CLI model key -> folder name under MODEL_FOLDER.
+WHISPER_MODEL_DIRS = {
+    'tiny': 'Systran--faster-whisper-tiny',
+    'base': 'Systran--faster-whisper-base',
+    'small': 'Systran--faster-whisper-small',
+    'medium': 'Systran--faster-whisper-medium',
+    'large': 'Systran--faster-whisper-large-v3',
+    'large-turbo': 'Systran--faster-whisper-large-v3-turbo',
+}
+_MODEL_ALIASES = {'large-v3': 'large', 'large_v3': 'large', 'large-v3-turbo': 'large-turbo'}
+
+_MODEL_LOCK = threading.RLock()          # guards loading/switching of the cached models
+# GPU inference is serialised by default; raise ATA_MAX_CONCURRENT_TRANSCRIPTIONS on big GPUs.
+_INFER_SEMAPHORE = threading.BoundedSemaphore(
+    max(1, int(os.getenv('ATA_MAX_CONCURRENT_TRANSCRIPTIONS', '1'))))
+_QUEUE_TIMEOUT_S = float(os.getenv('ATA_QUEUE_TIMEOUT', '900'))
+
 _loaded_whisper_model = None
+_loaded_whisper_name = None
 _loaded_diarize_model = None
+_diarize_attempted = False
 
-def load_models(whisper_model_override=None):
-    """Loads models globally for reuse across both process_audios() and transcribe_audio_locally()."""
-    global _loaded_whisper_model, _loaded_diarize_model
-    
-    # Reset global cache on reload attempt
-    _loaded_whisper_model = None
-    _loaded_diarize_model = None
-    
-    # Determine which Whisper model to use
-    model_name = whisper_model_override or os.getenv('WHISPER_MODEL', 'large')
-    model_map = {
-        'large': 'Systran--faster-whisper-large-v3',
-        'medium': 'Systran--faster-whisper-medium',
-        'small': 'Systran--faster-whisper-small',
-        'base': 'Systran--faster-whisper-base',
-        'tiny': 'Systran--faster-whisper-tiny',
-    }
-    
-    model_folder_name = model_map.get(model_name, f'Systran--faster-whisper-{model_name}')
-    whisper_model_path = MODEL_FOLDER / model_folder_name
 
-    check_gpu_resources()
-    
-    device_str = "cuda" if torch.cuda.is_available() else "cpu"
-    compute_type = "float16" if device_str == "cuda" else "float32"
-    
-    if _loaded_whisper_model and _loaded_diarize_model:
-        logger.info("Models already loaded, skipping reload.")
+class TranscriptionError(RuntimeError):
+    """Expected transcription failure. ``code`` is a stable machine-readable key."""
+
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
+@dataclass
+class TranscriptionResult:
+    """Structured outcome of :func:`transcribe_audio_result`.
+
+    Success and failure are signalled *only* through ``ok``/``error_code``, never
+    by inspecting ``text``: a real transcript that happens to contain the word
+    "failed" or "Error:" is a perfectly valid result.
+    """
+
+    ok: bool
+    text: str = ""
+    segments: List[Dict[str, Any]] = field(default_factory=list)   # incl. word timestamps
+    language: Optional[str] = None
+    duration: Optional[float] = None
+    error_code: Optional[str] = None
+    error: Optional[str] = None
+    warnings: List[str] = field(default_factory=list)
+
+
+def normalize_model_name(name=None):
+    """Returns a key of ``WHISPER_MODEL_DIRS`` for ``name`` (default: $WHISPER_MODEL or 'large').
+
+    Raises:
+        ValueError: Unknown model name.
+    """
+    key = str(name or os.getenv('WHISPER_MODEL') or 'large').strip().lower()
+    key = _MODEL_ALIASES.get(key, key)
+    if key not in WHISPER_MODEL_DIRS:
+        raise ValueError(f"Unknown Whisper model '{name}'. Valid: {', '.join(WHISPER_MODEL_DIRS)}")
+    return key
+
+
+def resolve_language(language):
+    """Converts a UI/CLI language value to a WhisperX code (case-insensitive).
+
+    Accepts ``None``/``''``/``'auto'`` (-> ``None`` = auto-detect), codes such as
+    ``'DE'``/``'de'``/``'SP'`` and native WhisperX codes.
+
+    Raises:
+        ValueError: Unsupported language.
+    """
+    text = '' if language is None else str(language).strip()
+    if not text or text.lower() in ('auto', 'autodetect', 'auto-detect'):
+        return None
+    if text.upper() in WHISPER_LANG_MAP:
+        return WHISPER_LANG_MAP[text.upper()]
+    if text.lower() in set(WHISPER_LANG_MAP.values()):
+        return text.lower()
+    raise ValueError(f"Unsupported language '{language}'.")
+
+
+def _free_gpu_memory():
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+
+def _ensure_models(model_name=None, explicit=False):
+    """Loads (or reuses) the Whisper and diarization models.
+
+    Args:
+        model_name: Key of ``WHISPER_MODEL_DIRS`` or None for the default.
+        explicit: True if the caller asked for this model by name; a missing
+            model is then an error instead of silently using another one.
+
+    Returns:
+        ``(whisper_model, diarization_model_or_None)``.
+
+    Raises:
+        TranscriptionError: Model missing or failed to load.
+    """
+    global _loaded_whisper_model, _loaded_whisper_name, _loaded_diarize_model, _diarize_attempted
+    with _MODEL_LOCK:
+        name = normalize_model_name(model_name)
+        path = MODEL_FOLDER / WHISPER_MODEL_DIRS[name]
+        if not path.exists():
+            if explicit or not WHISPERX_MODEL_PATH.exists():
+                raise TranscriptionError('model_unavailable', f"Whisper model '{name}' is not installed.")
+            logger.warning(f"Whisper model '{name}' not found; using {WHISPERX_MODEL_PATH.name}.")
+            path, name = WHISPERX_MODEL_PATH, 'default'
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        compute_type = "float16" if device == "cuda" else "float32"
+
+        if _loaded_whisper_model is None or _loaded_whisper_name != name:
+            if _loaded_whisper_model is None:
+                check_gpu_resources()
+            logger.info(f"Loading WhisperX model '{name}' from: {path}")
+            _loaded_whisper_model = None          # release the old model before loading
+            _free_gpu_memory()
+            try:
+                _loaded_whisper_model = whisperx.load_model(
+                    str(path), device, compute_type=compute_type, local_files_only=True)
+                _loaded_whisper_name = name
+            except Exception as e:
+                logger.error(f"Failed to load WhisperX model: {e}")
+                _loaded_whisper_name = None
+                raise TranscriptionError('model_load_failed', 'The Whisper model could not be loaded.')
+            logger.info("✅ WhisperX model loaded successfully.")
+
+        if not _diarize_attempted:                # diarization is loaded once, independent of Whisper
+            _diarize_attempted = True
+            if DIARIZATION_MODEL_PATH and DIARIZATION_MODEL_PATH.exists():
+                try:
+                    logger.info(f"Loading Diarization Pipeline from: {DIARIZATION_MODEL_PATH}")
+                    from pyannote.audio import Pipeline
+                    # pyannote disables TF32 on import; re-enable for speed on Ampere GPUs.
+                    torch.backends.cuda.matmul.allow_tf32 = True
+                    torch.backends.cudnn.allow_tf32 = True
+                    pipeline = Pipeline.from_pretrained(str(DIARIZATION_MODEL_PATH))
+                    if pipeline is not None:
+                        if device == "cuda":
+                            pipeline.to(torch.device(device))
+                        else:
+                            logger.warning("⚠️  Diarization Pipeline loaded on CPU (will be slower).")
+                        pipeline.min_duration_on = 3.0
+                        pipeline.min_duration_off = 4.0
+                    _loaded_diarize_model = pipeline
+                except Exception as e:
+                    logger.error(f"Failed to load Diarization Pipeline: {e}")
+                    _loaded_diarize_model = None
+            else:
+                logger.warning("⚠️  Diarization model not found. Speaker diarization will be disabled.")
         return _loaded_whisper_model, _loaded_diarize_model
 
-    # === WHISPERX MODEL (same as process_audios) ===
-    try:
-        logger.info(f"Loading WhisperX model from: {WHISPERX_MODEL_PATH}")
-        _loaded_whisper_model = whisperx.load_model(
-            str(WHISPERX_MODEL_PATH),
-            device_str,
-            compute_type=compute_type,  # float16 for GPU, float32 for CPU
-            local_files_only=True
-        )
-        logger.info("✅ WhisperX model loaded successfully.")
-    except Exception as e:
-        logger.critical(f"Failed to load WhisperX model: {e}")
-        return None, None
-    
-    # === DIARIZATION MODEL ===
-    if DIARIZATION_MODEL_PATH and DIARIZATION_MODEL_PATH.exists():
-        try:
-            logger.info(f"Loading Diarization Pipeline from: {DIARIZATION_MODEL_PATH}")
-            from pyannote.audio import Pipeline
 
-            # Re-enable TF32 (pyannote disables it by default)
-            torch.backends.cuda.matmul.allow_tf32 = True
-            torch.backends.cudnn.allow_tf32 = True
-            
-            # Step 1: Load the model first
-            _loaded_diarize_model = Pipeline.from_pretrained(str(DIARIZATION_MODEL_PATH))
-            
-            # Step 2: Verify model loaded successfully BEFORE device operations
-            if _loaded_diarize_model is None:
-                logger.error("Diarization Pipeline returned None after loading.")
-                _loaded_diarize_model = None
-            elif device_str == "cuda":  # ← FIXED: Check if model exists first
-                _loaded_diarize_model.to(torch.device(device_str))
-                logger.info("✅ Diarization Pipeline moved to GPU.")
-            else:
-                logger.warning("⚠️  Diarization Pipeline loaded on CPU (will be slower).")
-                
-            # Step 3: Set diarization thresholds (only if model is valid)
-            if _loaded_diarize_model is not None:
-                _loaded_diarize_model.min_duration_on = 3.0
-                _loaded_diarize_model.min_duration_off = 4.0
-                
-            logger.info("✅ Diarization Pipeline initialized successfully.")
-            
-        except Exception as e:  # ← Now only catches genuine loading failures
-            logger.error(f"Failed to load Diarization Pipeline: {e}")
-            logger.error(f"   Diarization model path: {DIARIZATION_MODEL_PATH}")
-            logger.error(f"   Model exists: {DIARIZATION_MODEL_PATH.exists()}")
-            import traceback
-            logger.error(f"   Full traceback:\n{traceback.format_exc()}")
-            _loaded_diarize_model = None  # ← Safe fallback on genuine error
-    else:
-        logger.warning("⚠️  Diarization model not found. Speaker diarization will be disabled.")
-        _loaded_diarize_model = None
+def load_models(whisper_model_override=None):
+    """Loads/reuses the models; kept for backwards compatibility.
 
-    logger.info("Models loaded successfully.")
-    return _loaded_whisper_model, _loaded_diarize_model
-
-def transcribe_audio_locally(audio_path, language=None, whisper_model_name=None):
+    Unlike earlier versions the cache is no longer cleared on every call, and the
+    override is honoured. Returns ``(None, None)`` on failure.
     """
-    Transcribes a single audio file using cached global models.
-    
+    try:
+        return _ensure_models(whisper_model_override, explicit=whisper_model_override is not None)
+    except (TranscriptionError, ValueError) as e:
+        logger.critical(f"Model loading failed: {e}")
+        return None, None
+
+
+def _fail(code, message):
+    return TranscriptionResult(ok=False, error_code=code, error=message)
+
+
+def transcribe_audio_result(audio_path, language=None, whisper_model_name=None, max_duration=None):
+    """Transcribes one file and returns a :class:`TranscriptionResult` (never raises
+    for expected failures).
+
     Args:
-        audio_path: Path to audio file
-        language: Language code ('auto', 'DE', 'EN', etc.)
-        whisper_model_name: Optional override (e.g., 'large-v3', 'base', 'tiny')
-    
+        audio_path: Path of an audio/video file (validated with ffprobe first).
+        language: ``None``/``'auto'`` or a code such as ``'DE'``/``'de'``.
+        whisper_model_name: Model key (``'tiny'``..``'large'``, ``'large-turbo'``) or None.
+        max_duration: Override of ``ATA_MAX_AUDIO_SECONDS`` (0 disables).
+
     Returns:
-        tuple: (transcription_text, wordOffsets)
+        ``TranscriptionResult``. ``error_code`` is one of ``invalid_language``,
+        ``invalid_model``, ``unreadable_media``, ``unsupported_format``,
+        ``media_too_long``, ``model_unavailable``, ``model_load_failed``, ``busy``
+        or ``transcription_error``.
     """
-    global _loaded_whisper_model, _loaded_diarize_model
-    
-    # Load models if not already loaded OR if model was switched
-    if not _loaded_whisper_model or whisper_model_name:
-        _loaded_whisper_model, _loaded_diarize_model = load_models(whisper_model_override=whisper_model_name)
-    
-    if not _loaded_whisper_model:
-        logger.error("Error: WhisperX model not loaded.")
-        return None, None
-
     try:
-        audio = whisperx.load_audio(audio_path)
-        
-        # === SAME TRANSCRIPTION PARAMETERS AS process_audios ===
-        transcribe_kwargs = {
-            "audio": audio,
-            "batch_size": BATCH_SIZE,
-            "verbose": False,
-            "print_progress": False,
-            "task": "transcribe"
-        }
-        if language and language != 'auto' and language in WHISPER_LANG_MAP:
-            transcribe_kwargs["language"] = WHISPER_LANG_MAP[language]
-            logger.info(f"Forced language: {language} → {transcribe_kwargs['language']}")
-        
-        result = _loaded_whisper_model.transcribe(**transcribe_kwargs)
-        
-        # === WORD ALIGNMENT (same as process_audios) ===
-        detected_language = result.get("language", 'en')
-        if detected_language:
-            try:
-                align_device = "cuda" if torch.cuda.is_available() else "cpu"
-                align_model, metadata = whisperx.load_align_model(
-                    language_code=detected_language, device=align_device
-                )
-                result = whisperx.align(result["segments"], align_model, metadata, audio, align_device, return_char_alignments=False)
-            except Exception as e:
-                logger.warning(f"Alignment failed: {e}")
+        lang_code = resolve_language(language)
+    except ValueError as e:
+        return _fail('invalid_language', str(e))
+    try:
+        model_name = normalize_model_name(whisper_model_name) if whisper_model_name else None
+    except ValueError as e:
+        return _fail('invalid_model', str(e))
 
-        # === SPEAKER DIARIZATION (same as process_audios) ===
-        if _loaded_diarize_model:
+    duration = None
+    if probe_media is not None:                     # reject hostile/oversized media early
+        try:
+            duration = probe_media(str(audio_path), max_duration).duration
+        except AudioError as e:
+            return _fail(e.code, e.message)
+
+    if not _INFER_SEMAPHORE.acquire(timeout=_QUEUE_TIMEOUT_S):
+        return _fail('busy', 'The server is busy. Please try again shortly.')
+    try:
+        whisper_model, diarize_model = _ensure_models(model_name, explicit=whisper_model_name is not None)
+        audio = whisperx.load_audio(str(audio_path))
+        transcribe_kwargs = {"audio": audio, "batch_size": BATCH_SIZE, "verbose": False,
+                             "print_progress": False, "task": "transcribe"}
+        if lang_code:
+            transcribe_kwargs["language"] = lang_code
+            logger.info(f"Forced language: {lang_code}")
+        result = whisper_model.transcribe(**transcribe_kwargs)
+
+        detected_language = result.get("language") or lang_code or 'en'
+        align_device = "cuda" if torch.cuda.is_available() else "cpu"
+        try:                                         # word alignment (needed for redaction)
+            align_model, metadata = whisperx.load_align_model(language_code=detected_language,
+                                                              device=align_device)
+            result = whisperx.align(result["segments"], align_model, metadata, audio,
+                                    align_device, return_char_alignments=False)
+        except Exception as e:
+            logger.warning(f"Alignment failed: {e}")
+
+        if diarize_model:
             try:
-                # Load audio as numpy, convert to torch tensor for pyannote
-                audio_np = whisperx.load_audio(audio_path)
-                
-                diarization_audio = {
-                    'waveform': torch.from_numpy(audio_np).unsqueeze(0),
-                    'sample_rate': 16000
-                }
-                
-                diarize_output = _loaded_diarize_model(
-                    diarization_audio,
-                    min_speakers=2,
-                    max_speakers=10
-                )
-                
-                speaker_diarization = diarize_output.speaker_diarization
-                
-                segments_list = []
-                for turn, _, speaker in speaker_diarization.itertracks(yield_label=True):
-                    duration = turn.end - turn.start
-                    if duration < 0.5:
-                        continue
-                    segments_list.append({'start': turn.start, 'end': turn.end, 'speaker': speaker})
-                
+                diarization_audio = {'waveform': torch.from_numpy(audio).unsqueeze(0), 'sample_rate': 16000}
+                diarize_output = diarize_model(diarization_audio, min_speakers=2, max_speakers=10)
+                segments_list = [
+                    {'start': turn.start, 'end': turn.end, 'speaker': speaker}
+                    for turn, _, speaker in diarize_output.speaker_diarization.itertracks(yield_label=True)
+                    if turn.end - turn.start >= 0.5]
                 if segments_list:
                     import pandas as pd
-                    diarize_df = pd.DataFrame(segments_list)
-                    result = whisperx.assign_word_speakers(diarize_df, result)
+                    result = whisperx.assign_word_speakers(pd.DataFrame(segments_list), result)
                     logger.info(f"✅ Diarization complete: {len(segments_list)} speaker segments assigned")
                 else:
                     logger.warning("No valid speakers found. Using fallback assignment.")
                     for i, seg in enumerate(result["segments"]):
-                        seg["speaker"] = f"SPEAKER_{i%2:02d}"
+                        seg["speaker"] = f"SPEAKER_{i % 2:02d}"
             except Exception as e:
                 logger.error(f"Diarization failed: {e}. Using fallback assignment.")
-                import traceback
-                logger.error(traceback.format_exc())
-                for i, segment in enumerate(result["segments"]):
-                    segment["speaker"] = f"SPEAKER_{i%2:02d}"
+                for i, seg in enumerate(result["segments"]):
+                    seg["speaker"] = f"SPEAKER_{i % 2:02d}"
         else:
             logger.warning("Diarization disabled. Using fallback speaker assignment.")
-            for i, segment in enumerate(result["segments"]):
-                if "speaker" not in segment:
-                    segment["speaker"] = f"SPEAKER_{i % 2:02d}"
+            for i, seg in enumerate(result["segments"]):
+                seg.setdefault("speaker", f"SPEAKER_{i % 2:02d}")
 
-        # === SEGMENT MERGING (same as process_audios) ===
-        gap_threshold = globals().get('SEGMENT_MERGE_THRESHOLD', 2.0)
-        result["segments"] = merge_consecutive_speaker_segments(
-            result["segments"], 
-            max_gap_seconds=gap_threshold
-        )
+        segments = merge_consecutive_speaker_segments(
+            result["segments"], max_gap_seconds=globals().get('SEGMENT_MERGE_THRESHOLD', 2.0))
+        lines = [f"{seg.get('speaker', 'SPEAKER_00')}: {seg.get('text', '').strip()}"
+                 for seg in segments if seg.get('text', '').strip()]
+        warnings = [] if lines else ['no_speech_detected']   # empty text is valid, not an error
+        segments = convert_numpy(segments)
+        if duration is None and segments:
+            duration = float(segments[-1].get('end') or 0.0)
+        logger.info(f"Transcription complete: {len(lines)} segment(s)")
+        return TranscriptionResult(True, "\n".join(lines), segments, detected_language, duration,
+                                   warnings=warnings)
+    except TranscriptionError as e:
+        return _fail(e.code, e.message)
+    except Exception:
+        logger.exception("Transcription failed")
+        return _fail('transcription_error', 'Transcription failed because of an internal error.')
+    finally:
+        _INFER_SEMAPHORE.release()
+        _free_gpu_memory()
 
-        # === CONVERT TO TEXT FORMAT ===
-        result_lines = [f"{seg.get('speaker', 'SPEAKER_00')}: {seg.get('text', '').strip()}" for seg in result["segments"] if seg.get('text', '').strip()]
-        result_text = "\n".join(result_lines) or "No speech detected."
-        
-        # Word offsets for downstream processing
-        for seg in result.get("segments", []):
-            if "speaker" not in seg:
-                seg["speaker"] = "SPEAKER_00"
 
-        resultOffset = convert_numpy(result.get("segments", []))
-        
-        logger.info(f"Transcription complete: {len(result_text)} chars, {len(result['segments'])} segments")
-        return result_text, resultOffset
+def transcribe_audio_locally(audio_path, language=None, whisper_model_name=None):
+    """Legacy wrapper returning ``(text, segments)``.
 
-    except Exception as e:
-        logger.error(f"Transcription failed: {e}", exc_info=True)
-        return f"Transcription failed: {e}", []
+    Failures raise :class:`TranscriptionError` instead of returning an error
+    string, so transcript content is never mistaken for an error message.
+    """
+    res = transcribe_audio_result(audio_path, language, whisper_model_name)
+    if not res.ok:
+        raise TranscriptionError(res.error_code, res.error)
+    return res.text, res.segments
+
 
 # --- Anonymization Engine (V2-style, simplified with DFKI-SLT model) ---
 
@@ -1471,6 +1549,21 @@ def predict_sentences_simple(sentences_tokens, model, tokenizer, id_to_tag_map, 
         
     return all_predictions
 
+#: Model tag -> placeholder written into the anonymized text ('' = leave text unchanged).
+TAG_PLACEHOLDERS = {
+    'PERSON': '[PERSON]', 'PERSON_EMAIL': '[EMAIL]',
+    'PERSON_SOCIAL_RELATION': '[NAME_RELATIVE]', 'ORG': '[ORGANISATION]',
+    'LOC_CITY': '[CITY]', 'LOC_COUNTRY': '[COUNTRY]',
+    'LOC_STREET': '[STREET]', 'LOC_ZIP': '[ZIP]',
+    'LOC_HOUSENUMBER': '[HOUSENUMBER]', 'LOC_OTHER': '[LOCATION]',
+    'DATETIME': '[DATETIME]', 'DATETIME_AGE': '[AGE]',
+    'CODE': '[CODE]', 'CODE_PHONE': '[PHONE]', 'CODE_URL': '[URL]',
+    'PROFESSION': '[PROFESSION]', 'PRODUCT': '[PRODUCT]',
+    'QUANTITY': '[QUANTITY]', 'MISC': '[MISC]', 'O': ''
+}
+_ANON_LOCK = threading.Lock()          # the shared model must not run concurrent inference
+
+
 class AnonymizationEngine:
     """Streamlined AnonymizationEngine compatible with DFKI-SLT/multilingual_DialogPII_NER."""
     
@@ -1493,38 +1586,28 @@ class AnonymizationEngine:
             logger.info(f"Model path: {self.model_path}")
             self._load_model()
 
-    def _build_safe_label_mapping(self):
-        """Constructs a dynamic mapping from model labels to anonymization tags."""
-        all_target_tags = {
-            'PERSON': '[PERSON]', 'PERSON_EMAIL': '[EMAIL]',
-            'PERSON_SOCIAL_RELATION': '[NAME_RELATIVE]', 'ORG': '[ORGANISATION]',
-            'LOC_CITY': '[CITY]', 'LOC_COUNTRY': '[COUNTRY]',
-            'LOC_STREET': '[STREET]', 'LOC_ZIP': '[ZIP]',
-            'LOC_HOUSENUMBER': '[HOUSENUMBER]', 'LOC_OTHER': '[LOCATION]',
-            'DATETIME': '[DATETIME]', 'DATETIME_AGE': '[AGE]',
-            'CODE': '[CODE]', 'CODE_PHONE': '[PHONE]', 'CODE_URL': '[URL]',
-            'PROFESSION': '[PROFESSION]', 'PRODUCT': '[PRODUCT]',
-            'QUANTITY': '[QUANTITY]', 'MISC': '[MISC]', 'O': ''
-        }
+    @staticmethod
+    def _active_tags(include_tags=None, exclude_tags=None):
+        """Set of model tags to anonymize after applying include/exclude filters."""
+        active = set(TAG_PLACEHOLDERS) - {'O'}
+        if include_tags is not None:          # [] means "none" (e.g. the UI's Clear All)
+            active &= {str(t).upper() for t in include_tags}
+        if exclude_tags:
+            active -= {str(t).upper() for t in exclude_tags}
+        return active
 
-        active_tags = set(all_target_tags.keys())
+    def _build_safe_label_mapping(self, include_tags=None, exclude_tags=None):
+        """Maps model label ids to placeholders; filtered-out tags map to '' (text kept).
 
-        if self.include_tags:
-            include_set = set(t.upper() for t in self.include_tags)
-            active_tags = active_tags.intersection(include_set)
-            logger.info(f"Restricting anonymization to specific tags: {active_tags}")
-        
-        if self.exclude_tags:
-            exclude_set = set(t.upper() for t in self.exclude_tags)
-            active_tags = active_tags.difference(exclude_set)
-            logger.info(f"Excluding tags: {exclude_set}")
-
+        Previously the filter was computed and then ignored, so the PII checkboxes
+        and --include-tags/--exclude-tags had no effect.
+        """
+        active = self._active_tags(include_tags, exclude_tags)
+        logger.info(f"Anonymizing tags: {sorted(active)}")
         mapping = {}
         for label_id, label_name in self.original_id2label.items():
-            clean_label = label_name.replace("B-", "").replace("I-", "").replace("S-", "").replace("E-", "")
-            clean_label_upper = clean_label.upper()
-            mapping[str(label_id)] = all_target_tags.get(clean_label_upper, "")
-                
+            clean = re.sub(r"^[BIES]-", "", str(label_name)).upper()
+            mapping[str(label_id)] = TAG_PLACEHOLDERS.get(clean, "") if clean in active else ""
         logger.info(f"Built label mapping with {len(mapping)} entries.")
         return mapping
 
@@ -1625,7 +1708,8 @@ class AnonymizationEngine:
             self.model.eval()
             
             self.tokenizer = AutoTokenizer.from_pretrained(str(self.model_path), local_files_only=True)
-            self.label_mapping = self._build_safe_label_mapping()
+            self.label_mapping = self._build_safe_label_mapping(self.include_tags, self.exclude_tags)
+            self._mapping_cache = {}
             logger.info("Model loaded and label mapping initialized.")
 
         except Exception as e:
@@ -1634,56 +1718,59 @@ class AnonymizationEngine:
             logger.error(traceback.format_exc())
             self.method = None
 
-    def anonymize(self, text, use_surrogates=False, surrogate_seed=None, surrogate_locales='de_DE,en_US'):
+    def anonymize(self, text, use_surrogates=False, surrogate_seed=None,
+                  surrogate_locales='de_DE,en_US', include_tags=None, exclude_tags=None):
         """
         Anonymizes text using simple sentence-level splitting.
+
+        Args:
+            text: Transcript with ``SPEAKER_nn:`` lines.
+            use_surrogates: Replace placeholders with realistic fake values.
+            surrogate_seed: Seed for reproducible surrogates.
+            surrogate_locales: Locale list, e.g. ``'de_DE,en_US'``; the first one selects the language.
+            include_tags / exclude_tags: Per-call tag filters (model tag names such as
+                ``'PERSON'``, ``'LOC_CITY'``); they override the engine-level filters.
+
         Returns:
-            tuple: (anonymized_text, success, message, entity_map)
-            entity_map enables consistent surrogate substitution downstream.
-         """
-    
+            Always a 5-tuple ``(text, success, message, entity_map, surrogate_registry)``.
+            Earlier versions returned 4 values on error paths, which broke callers
+            that unpack 5. ``entity_map`` holds the *original* strings per tag in
+            document order (sensitive); ``surrogate_registry`` holds fake values only.
+        """
         if not self.method or not self.model or not self.tokenizer:
-            return None, False, "Anonymization model not loaded.", {}
+            return None, False, "Anonymization model not loaded.", {}, {}
+
+        mapping = self.label_mapping
+        if include_tags is not None or exclude_tags is not None:
+            key = (frozenset(include_tags or ()), frozenset(exclude_tags or ()))
+            if key not in self._mapping_cache:
+                self._mapping_cache[key] = self._build_safe_label_mapping(include_tags, exclude_tags)
+            mapping = self._mapping_cache[key]
 
         sentences_data = split_dialogue_into_sentences(text)
         if not sentences_data:
-            return text, False, "No sentences detected.", {}
+            return text, False, "No sentences detected.", {}, {}
 
         sentences_tokens = [tokens for _, tokens in sentences_data]
-        
         try:
-            predictions = predict_sentences_simple(
-                sentences_tokens=sentences_tokens,
-                model=self.model,
-                tokenizer=self.tokenizer,
-                id_to_tag_map=self.label_mapping,
-                device=self.device
-            )
+            with _ANON_LOCK:
+                predictions = predict_sentences_simple(
+                    sentences_tokens=sentences_tokens, model=self.model, tokenizer=self.tokenizer,
+                    id_to_tag_map=mapping, device=self.device)
         except Exception as e:
             logger.error(f"Inference failed: {e}")
-            return text, False, str(e), {}
+            return text, False, str(e), {}, {}
 
-        # Returns (text, entity_map) tuple now
-        reconstructed_text, entity_map = reconstruct_text_from_predictions(
-            sentences_data, predictions, {}
-        )
+        reconstructed_text, entity_map = reconstruct_text_from_predictions(sentences_data, predictions, {})
         reconstructed_text = normalize_punctuation(reconstructed_text)
         reconstructed_text = merge_adjacent_tags(reconstructed_text)
 
         surrogate_registry = {}
         if use_surrogates:
             reconstructed_text, surrogate_registry = apply_surrogate_substitution(
-                reconstructed_text,
-                entity_map,
-                use_surrogates=True,
-                seed=surrogate_seed,
-                locales=surrogate_locales
-            )
-
-        if use_surrogates and surrogate_registry:
-            return reconstructed_text, True, "Success", entity_map, surrogate_registry
-        else:
-            return reconstructed_text, True, "Success", entity_map, {}
+                reconstructed_text, entity_map, use_surrogates=True,
+                seed=surrogate_seed, locales=surrogate_locales)
+        return reconstructed_text, True, "Success", entity_map, surrogate_registry
 
 # --- LLM Rewrite Features ---
 
@@ -1919,7 +2006,7 @@ def run_adversarial_anonymization(text, model_id, iterations=3):
             )
             critique = attacker_response.choices[0].message.content.strip()
             critique = re.sub(r'<[^>]+>', '', critique)
-            logger.info(f"Attacker completed iteration {i}. Risks found: {'Yes' if 'Risk' in critique or 'Found' in critique else 'None'}")
+            logger.info(f"Attacker completed iteration {i}. Risks found: {'None' if 'no risks found' in critique.lower() else 'Yes'}")
 
         except Exception as e:
             logger.error(f"Attacker failed in iteration {i}: {e}")
@@ -1933,7 +2020,7 @@ def run_adversarial_anonymization(text, model_id, iterations=3):
 
         current_text = anonymized_text
 
-        if "No risks found" in critique.lower() and i < iterations:
+        if "no risks found" in critique.lower() and i < iterations:     # was mixed-case: never matched
             logger.info("Attacker found no risks. Stopping early.")
             break
 
@@ -1988,189 +2075,8 @@ def normalize_punctuation(text) -> str:
 # SURROGATE POOLS FOR FAKE DATA GENERATION
 # ============================================================================
 
-SURROGATES = {
-    "EN": {
-        "PERSON": [
-            "John Smith", "Emma Johnson", "Michael Brown", "Sophia Miller",
-            "Daniel Wilson", "Olivia Moore", "James Taylor", "Emily Davis",
-            "Benjamin Clark", "Charlotte White", "Henry Walker", "Mia Harris",
-            "Alexander Hall", "Amelia Young", "David Allen", "Ella King",
-            "Joseph Wright", "Grace Scott", "Samuel Green", "Lily Baker"
-        ],
-        "CITY": [
-            "Berlin", "London", "New York", "Chicago", "Boston",
-            "Seattle", "Munich", "Hamburg", "Paris", "Vienna",
-            "Toronto", "Dublin", "Leeds", "Bristol", "Manchester",
-            "Frankfurt", "Cologne", "Zurich", "Amsterdam", "Prague"
-        ],
-        "ZIP": [
-            "10001", "20095", "75008", "10115", "50667",
-            "80331", "SW1A1AA", "94105", "60601", "33101",
-            "70173", "01067", "28195", "4000", "8001",
-            "1010", "2000", "80333", "04109", "90402"
-        ],
-        "AGE": [
-            "21", "24", "27", "30", "33",
-            "36", "39", "42", "45", "48",
-            "51", "54", "57", "60", "63",
-            "66", "69", "72", "75", "78"
-        ],
-        "EMAIL": [
-            "john@example.com", "emma@test.com", "michael@mail.com",
-            "sophia@demo.org", "daniel@company.net", "olivia@example.org",
-            "james@sample.com", "emily@test.org", "ben@demo.net",
-            "charlotte@mail.org", "henry@example.net", "mia@test.com",
-            "alex@sample.org", "amelia@demo.com", "david@mail.net",
-            "ella@example.org", "joseph@test.net", "grace@sample.com",
-            "samuel@demo.org", "lily@mail.com"
-        ],
-        "PHONE": [
-            "+1 202 555 0101", "+1 202 555 0102", "+1 202 555 0103",
-            "+44 20 7946 0001", "+44 20 7946 0002",
-            "+49 30 123456", "+49 40 987654",
-            "+33 1 23456789", "+41 44 1234567", "+43 1 987654",
-            "+1 303 555 1212", "+1 404 555 2323", "+49 89 456789",
-            "+44 161 555 1000", "+33 4 11111111",
-            "+1 212 555 8888", "+49 221 987654",
-            "+43 662 123456", "+41 31 7654321", "+1 617 555 0909"
-        ],
-        "PROFESSION": [
-            "doctor", "teacher", "engineer", "lawyer", "designer",
-            "developer", "nurse", "scientist", "manager", "architect",
-            "chef", "journalist", "consultant", "photographer", "pilot",
-            "researcher", "pharmacist", "electrician", "mechanic", "writer"
-        ],
-        "ORGANISATION": [
-            "Acme Corporation", "Global Tech Solutions", "Green Valley Hospital",
-            "Sunrise Medical Center", "Northbridge University", "Blue River Consulting",
-            "United Logistics Group", "Pioneer Software Ltd.", "Metro Insurance Services",
-            "Future Energy Systems", "City Health Network", "Bright Education Trust",
-            "National Research Institute", "Western Manufacturing Inc.",
-            "Community Care Foundation", "Summit Financial Partners",
-            "Digital Innovation Labs", "Central Public Library",
-            "Evergreen Construction", "International Trade Association"
-        ],
-        "URL": [
-            "https://example.com", "https://test.org", "https://demo.net",
-            "https://sample.com", "https://mywebsite.org",
-            "https://company.net", "https://homepage.com",
-            "https://service.org", "https://product.net",
-            "https://info.com", "https://data.org",
-            "https://project.net", "https://alpha.com",
-            "https://beta.org", "https://gamma.net",
-            "https://delta.com", "https://epsilon.org",
-            "https://zeta.net", "https://theta.com", "https://lambda.org"
-        ],
-        "PRODUCT": [
-            "iPhone", "ThinkPad", "Galaxy Tablet", "MacBook",
-            "Surface Pro", "PlayStation", "AirPods", "Kindle",
-            "GoPro", "Fitbit", "Nikon Camera", "Dell Monitor",
-            "HP Printer", "Canon Lens", "Dyson Vacuum",
-            "Sony Headphones", "Bose Speaker", "Apple Watch",
-            "Nintendo Switch", "Pixel Phone"
-        ],
-        "STREET": [
-            "Main Street", "Oak Avenue", "Maple Road", "Pine Street",
-            "Cedar Lane", "Elm Street", "Washington Avenue",
-            "Lakeview Drive", "Hillcrest Road", "Sunset Boulevard",
-            "Park Avenue", "River Road", "King Street",
-            "Queen Street", "Church Lane", "Station Road",
-            "Mill Road", "Victoria Street", "Bridge Street", "High Street"
-        ]
-    },
-    "DE": {
-        "PERSON": [
-            "Max Müller", "Anna Schmidt", "Peter Weber", "Laura Fischer",
-            "Thomas Wagner", "Julia Becker", "Lukas Hoffmann", "Sarah Koch",
-            "Felix Bauer", "Leonie Richter", "Jonas Klein", "Marie Wolf",
-            "Paul Schröder", "Lisa Neumann", "Tim Braun", "Nina Hartmann",
-            "David Lange", "Sophie Krüger", "Jan Meier", "Eva Schulz"
-        ],
-        "CITY": [
-            "Berlin", "Hamburg", "München", "Köln", "Frankfurt",
-            "Stuttgart", "Dresden", "Leipzig", "Bremen", "Hannover",
-            "Düsseldorf", "Dortmund", "Essen", "Bonn", "Mannheim",
-            "Nürnberg", "Augsburg", "Karlsruhe", "Potsdam", "Freiburg"
-        ],
-        "ZIP": [
-            "10115", "20095", "80331", "50667", "60311",
-            "70173", "01067", "04109", "28195", "30159",
-            "40213", "44135", "45127", "53111", "68159",
-            "90402", "86150", "76133", "14467", "79098"
-        ],
-        "AGE": [
-            "18", "22", "25", "28", "31",
-            "34", "37", "40", "43", "46",
-            "49", "52", "55", "58", "61",
-            "64", "67", "70", "73", "76"
-        ],
-        "EMAIL": [
-            "max@beispiel.de", "anna@test.de", "peter@mail.de",
-            "laura@firma.de", "thomas@demo.de", "julia@beispiel.org",
-            "lukas@test.org", "sarah@mail.org", "felix@demo.net",
-            "leonie@firma.com", "jonas@test.com", "marie@example.de",
-            "paul@beispiel.com", "lisa@demo.org", "tim@mail.net",
-            "nina@test.net", "david@firma.org", "sophie@example.com",
-            "jan@beispiel.net", "eva@test.de"
-        ],
-        "PHONE": [
-            "+49 30 123456", "+49 40 987654", "+49 89 456789",
-            "+49 221 111111", "+49 711 222222",
-            "+49 351 333333", "+49 341 444444", "+49 421 555555",
-            "+49 511 666666", "+49 211 777777",
-            "+49 231 888888", "+49 201 999999",
-            "+49 228 123123", "+49 621 321321",
-            "+49 911 456456", "+49 821 654654",
-            "+49 761 789789", "+49 331 987987",
-            "+49 69 135791", "+49 731 246810"
-        ],
-        "PROFESSION": [
-            "Arzt", "Lehrer", "Ingenieur", "Anwalt", "Designer",
-            "Entwickler", "Krankenpfleger", "Wissenschaftler", "Manager",
-            "Architekt", "Koch", "Journalist", "Berater", "Fotograf",
-            "Pilot", "Forscher", "Apotheker", "Elektriker",
-            "Mechaniker", "Schriftsteller"
-        ],
-        "ORGANISATION": [
-            "Universitätsklinikum Berlin", "Technische Universität München",
-            "Stadtwerke Hamburg", "Muster GmbH", "Beispiel AG",
-            "Forschungszentrum Leipzig", "Klinikum Stuttgart",
-            "Deutsches Institut für Informatik", "Berliner Verkehrsbetriebe",
-            "Münchner Versicherungsgruppe", "Norddeutsche Logistik GmbH",
-            "Gesundheitszentrum Köln", "Innovationslabor Dresden",
-            "Rhein-Main Consulting", "Bildungswerk Frankfurt",
-            "Sozialverband Deutschland", "Energieversorgung Bayern",
-            "MediCare Krankenhausverbund", "Industrieverband Nordrhein",
-            "Wissenschaftsakademie Freiburg"
-        ],
-        "URL": [
-            "https://beispiel.de", "https://test.org", "https://demo.net",
-            "https://firma.de", "https://webseite.org",
-            "https://projekt.net", "https://daten.de",
-            "https://service.org", "https://produkt.net",
-            "https://info.de", "https://alpha.org",
-            "https://beta.net", "https://gamma.de",
-            "https://delta.org", "https://epsilon.net",
-            "https://zeta.de", "https://theta.org",
-            "https://lambda.net", "https://omega.de", "https://portal.org"
-        ],
-        "PRODUCT": [
-            "iPhone", "ThinkPad", "Galaxy Tablet", "MacBook",
-            "Surface Pro", "PlayStation", "AirPods", "Kindle",
-            "GoPro", "Fitbit", "Nikon Kamera", "Dell Monitor",
-            "HP Drucker", "Canon Objektiv", "Dyson Staubsauger",
-            "Sony Kopfhörer", "Bose Lautsprecher", "Apple Watch",
-            "Nintendo Switch", "Pixel Smartphone"
-        ],
-        "STREET": [
-            "Hauptstraße", "Bahnhofstraße", "Gartenweg", "Schillerstraße",
-            "Goethestraße", "Bergstraße", "Dorfstraße", "Mühlenweg",
-            "Kirchstraße", "Lindenweg", "Parkstraße", "Wiesenweg",
-            "Waldstraße", "Ringstraße", "Schulstraße", "Mozartstraße",
-            "Lessingstraße", "Friedhofsweg", "Birkenweg", "Ahornstraße"
-        ]
-    }
-}
+# The static surrogate pools moved to pipeline/surrogates.py (``POOLS``). ``SURROGATES`` is kept
+# as an import alias (see imports); its shape changed from {lang: {TAG: [...]}} to {lang: {kind: [...]}}.
 
 # --- Surrogate Substitution ---
 
@@ -2193,92 +2099,65 @@ TAG_TO_SURROGATE_CATEGORY = {
     'PRODUCT': 'PRODUCT',
 }
 
-def apply_surrogate_substitution(text, entity_map, 
-                                  use_surrogates=False,
-                                  seed=None,
-                                  locales='en_US'):
-    """
-    Applies consistent Faker-based surrogate substitution to anonymized text.
-    ✅ FIXED: Now searches for [TAG] placeholders directly, regardless of entity_map keys.
-    """
+def apply_surrogate_substitution(text, entity_map, use_surrogates=False, seed=None, locales='en_US'):
+    """Replaces ``[TAG]`` placeholders with realistic fake values.
 
-    if not HAS_FAKER:
-        logger.error("Faker library not installed. Install with: pip install faker")
+    Compatibility wrapper around :mod:`pipeline.surrogates` (Faker when installed,
+    otherwise static pools). Same entity -> same fake; see that module for details.
+
+    Args:
+        text: Anonymized text containing placeholders.
+        entity_map: ``{tag: [original strings in document order]}`` from the anonymizer
+            (enables consistency across mentions); may be empty.
+        use_surrogates: No-op unless True.
+        seed: Seed for reproducible output.
+        locales: Locale list such as ``'de_DE,en_US'``; the first entry selects the language.
+
+    Returns:
+        ``(text, registry)`` where ``registry`` maps tag -> list of fake values
+        (never contains the originals).
+    """
+    if not use_surrogates or not text or '[' not in text:
         return text, {}
-    
-    if not use_surrogates:
-        return text, {}
-    
-    if not text or '[' not in text:
-        logger.debug("No placeholders found in text, skipping surrogate substitution.")
-        return text, {}
-    
-    try:
-        fake = Faker(locales.split(','))
-        if seed is not None:
-            fake.seed_instance(seed)
-            logger.info(f"Faker seeded with value: {seed} for reproducibility")
-    except Exception as e:
-        logger.error(f"Failed to initialize Faker: {e}")
-        return text, {}
-    
-    # Map BERT tags → SURROGATES pools → Faker generators
-    TAG_TO_FAKER_METHOD = {
-        'PERSON': lambda: fake.name(),
-        'PERSON_EMAIL': lambda: fake.email(),
-        'PERSON_SOCIAL_RELATION': lambda: fake.name(),
-        'ORG': lambda: fake.company(),
-        'LOC_CITY': lambda: fake.city(),
-        'LOC_COUNTRY': lambda: fake.country(),
-        'LOC_STREET': lambda: fake.street_address(),
-        'LOC_ZIP': lambda: fake.postcode(),
-        'LOC_HOUSENUMBER': lambda: str(fake.random_int(1, 999)),
-        'LOC_OTHER': lambda: fake.city(),
-        'DATETIME': lambda: fake.date(),
-        'DATETIME_AGE': lambda: str(fake.random_int(18, 90)),
-        'CODE': lambda: fake.uuid4()[:8].upper(),
-        'CODE_PHONE': lambda: fake.phone_number(),
-        'CODE_URL': lambda: fake.url(),
-        'PROFESSION': lambda: fake.job(),
-        'PRODUCT': lambda: fake.catch_phrase(),
-        'QUANTITY': lambda: str(fake.random_int(1, 1000)),
-        'MISC': lambda: fake.word(),
-    }
-    
-    # Track substitutions for consistency
-    used_values = defaultdict(list)
-    registry = defaultdict(list)
-    
-    def replacer(match):
-        tag = match.group(1)  # e.g., 'PERSON'
-        
-        if tag not in TAG_TO_FAKER_METHOD:
-            # No surrogate pool for this tag - keep placeholder
-            return match.group(0)
-        
-        # Get surrogate value
-        faker_func = TAG_TO_FAKER_METHOD[tag]
-        value = faker_func()
-        
-        # Avoid immediate repetition
-        if value in used_values[tag][-3:]:
-            value = faker_func()
-        
-        used_values[tag].append(value)
-        registry[tag].append(value)
-        
-        logger.debug(f"Surrogate: [{tag}] → '{value}'")
-        return value
-    
-    # Replace ALL [TAG] placeholders
-    s_text = re.sub(r'\[([A-Z_]+)\]', replacer, text)
-    
-    entities_replaced = sum(len(v) for v in registry.values())
-    logger.info(f"Applied surrogate substitution: {entities_replaced} entities replaced")
-    return s_text, dict(registry)
+    result = apply_surrogates(text, entity_map, lang=lang_from_locales(locales), seed=seed)
+    for warning in result.warnings:
+        logger.warning(f"Surrogate note: {warning}")
+    logger.info(f"Applied surrogate substitution: {result.replaced} placeholder(s) replaced "
+                f"(backend={result.backend})")
+    return result.text, result.registry
+
+
+_MASTER_KEY = None
+
+
+def _save_entity_map(base_name, entity_map):
+    """Persists the entity map (it contains the ORIGINAL PII!) - only when requested.
+
+    Stored in a 0700 folder with 0600 files, encrypted (AES-256-GCM) when a persistent
+    master key is configured, so the file cannot sit unprotected next to the shareable
+    anonymized output as it did before. Returns the path written.
+    """
+    global _MASTER_KEY
+    if _MASTER_KEY is None:
+        _MASTER_KEY = load_master_key(required=False)
+    safe = sanitize_filename(base_name)
+    folder = ensure_private_dir(ENTITYMAP_FOLDER)
+    payload = json.dumps(entity_map, indent=2, ensure_ascii=False).encode("utf-8")
+    if not _MASTER_KEY.ephemeral:
+        path = folder / f"{safe}_entitymap.json.enc"
+        write_private_file(path, encrypt_bytes(payload, _MASTER_KEY.key, b"ATA:entitymap:" + safe.encode()))
+    else:
+        path = folder / f"{safe}_entitymap.json"
+        write_private_file(path, payload)
+        logger.warning("No master key configured: entity map saved UNENCRYPTED (mode 0600). "
+                       "Configure secrets/encryption_key.txt to encrypt it.")
+    return path
+
 
 def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert=False, 
-                          adversarial_mode=False, include_tags=None, exclude_tags=None, file_list=None):
+                          adversarial_mode=False, include_tags=None, exclude_tags=None, file_list=None,
+                          enable_surrogates=False, surrogate_seed=None,
+                          surrogate_locales='de_DE,en_US', save_entity_map=False):
     """
     Reads raw transcripts, anonymizes them with BERT, and optionally rewrites with LLM.
     Supports adversarial_mode which runs a 3-iteration Red Team vs. Blue Team loop.
@@ -2394,9 +2273,9 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
                 anon_start = time.time()
                 anonymized_text, success, msg, entity_map, surrogate_registry = anonymizer.anonymize(
                     text_content,
-                    use_surrogates=args.enable_surrogates,
-                    surrogate_seed=args.surrogate_seed,
-                    surrogate_locales=args.surrogate_language
+                    use_surrogates=enable_surrogates,
+                    surrogate_seed=surrogate_seed,
+                    surrogate_locales=surrogate_locales
                 )
                 
                 if not success or not anonymized_text:
@@ -2407,17 +2286,16 @@ def process_anonymization(llm_rewrite_enabled=None, llm_model_id=None, skip_bert
                 logger.info(f"  Entities detected: {len(entity_map)}")
                 logger.info(f"  Tags found: {', '.join(entity_map.keys()) if entity_map else 'None'}")
                 
-                # Save entity map for audit/debugging
-                entity_map_path = ANONYM_FOLDER / f"{base_name}_anon_entitymap.json"
-                with open(entity_map_path, "w", encoding="utf-8") as f:
-                    json.dump(entity_map, f, indent=2, ensure_ascii=False)
-                logger.debug(f"Entity map saved: {entity_map_path}")
-                
+                # The entity map contains the original PII: only written on request (--save-entity-map).
+                if save_entity_map:
+                    entity_map_path = _save_entity_map(base_name, entity_map)
+                    logger.info(f"Entity map saved (private): {entity_map_path}")
+
                 # Save surrogate registry if generated
-                if surrogate_registry and args.enable_surrogates:
+                if surrogate_registry and enable_surrogates:
                     surrogate_path = ANONYM_FOLDER / f"{base_name}_anon_surrogates.json"
-                    with open(surrogate_path, "w", encoding="utf-8") as f:
-                        json.dump(surrogate_registry, f, indent=2, ensure_ascii=False)
+                    write_private_file(surrogate_path, json.dumps(
+                        surrogate_registry, indent=2, ensure_ascii=False).encode("utf-8"))
                     logger.info(f"Surrogate registry saved: {surrogate_path}")
 
                 output_filename = f"{base_name}_anon.txt"
@@ -2594,24 +2472,49 @@ Examples:
     parser.add_argument('--file', type=str, help='Process a single file')
     parser.add_argument('--files', nargs='+', help='Process multiple files')
     parser.add_argument('--enable-tts', action='store_true',
-                    help='Enable multi-speaker TTS generation after transcription. '
+                    help='[not implemented in the CLI yet - use the web interface] Multi-speaker TTS generation. '
                          'Voice count is derived from diarization; assignments are randomized.')
     parser.add_argument('--merge-threshold', type=float, default=SEGMENT_MERGE_THRESHOLD,
                     help=f"Maximum gap in seconds between segments to merge (default: {SEGMENT_MERGE_THRESHOLD}). "
                          "Set to 0 for immediate consecutive merge only.")
     parser.add_argument('--audio-edit', type=str, default=None,
-                        help='Apply audio offset modifications based on JSON config file')
+                        help='[not implemented yet] Apply audio offset modifications based on JSON config file')
     parser.add_argument('--enable-surrogates', action='store_true',
                         help='Enable Faker-based surrogate substitution (e.g., "Max Mustermann" → "Axel Schneider")')
     parser.add_argument('--surrogate-seed', type=int, default=None,
                         help='Seed for Faker RNG (for reproducible surrogates). Default: random.')
-    parser.add_argument('--surrogate-language', type=str, default='de_DE,en_US',
-                        help='Faker locale(s) for surrogate generation (comma-separated). Default: de_DE,en_US')
+    parser.add_argument('--surrogate-language', type=str, default=None,
+                        help='Locale(s) for surrogate generation (comma-separated); the first selects the language. '
+                             'Default: derived from --lang, else de_DE,en_US')
     
+    parser.add_argument('--save-entity-map', action='store_true',
+                        help='Also save the entity map (contains ORIGINAL PII) to pipeline/entitymaps/ '
+                             '(0700 folder; encrypted if a master key is configured). Off by default.')
+    parser.add_argument('--redact-audio', action='store_true',
+                        help='After anonymization, mask the anonymized words in the audio with beeps '
+                             '(writes audios_redacted/<name>_redacted.<fmt> and anonym/<name>_redactions.json).')
+    parser.add_argument('--redact-only', action='store_true',
+                        help='Only run audio redaction on existing transcripts/anonym files (no transcription). '
+                             'Lightweight alternative without the ML stack: python -m pipeline.redaction_cli')
+    parser.add_argument('--redact-mode', choices=['placeholders', 'changes'], default='placeholders',
+                        help="'placeholders': mask words replaced by [TAG] (default); 'changes': mask every difference.")
+    parser.add_argument('--redact-pad', type=float, default=DEFAULT_PAD_S,
+                        help=f'Padding in seconds added around each masked span (default {DEFAULT_PAD_S}).')
+    parser.add_argument('--redact-format', choices=['wav', 'mp3', 'flac'], default='wav')
+    parser.add_argument('--redactions-from', type=str, default=None,
+                        help='Use hand-edited spans (JSON, schema v1) instead of deriving them; needs exactly one --file.')
+    parser.add_argument('--redactions-include-words', action='store_true',
+                        help='Keep the original words in the redactions JSON (not recommended).')
+
     args = parser.parse_args()
     
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
+
+    if args.surrogate_language is None:
+        args.surrogate_language = FAKER_LOCALE_MAP.get((args.lang or '').upper(), 'de_DE,en_US')
+    if args.merge_threshold is not None:
+        SEGMENT_MERGE_THRESHOLD = args.merge_threshold      # was parsed but never applied
 
     session_logger = SessionLogger(BASE_PATH)
     session_logger.log_settings({
@@ -2628,10 +2531,10 @@ Examples:
     
     check_gpu_resources()
     
-    run_transcription = not args.disable_transcription
+    run_transcription = not args.disable_transcription and not args.redact_only
     run_diarization = not args.disable_diarization
-    run_anonymization = not args.disable_anonymization
-    run_llm = not args.disable_llm
+    run_anonymization = not args.disable_anonymization and not args.redact_only
+    run_llm = not args.disable_llm and not args.redact_only
     is_adversarial = args.adversarial
 
     skip_bert_for_llm = args.llm_only
@@ -2691,13 +2594,32 @@ Examples:
             adversarial_mode=is_adversarial,
             include_tags=include_tags,
             exclude_tags=exclude_tags,
-            file_list=input_file_list if input_file_list else None
+            file_list=input_file_list if input_file_list else None,
+            enable_surrogates=args.enable_surrogates,
+            surrogate_seed=args.surrogate_seed,
+            surrogate_locales=args.surrogate_language,
+            save_entity_map=args.save_entity_map
         )
-    else:
+    elif not args.redact_only:
         logger.info("⏭️  Skipping anonymization (--disable-anonymization)")
         if run_llm and not args.llm_only:
             logger.warning("⚠️  LLM rewrite requested but BERT anonymization is disabled...")
     
+    # Step 4: Audio redaction (words timeline + anonymized text -> beeped audio)
+    if args.redact_audio or args.redact_only:
+        bases = ([Path(f).stem for f in input_file_list] if input_file_list
+                 else redaction_cli.discover_bases(TRANSCRIPTS_FOLDER))
+        if args.redactions_from and len(bases) != 1:
+            parser.error("--redactions-from needs exactly one --file")
+        redaction_cli.redact_batch(
+            bases, transcripts=TRANSCRIPTS_FOLDER, anonym=ANONYM_FOLDER, audios=AUDIOS_FOLDER,
+            out_audio=REDACTED_AUDIO_FOLDER,
+            options=redaction_cli.rd.RedactionOptions.from_mapping(
+                {"mode": args.redact_mode, "pad_s": args.redact_pad}),
+            fmt=args.redact_format,
+            spans_file=Path(args.redactions_from) if args.redactions_from else None,
+            include_words=args.redactions_include_words)
+
     logger.info("Pipeline finished.")
     pipeline_duration = time.time() - pipeline_start
     logger.info(f"Pipeline total duration: {pipeline_duration:.2f}s ({pipeline_duration/60:.1f} minutes)")
@@ -2718,6 +2640,12 @@ __all__ = [
     'process_audios',
     'load_models',
     'transcribe_audio_locally',
+    'transcribe_audio_result',
+    'TranscriptionResult',
+    'TranscriptionError',
+    'resolve_language',
+    'normalize_model_name',
+    'TAG_PLACEHOLDERS',
     'AnonymizationEngine',
     'process_anonymization',
     'generate_audio_edit_script',
@@ -2730,7 +2658,6 @@ __all__ = [
     
     # TTS functions (from tts_engine)
     'generate_speech',
-    'generate_beep',
     'synthesize_segment',
     'get_available_tts_voices',
     'get_tts_status',
