@@ -257,10 +257,10 @@
             color: #003754; cursor: pointer; font-size: 14px;
             font-weight: 600; transition: all 0.2s ease;
         }
-        .pii-tag-actions button:hover { 
+        .pii-tag-actions button:hover {
             background: #009A54;
-            color: #FFFFFF; 
-            border-color: #009A54; 
+            color: #FFFFFF;
+            border-color: #009A54;
         }
 
         .download-grid {
@@ -536,7 +536,7 @@
                     Select which categories of personally identifiable information to anonymize. All are enabled by default.
                 </p>
                 <div class="pii-tag-toggle-container">
-                    <button id="pii-toggle-btn" class="pii-tag-toggle-btn collapsed">Advanced Settings</button>
+                    <button id="pii-toggle-btn" class="pii-tag-toggle-btn collapsed">Show Tags</button>
                 </div>
                 <div id="pii-tag-expand-wrapper" class="pii-tag-expand-wrapper collapsed">
                     <div id="pii-tag-grid" class="pii-tag-grid">
@@ -569,6 +569,21 @@
                      <button id="process-org-audio-btn" class="button">Process Audio</button>
                 </div>
                 <audio id="audio-player" controls class="hidden"></audio>
+                <!-- CORRECTION 5a: Waveform redaction editor panel (new) -->
+                <div id="redaction-editor" class="section hidden" style="margin-top: 20px;">
+                    <h3>Redaction Editor</h3>
+                    <canvas id="wf-canvas" width="900" height="180" style="width:100%; cursor:crosshair;"></canvas>
+                    <p style="font-size: 12px; color: #003754;">
+                        Drag a span edge to widen or narrow a redaction. Drag on empty waveform to add a new
+                        redaction. Click a span to select it, then delete it below.
+                    </p>
+                    <div style="display:flex; gap:10px; justify-content:center; margin-top:10px;">
+                        <button id="editor-delete-span" class="button secondary" disabled>Delete Selected Span</button>
+                        <button id="editor-apply" class="button">Apply Redaction</button>
+                        <button id="editor-close" class="button secondary">Close Editor</button>
+                    </div>
+                    <div id="editor-status" class="status"></div>
+                </div>
             </div>
         </div>
         <div class="side-annotation">
@@ -576,6 +591,7 @@
             <p>Double check the output text. Machine processing miss identifying information or wrongly remove information. Double check it is correct! Edit it if it is not.</p>
             <p>Use the rephrase function to change the phrasing, which can also be identifying. Replace removed information with fake alternatives for a more natural-sounding text.</p>
             <p>Click Synthetic Audio if you want an audio file with fake voices speaking the de-identified text.</p>
+            <p>Click Process Audio to open the waveform editor and review or correct the redacted time ranges before rendering.</p>
         </div>
     </div>
 
@@ -626,14 +642,15 @@
     </div>
 
     <script>
+        /* CORRECTION 1: Only these globals live at script scope. The former duplicate
+           declarations of audioBlob, uploadedFile, offsetData and audioName further down
+           were a SyntaxError that prevented the ENTIRE script from parsing. */
         let currentSessionId = null;
-    let audioBlob = null;
-    let uploadedFile = null;
-    let offsetData = null;
-    let audioName = null;
+        let currentJobId = null;
+        let currentJobToken = null;
+        let currentAudioFilename = null;
     document.addEventListener('DOMContentLoaded', () => {
         console.log('📦 DOMContentLoaded fired');
-        loadModels();
         // === MODAL FUNCTIONS ===
         const surveyModal = document.getElementById('survey-modal');
         const modalCloseBtn = document.getElementById('modal-close-btn');
@@ -725,7 +742,11 @@
             'MISC': { label: 'Miscellaneous', desc: 'Other identifiable information' }
         };
 
-        let mediaRecorder, audioChunks = [], timerInterval, seconds = 0, isRecording = false, audioBlob = null, uploadedFile = null, offsetData = null, audioName = null;
+        /* CORRECTION 1 (continued): session/media state is declared ONCE here.
+           The previous line re-declared audioBlob, uploadedFile, offsetData and
+           audioName with `let` in the same scope, which is a fatal SyntaxError. */
+        let mediaRecorder, audioChunks = [], timerInterval, seconds = 0, isRecording = false;
+        let audioBlob = null, uploadedFile = null, offsetData = null, audioName = null;
 
         function updateStatus(message, isError = false, persistent = false) {
             statusDiv.textContent = message;
@@ -849,7 +870,8 @@
         });
 
         function getSelectedPiiTags() {
-            return Array.from(piiTagGrid.querySelectorAll('input[type="checkbox"]:checked')).map(cb => cb.value);
+
+return Array.from(piiTagGrid.querySelectorAll('input[type="checkbox"]:checked')).map(cb => cb.value);
         }
 
         piiSelectAllBtn.addEventListener('click', () => piiTagGrid.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = true));
@@ -1000,6 +1022,11 @@
                     transcribedText.value = result.transcription || "";
                     offsetData = result.offsets || [];
                     audioName = result.audio_name;
+                    /* CORRECTION 2: capture per-job credentials so the authenticated
+                       waveform/redaction endpoints (/waveform, /get_redaction_segments,
+                       /generate_org_audio) can be called with the X-Job-Token header. */
+                    currentJobId = result.job_id || null;
+                    currentJobToken = result.job_token || null;
                     updateStatus("Transcription successful!", false); // ← Normal auto-hide for success
                     downloadOriginalBtn.disabled = false;
                     anonymizeBtn.disabled = false;
@@ -1032,10 +1059,15 @@
                 const response = await fetch('/anonymize', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
+                    /* CORRECTION 3: pass job_id/job_token so the server links the
+                       placeholder text to the audio job (required by
+                       /get_redaction_segments in job mode). */
+                    body: JSON.stringify({
                         transcript: text,
                         lang: transcriptionLanguageSelect.value,
-                        include_tags: selectedTags.length > 0 ? selectedTags : undefined
+                        include_tags: selectedTags.length > 0 ? selectedTags : undefined,
+                        job_id: currentJobId,
+                        job_token: currentJobToken
                     })
                 });
                 
@@ -1063,10 +1095,13 @@
                     // Schedule survey popup
                     scheduleSurveyModal();
 
-                    // Save audio filename
-                    currentAudioFilename = result.audio_name ? 
-                    Path.basename(result.audio_name, Path.extname(result.audio_name)) + '.txt' : 
-                    null;
+                    /* CORRECTION 3 (continued): the previous code used Node.js APIs
+                       (Path.basename / Path.extname) that do not exist in browsers and
+                       threw a ReferenceError on EVERY successful anonymization. */
+                    if (result.audio_name) {
+                        currentAudioFilename =
+                            result.audio_name.replace(/\.[^/.]+$/, '') + '.txt';
+                    }
                 } else {
                     // Handle server error
                     throw new Error(result.error || "Anonymization failed.");
@@ -1238,17 +1273,183 @@
             downloadTextContent(anonymizedText.value, filename);
         });
 
-        downloadSpeechBtn.addEventListener('click', () => { 
-            if (audioPlayer.src) {
-                const a = document.createElement('a');
-                a.href = audioPlayer.src;
-                a.download = 'synthetic_speech.wav';
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
+        /* CORRECTION 4: two legacy duplicate downloadSpeechBtn listeners were removed
+           here. Three listeners on one button fired simultaneously (blob download +
+           player-src download + window.open). The blob-based handler above is the only
+           one that downloads what was actually generated. */
+
+        // === CORRECTION 5: Waveform redaction editor ===
+        // Lets the user review and correct the derived redaction spans: widen/narrow,
+        // delete or add spans on the waveform, then render the redacted audio.
+        const MANUAL_MIN_SPAN_S = 0.02;   // must match pipeline/redaction.py MANUAL_MIN_SPAN_S
+        const wfCanvas = document.getElementById('wf-canvas');
+        const editorPanel = document.getElementById('redaction-editor');
+        const editorDeleteBtn = document.getElementById('editor-delete-span');
+        const editorApplyBtn = document.getElementById('editor-apply');
+        let wfSpans = [], wfDuration = 0, wfLevels = [], wfSelected = null, wfDrag = null;
+
+        function editorStatus(msg, isError = false) {
+            const el = document.getElementById('editor-status');
+            el.textContent = msg;
+            el.className = 'status ' + (isError ? 'error' : 'success');
+        }
+
+        async function openRedactionEditor() {
+            if (!currentJobId || !currentJobToken) {
+                updateStatus('The editor needs a job - transcribe the audio first.', true);
+                return;
+            }
+            showLoader(true);
+            try {
+                // 1) Derive the automatic spans from the (placeholder) anonymized text.
+                const segResp = await fetch('/get_redaction_segments', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Job-Token': currentJobToken },
+                    body: JSON.stringify({ job_id: currentJobId, text: anonymizedText.value })
+                });
+                const segData = await segResp.json();
+                if (!segData.success) throw new Error(segData.error || 'Could not derive redaction segments.');
+                // Edited spans are sent as "manual" so the server treats them as final.
+                wfSpans = (segData.segments || []).map(s => ({
+                    id: s.id, start: s.start, end: s.end, source: 'manual' }));
+                wfDuration = segData.duration || 0;
+                if ((segData.warnings || []).includes('alignment_diverged'))
+                    editorStatus('Warning: text/audio alignment diverged - review every span.', true);
+
+                // 2) Fetch RMS levels for the waveform display.
+                const wfResp = await fetch(
+                    '/waveform?job_id=' + encodeURIComponent(currentJobId) + '&bars=2000',
+                    { headers: { 'X-Job-Token': currentJobToken } });
+                const wf = await wfResp.json();
+                if (!wf.success) throw new Error(wf.error || 'Could not load waveform.');
+                wfLevels = wf.levels || [];
+                wfDuration = wf.duration || wfDuration;
+
+                editorPanel.classList.remove('hidden');
+                editorPanel.scrollIntoView({ behavior: 'smooth' });
+                drawEditor();
+            } catch (err) {
+                updateStatus('Editor failed: ' + err.message, true);
+            } finally {
+                showLoader(false);
+            }
+        }
+
+        function drawEditor() {
+            const ctx = wfCanvas.getContext('2d');
+            const cw = wfCanvas.width, ch = wfCanvas.height;
+            ctx.clearRect(0, 0, cw, ch);
+            ctx.fillStyle = '#FFF5F4';
+            ctx.fillRect(0, 0, cw, ch);
+            if (wfLevels.length && wfDuration > 0) {
+                const barW = cw / wfLevels.length;
+                ctx.fillStyle = '#009AA9';
+                wfLevels.forEach((lvl, i) => {
+                    const h = lvl * (ch - 10);
+                    ctx.fillRect(i * barW, (ch - h) / 2, Math.max(barW - 1, 1), h);
+                });
+            }
+            for (const s of wfSpans) {
+                const x1 = s.start / wfDuration * cw, x2 = s.end / wfDuration * cw;
+                ctx.fillStyle = wfSelected === s ? 'rgba(175,24,33,0.45)' : 'rgba(175,24,33,0.25)';
+                ctx.fillRect(x1, 0, x2 - x1, ch);
+                ctx.strokeStyle = '#AF1821';
+                ctx.lineWidth = wfSelected === s ? 3 : 2;
+                ctx.strokeRect(x1, 0, x2 - x1, ch);
+            }
+        }
+
+        wfCanvas.addEventListener('pointerdown', (e) => {
+            if (wfDuration <= 0) return;
+            const rect = wfCanvas.getBoundingClientRect();
+            const t = (e.clientX - rect.left) / rect.width * wfDuration;
+            const tol = 6 / rect.width * wfDuration;      // ~6 px grab tolerance
+            let hit = null;
+            for (const s of wfSpans) {
+                if (Math.abs(t - s.start) <= tol) hit = { s, mode: 'start' };
+                else if (Math.abs(t - s.end) <= tol) hit = { s, mode: 'end' };
+            }
+            if (!hit) for (const s of wfSpans) if (t > s.start && t < s.end) hit = { s, mode: 'move' };
+            wfSelected = hit ? hit.s : null;
+            if (!hit) {
+                // Empty area: start drawing a brand-new manual span.
+                const ns = { id: 'm' + Date.now(), start: t, end: t, source: 'manual' };
+                wfSpans.push(ns);
+                wfSelected = ns;
+                wfDrag = { s: ns, mode: 'end' };
+            } else {
+                wfDrag = hit;
+            }
+            editorDeleteBtn.disabled = !wfSelected;
+            wfCanvas.setPointerCapture(e.pointerId);
+            drawEditor();
+        });
+
+        wfCanvas.addEventListener('pointermove', (e) => {
+            if (!wfDrag) return;
+            const rect = wfCanvas.getBoundingClientRect();
+            const t = Math.min(Math.max((e.clientX - rect.left) / rect.width * wfDuration, 0), wfDuration);
+            if (wfDrag.mode === 'start') wfDrag.s.start = Math.min(t, wfDrag.s.end - MANUAL_MIN_SPAN_S);
+            else if (wfDrag.mode === 'end') wfDrag.s.end = Math.max(t, wfDrag.s.start + MANUAL_MIN_SPAN_S);
+            else {
+                const len = wfDrag.s.end - wfDrag.s.start;
+                wfDrag.s.start = Math.min(Math.max(t - len / 2, 0), Math.max(wfDuration - len, 0));
+                wfDrag.s.end = wfDrag.s.start + len;
+            }
+            drawEditor();
+        });
+
+        wfCanvas.addEventListener('pointerup', () => {
+            if (wfDrag) {
+                wfSpans.sort((a, b) => a.start - b.start);
+                wfDrag = null;
+                drawEditor();
             }
         });
-        downloadSpeechBtn.addEventListener('click', () => { if (audioPlayer.src) window.open(audioPlayer.src); });
+
+        editorDeleteBtn.addEventListener('click', () => {
+            wfSpans = wfSpans.filter(s => s !== wfSelected);
+            wfSelected = null;
+            editorDeleteBtn.disabled = true;
+            drawEditor();
+        });
+
+        editorApplyBtn.addEventListener('click', async () => {
+            const valid = wfSpans.filter(s => s.end - s.start >= MANUAL_MIN_SPAN_S);
+            if (!valid.length) {
+                editorStatus('Add or extend at least one redaction span first.', true);
+                return;
+            }
+            editorApplyBtn.disabled = true;
+            try {
+                const resp = await fetch('/generate_org_audio', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Job-Token': currentJobToken },
+                    body: JSON.stringify({
+                        job_id: currentJobId, format: 'wav',
+                        segments: valid.map(s => ({ start: +s.start.toFixed(3), end: +s.end.toFixed(3) }))
+                    })
+                });
+                const data = await resp.json();
+                if (!data.success) throw new Error(data.error || 'Redaction rendering failed.');
+                // audio_url is a short-lived signed link (server SIGNED_URL_TTL_S).
+                audioPlayer.src = data.audio_url;
+                audioPlayer.classList.remove('hidden');
+                audioPlayer.setAttribute('controls', '');
+                editorStatus('Applied ' + data.segments_applied + ' span(s). Preview above; download before the link expires (' +
+                    data.expires_in + ' s).', false);
+            } catch (err) {
+                editorStatus('Apply failed: ' + err.message, true);
+            } finally {
+                editorApplyBtn.disabled = false;
+            }
+        });
+
+        document.getElementById('editor-close').addEventListener('click', () =>
+            editorPanel.classList.add('hidden'));
+
+        // The previously dead "Process Audio" button now opens the editor.
+        document.getElementById('process-org-audio-btn').addEventListener('click', openRedactionEditor);
 
         loadModels();
         loadPiiTags();
