@@ -28,9 +28,12 @@ pipeline/transcripts/
 pipeline/anonym
 pipeline/annonym/
 pipeline/logs/
+logs/
+pipeline/audios_redacted
 pipeline/LLM-Anon/
 pipeline/tts/*.wav
 pipeline/tts/bin/
+pipeline/tts/voices/
 
 #  SSL files
 key.pem
