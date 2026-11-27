@@ -1,18 +1,13 @@
-/pipeline/model/*
-pipeline/models/*
-pipeline/annonym/*
-!pipeline/model/*/.GithubCreateDir
-pipeline/model/
-pipeline/models/
-pipeline_Test.py
 !.gitkeep
-!models_manifest.txt
-ModelTraining/*
-.env
+!.GithubCreateDir
 
 # ===== LARGE MODEL FILES (Do not commit) =====
-pipeline/model/
-pipeline/models/
+pipeline/model/**
+!pipeline/model/**/
+!pipeline/model/**/.GithubCreateDir
+pipeline/models/**
+!pipeline/models/**/
+!pipeline/models/**/.GithubCreateDir
 *.bin
 *.pt
 *.pth
@@ -20,24 +15,24 @@ pipeline/models/
 *.safetensors
 *.ckpt
 
-# Python cache
-__pycache__/
-*.pyc
-
-# ===== Uploaded/Audio Files =====
+# ===== Uploaded/Audio/Sensitive Files =====
 uploads/
+pipeline/videos
 
 # ===== LARGE FILES (Do not commit) =====
 # Audio files from processing
-uploads/
-pipeline/audios/
+pipeline/uploads
+pipeline/audio
+pipeline/audios
 pipeline/transcripts/
+pipeline/anonym
 pipeline/annonym/
 pipeline/logs/
-pipeline/videos/
 pipeline/LLM-Anon/
+pipeline/tts/*.wav
+pipeline/tts/bin/
 
-# SSL files
+#  SSL files
 key.pem
 cert.pem
 ssl_certs/server.key
@@ -54,15 +49,27 @@ backups/
 # Unrelated files
 *.csv
 TextAnonym.py
+pipeline_Test.py
+!models_manifest.txt
+ModelTraining/*
 
 # Log files
 pipeline/anon_session_*
 
 # Python cache
 __pycache__/
+.pytest_cache/
 *.pyc
 *.pyo
 *.pyd
+
+# Environment files
+.env
+.venv/
+*.egg-info/
+dist/
+build/
+*.part
 
 # IDE files
 .vscode/
@@ -73,11 +80,8 @@ __pycache__/
 # Temporary files
 *.tmp
 .tmp/
-requirements-lock.txt
 
 # Secrets
-
-#secrets/
 *.secret
 *.password
 secrets/*.key
@@ -88,3 +92,6 @@ secrets/*.crt
 *.key
 *.p12
 *.pfx
+
+# Jobs
+jobs/

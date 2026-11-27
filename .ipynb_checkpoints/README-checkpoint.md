@@ -1,3 +1,5 @@
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/Project-VERANDA/ATA)
+
 # Audio-Transcript-Anonymizer (ATA)
 
 A comprehensive pipeline for privacy-preserving audio processing. This tool accepts audio or video files, transcribes the content using WhisperX, applies speaker diarization via Pyannote, and anonymizes Personally Identifiable Information (PII) using BERT and LLMs. It uniquely supports audio-level anonymization, replacing sensitive spoken segments with beeps to create fully anonymized audio files.
@@ -14,51 +16,26 @@ Ideal for: Interviews, therapy sessions, legal consultations, and any conversati
   
   * Text Anonymization (BERT): Detects and replaces PII (names, emails, locations, phone numbers, etc.) using a multilingual BERT model.
   
-   * 🆕 Audio Anonymization (Beep Replacement): Maps identified PII to audio timestamps and replaces sensitive segments with beeps, preserving the rest of the conversation.
+   * Audio Anonymization (Beep Replacement): Maps identified PII to audio timestamps and replaces sensitive segments with beeps, preserving the rest of the conversation.
   
   * LLM Rewriting: Uses Large Language Models to generalize indirect identifiers (e.g., specific job titles, rare locations) that BERT might miss.
   
-  * Adversarial Mode: Optional Red Team vs. Blue Team loop to iteratively improve anonymization quality.
+  * Adversarial Mode: Looping LLMs across the script to identify and remove identifiers that went undetected by the BERT model.
   
   * Web Interface: User-friendly GUI for uploading, recording, editing, and downloading anonymized results.
   
-  * Bulk Processing: Supports batch processing via command line or ZIP file uploads.
+  * Bulk Processing: Supports batch processing via command line or file uploads.
 
-  * TTS Backends:
-    
-  * Piper TTS (Recommended)
-- Fast offline synthesis
-- 30+ languages
-- GPL v3 license
-- Voice: en_US-lessac-medium
-
-  * Coqui XTTS v2
-- Voice cloning support
-- 17 languages
-- CPML license (non-commercial)
-- Model: ~2GB download
+  * Text-to-speech with Piper TTS for fast offline synthesis
 
 # 📦 Installation Prerequisites
 
-    Python 3.8+
-    FFmpeg: Required for audio/video conversion.
-    Ubuntu/Debian: sudo apt-get install ffmpeg
-    macOS: brew install ffmpeg
-    Windows: Download from ffmpeg.org and add to **PATH**.
+    Python 3.12
     **NVIDIA** **GPU** (Optional but Recommended): For 10x faster processing.
 
 **Step-by-Step Setup**
 
-  Clone the repository:
-```
-    git clone https://github.com/Project-VERANDA/ATA/
-    cd ATA
-``` 
-   Run the setup script:
-```
-    ./ATA_Setup.sh
-```
-   Follow the prompts.
+
 
    * Choose y to install Flask (Web Interface) if you plan to use the **GUI**.
    * Input n if you only need the command-line interface.
@@ -78,6 +55,17 @@ Ideal for: Interviews, therapy sessions, legal consultations, and any conversati
    * Create a .env file in the ATA root directory (see Configuration below).
    
    * This is required for the LLM rewriting and adversarial features.
+
+  Clone the repository:
+```
+    git clone https://github.com/Project-VERANDA/ATA/
+    cd ATA
+```
+   Run the setup script:
+```
+    ./Installer.sh
+```
+   Follow the prompts.
 
 
 
@@ -157,7 +145,7 @@ Argument	Description
    
    * Anonymize: Click Anonymize Text to apply BERT and/or LLM.
    
-   * 🆕 Generate Anonymized Audio: Click this button to replace PII segments with beeps.
+   * Generate Anonymized Audio: Click this button to replace PII segments with beeps.
    
    * Download: Download the text transcript and the _beeped.wav audio file.
 
@@ -191,12 +179,6 @@ USE_HTTPS=true
 |Storage (Models)|~**30GB**|	~**30GB**|
 
 
-### Verify **GPU** Availability:
-
-```
-python -c "import torch; print('**CUDA** Available:', torch.cuda.is_available())"
-```
-
 # 📂 Output Directory Structure
 
 **ATA**/ 
@@ -204,11 +186,12 @@ python -c "import torch; print('**CUDA** Available:', torch.cuda.is_available())
 ├── videos/          # Input video files │   
 ├── audios/          # Extracted WAV files │   
 ├── transcripts/     # Raw transcription files (.txt) │   
-├── anonym/          # BERT-anonymized transcripts (_anon.txt) │   ├── LLM-Anon/    # LLM-rewritten transcripts (_llm_.txt, _adversarial_.txt) 
+├── anonym/          # BERT-anonymized transcripts (_anon.txt) │   
+├── LLM-Anon/    # LLM-rewritten transcripts (_llm_.txt, _adversarial_.txt) 
 │   
 ├── uploads/         # Temporary storage for web uploads (includes _beeped.wav files) 
-│   ├── model/           # Downloaded AI models 
-│    └── logs/            # Session logs (session_YYYY-MM-DD_HH-MM-SS.txt) 
+├── model/           # Downloaded AI models 
+├──  logs/            # Session logs (session_YYYY-MM-DD_HH-MM-SS.txt) 
 └── interactive_app/     # Web interface files
 
 Note on Audio Outputs:
@@ -216,9 +199,11 @@ Note on Audio Outputs:
     Anonymized audio files generated via the web interface are saved in pipeline/uploads/ with the suffix _beeped.wav (e.g., interview_beeped.wav).
     These files are temporary; download them via the web interface or move them manually.
 
-🎙️ New Feature: Audio Beep Replacement
+Audio Beep Replacement
 
-The pipeline now supports audio-level anonymization. ### How It Works
+The pipeline now supports audio-level anonymization. 
+
+### How It Works
 
     Transcription & Identification: The system transcribes audio and identifies **PII** entities using the **BERT** model.
     Offset Mapping: The system maps the text-based **PII** tags back to their precise time offsets in the original audio file.
@@ -231,11 +216,11 @@ If you are integrating this into your own scripts:
 
 from audio_utils import AudioBeepReplacer
 
-# 'offsets' must be obtained from the transcription step (returned by transcribe_audio_locally)
+'offsets' must be obtained from the transcription step (returned by transcribe_audio_locally)
 
 replacer = AudioBeepReplacer(beep_freq=1000, beep_gain_db=-6) output_file = replacer.replace_offsets_with_beeps(input.wav, offsets, output_beeped.wav)
 
-🛡️ Supported **PII** Tags
+# 🛡️ Supported **PII** Tags
 
 The BERT anonymization model detects and replaces the following entity types:
 
