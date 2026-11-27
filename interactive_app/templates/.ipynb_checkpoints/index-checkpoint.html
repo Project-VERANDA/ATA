@@ -572,19 +572,25 @@
                 <!-- CORRECTION 5a: Waveform redaction editor panel (new) -->
                 <div id="redaction-editor" class="section hidden" style="margin-top: 20px;">
                     <h3>Redaction Editor</h3>
-                    <canvas id="wf-canvas" width="900" height="180" style="width:100%; cursor:crosshair;"></canvas>
+                    <div style="display:flex; gap:8px; align-items:center; justify-content:center; margin-bottom:10px; flex-wrap:wrap;">
+                        <button id="editor-zoom-in"     class="button secondary" title="Zoom in">🔍➕</button>
+                        <button id="editor-zoom-out"    class="button secondary" title="Zoom out">🔍➖</button>
+                        <button id="editor-zoom-reset"  class="button secondary" title="Reset view">↺</button>
+                        <button id="editor-pan-left"    class="button secondary" title="Pan left">⬅</button>
+                        <button id="editor-pan-right"   class="button secondary" title="Pan right">➡</button>
+                        <button id="editor-mode-toggle" class="button" title="Switch between select/move and drawing new spans">➕ Add Span</button>
+                    </div>
+                    <canvas id="wf-canvas" width="900" height="180" style="width:100%; cursor:grab;"></canvas>
                     <p style="font-size: 12px; color: #003754;">
-                        Drag a span edge to widen or narrow a redaction. Drag on empty waveform to add a new
-                        redaction. Click a span to select it, then delete it below.
+                        Select mode: drag empty area to pan · click a span to select · drag edges to resize · drag body to move.
+                        Use ➕ Add Span to draw a new redaction (drag in either direction). Wheel zooms, ↺ resets the view.
                     </p>
                     <div style="display:flex; gap:10px; justify-content:center; margin-top:10px;">
-                        <button id="editor-zoom-in"  class="button secondary">Zoom In +</button>
-                        <button id="editor-zoom-out" class="button secondary">Zoom Out −</button>
-                        <button id="editor-zoom-reset" class="button secondary">Reset View</button>
                         <button id="editor-delete-span" class="button secondary" disabled>Delete Selected Span</button>
                         <button id="editor-apply" class="button">Apply Redaction</button>
                         <button id="editor-close" class="button secondary">Close Editor</button>
                     </div>
+                    <div id="editor-view-label" style="font-size:12px; color:#003754; text-align:center; margin-top:5px;"></div>
                     <div id="editor-status" class="status"></div>
                 </div>
             </div>
@@ -1290,21 +1296,45 @@ return Array.from(piiTagGrid.querySelectorAll('input[type="checkbox"]:checked'))
         // delete or add spans on the waveform, then render the redacted audio.
         const MANUAL_MIN_SPAN_S = 0.02;   // must match pipeline/redaction.py MANUAL_MIN_SPAN_S
         const MIN_VIEW_S = 0.5;           // narrowest zoom window (seconds)
+        const PAN_STEP_FRAC = 0.25;       // pan buttons move 25% of the visible window per click
+        
         const wfCanvas = document.getElementById('wf-canvas');
         const editorPanel = document.getElementById('redaction-editor');
         const editorDeleteBtn = document.getElementById('editor-delete-span');
         const editorApplyBtn = document.getElementById('editor-apply');
+        const editorModeToggleBtn = document.getElementById('editor-mode-toggle');
+        const editorZoomInBtn = document.getElementById('editor-zoom-in');
+        const editorZoomOutBtn = document.getElementById('editor-zoom-out');
+        const editorZoomResetBtn = document.getElementById('editor-zoom-reset');
+        const editorPanLeftBtn = document.getElementById('editor-pan-left');
+        const editorPanRightBtn = document.getElementById('editor-pan-right');
+        
         let wfSpans = [], wfDuration = 0, wfSelected = null, wfDrag = null;
         // Which part of the timeline is visible, and which time range wfLevels covers.
         let wfView = { start: 0, end: 0 };
         let wfLevelStart = 0, wfLevelEnd = 0;
-
+        let editorMode = 'select';        // 'select' (pan/select/move) | 'add' (draw new spans)
+        
         function editorStatus(msg, isError = false) {
             const el = document.getElementById('editor-status');
             el.textContent = msg;
             el.className = 'status ' + (isError ? 'error' : 'success');
         }
-
+        
+        function setEditorMode(mode) {
+            editorMode = mode;
+            const adding = mode === 'add';
+            if (editorModeToggleBtn) {
+                editorModeToggleBtn.textContent = adding ? '✓ Done – Select/Move' : '➕ Add Span';
+                editorModeToggleBtn.classList.toggle('secondary', !adding);
+            }
+            wfCanvas.style.cursor = adding ? 'crosshair' : 'grab';
+            editorStatus(adding
+                ? 'Add mode: press and drag on the waveform to draw a new redaction span (works in both directions).'
+                : 'Select mode: drag empty area to pan · click a span to select · drag its edges to resize · drag its body to move.',
+                false);
+        }
+        
         async function openRedactionEditor() {
             if (!currentJobId || !currentJobToken) {
                 updateStatus('The editor needs a job - transcribe the audio first.', true);
@@ -1326,7 +1356,7 @@ return Array.from(piiTagGrid.querySelectorAll('input[type="checkbox"]:checked'))
                 wfDuration = segData.duration || 0;
                 if ((segData.warnings || []).includes('alignment_diverged'))
                     editorStatus('Warning: text/audio alignment diverged - review every span.', true);
-
+        
                 // 2) Fetch RMS levels for the waveform display.
                 const wfResp = await fetch(
                     '/waveform?job_id=' + encodeURIComponent(currentJobId) + '&bars=2000',
@@ -1337,9 +1367,10 @@ return Array.from(piiTagGrid.querySelectorAll('input[type="checkbox"]:checked'))
                 wfDuration = wf.duration || wfDuration;
                 wfLevelStart = 0; wfLevelEnd = wfDuration;
                 wfView = { start: 0, end: wfDuration };
-
+        
                 editorPanel.classList.remove('hidden');
                 editorPanel.scrollIntoView({ behavior: 'smooth' });
+                setEditorMode('select');
                 drawEditor();
             } catch (err) {
                 updateStatus('Editor failed: ' + err.message, true);
@@ -1351,7 +1382,7 @@ return Array.from(piiTagGrid.querySelectorAll('input[type="checkbox"]:checked'))
         function viewSpan() { return wfView.end - wfView.start; }
         function timeToX(t) { return (t - wfView.start) / viewSpan() * wfCanvas.width; }
         function xToTime(x) { return wfView.start + x / wfCanvas.width * viewSpan(); }
-
+        
         function clampView(start, end) {
             end = Math.min(end, wfDuration);
             start = Math.max(start, 0);
@@ -1361,6 +1392,15 @@ return Array.from(piiTagGrid.querySelectorAll('input[type="checkbox"]:checked'))
                 else end = start + MIN_VIEW_S;
             }
             wfView.start = start; wfView.end = end;
+        }
+        
+        // Pan the visible window by a fraction of its width (buttons / keyboard).
+        function panBy(frac) {
+            if (wfDuration <= 0) return;
+            const d = viewSpan() * frac;
+            clampView(wfView.start + d, wfView.end + d);
+            drawEditor();
+            scheduleWaveformRefresh();
         }
         
         function drawEditor() {
@@ -1395,85 +1435,121 @@ return Array.from(piiTagGrid.querySelectorAll('input[type="checkbox"]:checked'))
             if (lbl) lbl.textContent = wfView.start.toFixed(2) + ' – ' + wfView.end.toFixed(2) +
                 ' s  (' + viewSpan().toFixed(2) + ' s shown)';
         }
-
+        
+        // ---- Single consolidated pointerdown (replaces the two old duplicates) ----
         wfCanvas.addEventListener('pointerdown', (e) => {
             if (wfDuration <= 0) return;
             const rect = wfCanvas.getBoundingClientRect();
-            const t = (e.clientX - rect.left) / rect.width * wfDuration;
-            const tol = 6 / rect.width * wfDuration;      // ~6 px grab tolerance
-            let hit = null;
-            for (const s of wfSpans) {
-                if (Math.abs(t - s.start) <= tol) hit = { s, mode: 'start' };
-                else if (Math.abs(t - s.end) <= tol) hit = { s, mode: 'end' };
-            }
-            if (!hit) for (const s of wfSpans) if (t > s.start && t < s.end) hit = { s, mode: 'move' };
-            wfSelected = hit ? hit.s : null;
-            if (!hit) {
-                // Empty area: start drawing a brand-new manual span.
+            wfCanvas.setPointerCapture(e.pointerId);
+        
+            // ADD mode: start a new span anchored at the click point.
+            if (editorMode === 'add') {
+                const t = xToTime((e.clientX - rect.left) / rect.width * wfCanvas.width);
                 const ns = { id: 'm' + Date.now(), start: t, end: t, source: 'manual' };
                 wfSpans.push(ns);
                 wfSelected = ns;
-                wfDrag = { s: ns, mode: 'end' };
-            } else {
-                wfDrag = hit;
-            }
-            editorDeleteBtn.disabled = !wfSelected;
-            wfCanvas.setPointerCapture(e.pointerId);
-            drawEditor();
-        });
-
-        wfCanvas.addEventListener('pointerdown', (e) => {
-            if (wfDuration <= 0) return;
-            const rect = wfCanvas.getBoundingClientRect();
-            if (e.shiftKey) {                          // Shift+drag pans the view
-                wfDrag = { mode: 'pan', px: e.clientX, rectW: rect.width };
-                wfCanvas.setPointerCapture(e.pointerId);
+                wfDrag = { mode: 'draw', s: ns, anchor: t };
+                editorDeleteBtn.disabled = false;
+                drawEditor();
                 return;
             }
+        
+            // SELECT mode: Shift+drag always pans, even when starting on a span.
+            if (e.shiftKey) {
+                wfDrag = { mode: 'pan', px: e.clientX, rectW: rect.width };
+                return;
+            }
+        
             const t = xToTime((e.clientX - rect.left) / rect.width * wfCanvas.width);
-            const tol = 6 / rect.width * viewSpan();   // ~6 px grab tolerance
+            const tol = 6 / rect.width * viewSpan();      // ~6 px grab tolerance
             let hit = null;
             for (const s of wfSpans) {
                 if (Math.abs(t - s.start) <= tol) hit = { s, mode: 'start' };
                 else if (Math.abs(t - s.end) <= tol) hit = { s, mode: 'end' };
             }
             if (!hit) for (const s of wfSpans) if (t > s.start && t < s.end) hit = { s, mode: 'move' };
-            wfSelected = hit ? hit.s : null;
-            if (!hit) {
-                const ns = { id: 'm' + Date.now(), start: t, end: t, source: 'manual' };
-                wfSpans.push(ns);
-                wfSelected = ns;
-                wfDrag = { s: ns, mode: 'end' };
-            } else {
+        
+            if (hit) {
+                wfSelected = hit.s;
                 wfDrag = hit;
+                editorDeleteBtn.disabled = false;
+            } else {
+                // Empty area in select mode = deselect + pan the view.
+                wfSelected = null;
+                editorDeleteBtn.disabled = true;
+                wfDrag = { mode: 'pan', px: e.clientX, rectW: rect.width };
             }
-            editorDeleteBtn.disabled = !wfSelected;
-            wfCanvas.setPointerCapture(e.pointerId);
             drawEditor();
         });
-
+        
         wfCanvas.addEventListener('pointermove', (e) => {
-            if (!wfDrag) return;
             const rect = wfCanvas.getBoundingClientRect();
+            const xFrac = (e.clientX - rect.left) / rect.width;
+            const tNow = xToTime(xFrac * wfCanvas.width);
+        
+            // No active drag: give hover feedback via the cursor.
+            if (!wfDrag) {
+                if (editorMode === 'add') {
+                    wfCanvas.style.cursor = 'crosshair';
+                } else {
+                    const tol = 6 / rect.width * viewSpan();
+                    const onEdge = wfSpans.some(s =>
+                        Math.abs(tNow - s.start) <= tol || Math.abs(tNow - s.end) <= tol);
+                    const inSpan = wfSpans.some(s => tNow > s.start && tNow < s.end);
+                    wfCanvas.style.cursor = onEdge ? 'ew-resize' : inSpan ? 'move' : 'grab';
+                }
+                return;
+            }
+        
             if (wfDrag.mode === 'pan') {
                 const dt = (e.clientX - wfDrag.px) / wfDrag.rectW * viewSpan();
-                clampView(wfDrag.start - dt, wfDrag.end - dt);
+                clampView(wfView.start - dt, wfView.end - dt);
                 drawEditor();
                 scheduleWaveformRefresh();
                 return;
             }
-            const t = Math.min(Math.max(xToTime((e.clientX - rect.left) / rect.width * wfCanvas.width), 0), wfDuration);
-            if (wfDrag.mode === 'start') wfDrag.s.start = Math.min(t, wfDrag.s.end - MANUAL_MIN_SPAN_S);
-            else if (wfDrag.mode === 'end') wfDrag.s.end = Math.max(t, wfDrag.s.start + MANUAL_MIN_SPAN_S);
-            else {
+        
+            const t = Math.min(Math.max(tNow, 0), wfDuration);
+            if (wfDrag.mode === 'draw') {
+                // Direction-agnostic: the anchor stays fixed; whichever edge the
+                // pointer crosses becomes start or end accordingly.
+                wfDrag.s.start = Math.min(t, wfDrag.anchor);
+                wfDrag.s.end   = Math.max(t, wfDrag.anchor);
+            } else if (wfDrag.mode === 'start') {
+                wfDrag.s.start = Math.min(t, wfDrag.s.end - MANUAL_MIN_SPAN_S);
+            } else if (wfDrag.mode === 'end') {
+                wfDrag.s.end = Math.max(t, wfDrag.s.start + MANUAL_MIN_SPAN_S);
+            } else { // move
                 const len = wfDrag.s.end - wfDrag.s.start;
                 wfDrag.s.start = Math.min(Math.max(t - len / 2, 0), Math.max(wfDuration - len, 0));
                 wfDrag.s.end = wfDrag.s.start + len;
             }
             drawEditor();
         });
-
+        
+        // Finalize drags. Without this the old code never cleared wfDrag and
+        // left zero-width "phantom" spans behind after a bare click.
+        function endDrag() {
+            if (!wfDrag) return;
+            if (wfDrag.mode === 'draw') {
+                // A click without a real drag: discard the accidental tiny span.
+                if (wfDrag.s.end - wfDrag.s.start < MANUAL_MIN_SPAN_S) {
+                    wfSpans = wfSpans.filter(s => s !== wfDrag.s);
+                    wfSelected = null;
+                    editorDeleteBtn.disabled = true;
+                }
+                // One span drawn → back to select mode.
+                // (Remove this line if you want to stay in ADD mode for multiple spans.)
+                setEditorMode('select');
+            }
+            wfDrag = null;
+            drawEditor();
+        }
+        wfCanvas.addEventListener('pointerup', endDrag);
+        wfCanvas.addEventListener('pointercancel', endDrag);
+        
         // Mouse-wheel zoom centred on the cursor; refetches a hi-res window afterwards.
+        // Works in both modes.
         wfCanvas.addEventListener('wheel', (e) => {
             if (wfDuration <= 0) return;
             e.preventDefault();
@@ -1485,9 +1561,8 @@ return Array.from(piiTagGrid.querySelectorAll('input[type="checkbox"]:checked'))
             drawEditor();
             scheduleWaveformRefresh();
         }, { passive: false });
-
-        // When the view narrows, refetch RMS data for just that window at higher resolution
-        // (/waveform supports start/end and up to 4000 bars — see app.py).
+        
+        // ---- When the view narrows, refetch RMS data for just that window ----
         async function refreshWaveformWindow() {
             if (!currentJobId || !currentJobToken) return;
             const span = viewSpan();
@@ -1506,34 +1581,47 @@ return Array.from(piiTagGrid.querySelectorAll('input[type="checkbox"]:checked'))
                 }
             } catch (_) { /* keep the stretched overview on failure */ }
         }
-
+        
         let wfFetchTimer = null;
         function scheduleWaveformRefresh() {
             clearTimeout(wfFetchTimer);
             wfFetchTimer = setTimeout(refreshWaveformWindow, 250);
         }
-
-        document.getElementById('editor-zoom-in').addEventListener('click', () => {
+        
+        // ---- Toolbar buttons (guarded so one missing ID can't kill init) ----
+        function bindEditor(id, fn) {
+            const el = document.getElementById(id);
+            if (el) el.addEventListener('click', fn);
+            else console.warn('⚠️ Missing editor element:', id);
+        }
+        
+        bindEditor('editor-zoom-in', () => {
+            if (wfDuration <= 0) return;
             const c = (wfView.start + wfView.end) / 2, half = viewSpan() / 4;
             clampView(c - half, c + half); drawEditor(); scheduleWaveformRefresh();
         });
-        document.getElementById('editor-zoom-out').addEventListener('click', () => {
+        bindEditor('editor-zoom-out', () => {
+            if (wfDuration <= 0) return;
             const c = (wfView.start + wfView.end) / 2, half = viewSpan();
             clampView(c - half, c + half); drawEditor(); scheduleWaveformRefresh();
         });
-        document.getElementById('editor-zoom-reset').addEventListener('click', () => {
+        bindEditor('editor-zoom-reset', () => {
             wfView = { start: 0, end: wfDuration };
             wfLevelStart = 0; wfLevelEnd = wfDuration;
             drawEditor(); scheduleWaveformRefresh();
         });
-
+        bindEditor('editor-pan-left',  () => panBy(-PAN_STEP_FRAC));
+        bindEditor('editor-pan-right', () => panBy(PAN_STEP_FRAC));
+        bindEditor('editor-mode-toggle', () =>
+            setEditorMode(editorMode === 'add' ? 'select' : 'add'));
+        
         editorDeleteBtn.addEventListener('click', () => {
             wfSpans = wfSpans.filter(s => s !== wfSelected);
             wfSelected = null;
             editorDeleteBtn.disabled = true;
             drawEditor();
         });
-
+        
         editorApplyBtn.addEventListener('click', async () => {
             const valid = wfSpans.filter(s => s.end - s.start >= MANUAL_MIN_SPAN_S);
             if (!valid.length) {
@@ -1564,12 +1652,14 @@ return Array.from(piiTagGrid.querySelectorAll('input[type="checkbox"]:checked'))
                 editorApplyBtn.disabled = false;
             }
         });
-
-        document.getElementById('editor-close').addEventListener('click', () =>
-            editorPanel.classList.add('hidden'));
-
+        
+        bindEditor('editor-close', () => editorPanel.classList.add('hidden'));
+        
         // The previously dead "Process Audio" button now opens the editor.
-        document.getElementById('process-org-audio-btn').addEventListener('click', openRedactionEditor);
+        bindEditor('process-org-audio-btn', openRedactionEditor);
+        
+        // Initial mode + cursor.
+        setEditorMode('select');
 
         loadModels();
         loadPiiTags();
