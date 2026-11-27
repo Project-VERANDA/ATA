@@ -1297,23 +1297,20 @@ return Array.from(piiTagGrid.querySelectorAll('input[type="checkbox"]:checked'))
         const MANUAL_MIN_SPAN_S = 0.02;   // must match pipeline/redaction.py MANUAL_MIN_SPAN_S
         const MIN_VIEW_S = 0.5;           // narrowest zoom window (seconds)
         const PAN_STEP_FRAC = 0.25;       // pan buttons move 25% of the visible window per click
+        const RULER_H = 18;               // pixels reserved at the canvas bottom for the timestamp ruler
         
         const wfCanvas = document.getElementById('wf-canvas');
         const editorPanel = document.getElementById('redaction-editor');
         const editorDeleteBtn = document.getElementById('editor-delete-span');
         const editorApplyBtn = document.getElementById('editor-apply');
         const editorModeToggleBtn = document.getElementById('editor-mode-toggle');
-        const editorZoomInBtn = document.getElementById('editor-zoom-in');
-        const editorZoomOutBtn = document.getElementById('editor-zoom-out');
-        const editorZoomResetBtn = document.getElementById('editor-zoom-reset');
-        const editorPanLeftBtn = document.getElementById('editor-pan-left');
-        const editorPanRightBtn = document.getElementById('editor-pan-right');
         
         let wfSpans = [], wfDuration = 0, wfSelected = null, wfDrag = null;
         // Which part of the timeline is visible, and which time range wfLevels covers.
         let wfView = { start: 0, end: 0 };
         let wfLevelStart = 0, wfLevelEnd = 0;
         let editorMode = 'select';        // 'select' (pan/select/move) | 'add' (draw new spans)
+        let wfPlayingSpan = null;         // span currently being auditioned via ▶ Play Selected
         
         function editorStatus(msg, isError = false) {
             const el = document.getElementById('editor-status');
@@ -1383,15 +1380,22 @@ return Array.from(piiTagGrid.querySelectorAll('input[type="checkbox"]:checked'))
         function timeToX(t) { return (t - wfView.start) / viewSpan() * wfCanvas.width; }
         function xToTime(x) { return wfView.start + x / wfCanvas.width * viewSpan(); }
         
+        /* FIXED clampView: keeps the window SIZE constant and clamps its POSITION.
+           The old version clamped start and end independently, so a pan (or a
+           zoom-out) that ran past an edge shrank the window — which looked like
+           an unintended zoom-in drifting off the waveform. Now the view simply
+           stops at the edge. */
         function clampView(start, end) {
-            end = Math.min(end, wfDuration);
-            start = Math.max(start, 0);
-            if (end - start < MIN_VIEW_S) {
-                if (start <= 0) end = Math.min(MIN_VIEW_S, wfDuration);
-                else if (end >= wfDuration) start = Math.max(wfDuration - MIN_VIEW_S, 0);
-                else end = start + MIN_VIEW_S;
+            if (wfDuration <= 0) { wfView = { start: 0, end: 0 }; return; }
+            let span = end - start;
+            if (span >= wfDuration) {                 // wider than the audio → show everything
+                wfView = { start: 0, end: wfDuration };
+                return;
             }
-            wfView.start = start; wfView.end = end;
+            if (span < MIN_VIEW_S) span = MIN_VIEW_S; // enforce the narrowest allowed window
+            start = Math.min(Math.max(start, 0), wfDuration - span);
+            wfView.start = start;
+            wfView.end = start + span;
         }
         
         // Pan the visible window by a fraction of its width (buttons / keyboard).
@@ -1403,9 +1407,24 @@ return Array.from(piiTagGrid.querySelectorAll('input[type="checkbox"]:checked'))
             scheduleWaveformRefresh();
         }
         
+        // Pick a "nice" tick interval so roughly 5–10 labels fit in the view.
+        function niceTickStep(span) {
+            const steps = [0.1, 0.2, 0.25, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600];
+            for (const s of steps) if (span / s <= 10) return s;
+            return 3600;
+        }
+        
+        function formatTick(t, step) {
+            if (step < 1) return t.toFixed(2) + 's';
+            if (step < 60) return t.toFixed(step < 5 ? 1 : 0) + 's';
+            const m = Math.floor(t / 60), s = Math.round(t % 60);
+            return m + ':' + String(s).padStart(2, '0');
+        }
+        
         function drawEditor() {
             const ctx = wfCanvas.getContext('2d');
             const cw = wfCanvas.width, ch = wfCanvas.height;
+            const waveBottom = ch - RULER_H;          // waveform stops above the ruler
             ctx.clearRect(0, 0, cw, ch);
             ctx.fillStyle = '#FFF5F4';
             ctx.fillRect(0, 0, cw, ch);
@@ -1417,8 +1436,8 @@ return Array.from(piiTagGrid.querySelectorAll('input[type="checkbox"]:checked'))
                     if (t0 + barDur < wfView.start || t0 > wfView.end) return;   // outside view
                     const x = timeToX(t0);
                     const w = Math.max(barDur / viewSpan() * cw - 1, 1);
-                    const h = lvl * (ch - 10);
-                    ctx.fillRect(x, (ch - h) / 2, w, h);
+                    const h = lvl * (waveBottom - 10);
+                    ctx.fillRect(x, (waveBottom - h) / 2, w, h);
                 });
             }
             for (const s of wfSpans) {
@@ -1426,17 +1445,41 @@ return Array.from(piiTagGrid.querySelectorAll('input[type="checkbox"]:checked'))
                 const x1 = timeToX(Math.max(s.start, wfView.start));
                 const x2 = timeToX(Math.min(s.end, wfView.end));
                 ctx.fillStyle = wfSelected === s ? 'rgba(175,24,33,0.45)' : 'rgba(175,24,33,0.25)';
-                ctx.fillRect(x1, 0, x2 - x1, ch);
+                ctx.fillRect(x1, 0, x2 - x1, waveBottom);
                 ctx.strokeStyle = '#AF1821';
                 ctx.lineWidth = wfSelected === s ? 3 : 2;
-                ctx.strokeRect(x1, 0, x2 - x1, ch);
+                ctx.strokeRect(x1, 0, x2 - x1, waveBottom);
             }
+        
+            // --- Timestamp ruler ---
+            const step = niceTickStep(viewSpan());
+            ctx.strokeStyle = '#003754';
+            ctx.fillStyle = '#003754';
+            ctx.lineWidth = 1;
+            ctx.font = '11px sans-serif';
+            ctx.textAlign = 'center';
+            const first = Math.ceil(wfView.start / step) * step;
+            for (let t = first; t <= wfView.end + 1e-9; t += step) {
+                const x = timeToX(t);
+                if (x < -20 || x > cw + 20) continue;
+                ctx.beginPath();
+                ctx.moveTo(x, waveBottom);
+                ctx.lineTo(x, ch);
+                ctx.stroke();
+                ctx.fillText(formatTick(t, step), x, ch - 4);
+            }
+            // baseline separating ruler from the waveform
+            ctx.beginPath();
+            ctx.moveTo(0, waveBottom);
+            ctx.lineTo(cw, waveBottom);
+            ctx.stroke();
+        
             const lbl = document.getElementById('editor-view-label');
             if (lbl) lbl.textContent = wfView.start.toFixed(2) + ' – ' + wfView.end.toFixed(2) +
                 ' s  (' + viewSpan().toFixed(2) + ' s shown)';
         }
         
-        // ---- Single consolidated pointerdown (replaces the two old duplicates) ----
+        // ---- Single consolidated pointerdown ----
         wfCanvas.addEventListener('pointerdown', (e) => {
             if (wfDuration <= 0) return;
             const rect = wfCanvas.getBoundingClientRect();
@@ -1614,6 +1657,35 @@ return Array.from(piiTagGrid.querySelectorAll('input[type="checkbox"]:checked'))
         bindEditor('editor-pan-right', () => panBy(PAN_STEP_FRAC));
         bindEditor('editor-mode-toggle', () =>
             setEditorMode(editorMode === 'add' ? 'select' : 'add'));
+        
+        // ---- ▶ Play Selected: audition exactly the selected redaction span ----
+        bindEditor('editor-play-selected', () => {
+            if (!wfSelected || wfSelected.end - wfSelected.start < MANUAL_MIN_SPAN_S) {
+                editorStatus('Select a span first (click it) to play that period.', true);
+                return;
+            }
+            wfPlayingSpan = { start: wfSelected.start, end: wfSelected.end };
+            try {
+                audioPlayer.currentTime = wfPlayingSpan.start;
+                audioPlayer.play();
+                editorStatus('Playing ' + wfPlayingSpan.start.toFixed(2) + ' – ' +
+                    wfPlayingSpan.end.toFixed(2) + ' s …', false);
+            } catch (err) {
+                editorStatus('Playback failed: ' + err.message, true);
+            }
+        });
+        
+        // Stop playback when the end of the auditioned span is reached.
+        // Only active while a span audition is running; normal full playback is unaffected.
+        audioPlayer.addEventListener('timeupdate', () => {
+            if (!wfPlayingSpan) return;
+            if (audioPlayer.currentTime >= wfPlayingSpan.end || audioPlayer.ended) {
+                audioPlayer.pause();
+                wfPlayingSpan = null;
+            }
+        });
+        // Clear the audition state if the user manually stops/seeks elsewhere.
+        audioPlayer.addEventListener('pause', () => { wfPlayingSpan = null; });
         
         editorDeleteBtn.addEventListener('click', () => {
             wfSpans = wfSpans.filter(s => s !== wfSelected);
