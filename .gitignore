@@ -55,7 +55,8 @@ TextAnonym.py
 pipeline_Test.py
 !models_manifest.txt
 ModelTraining/*
-.ipynb_checkpoints/
+*/.ipynb_checkpoints/
+*/.ipynb_checkpoints/*
 
 # Log files
 pipeline/anon_session_*
