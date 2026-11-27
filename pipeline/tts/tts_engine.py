@@ -4,6 +4,7 @@ Production-ready with local Piper API
 """
 
 import os
+import re
 import subprocess
 import io
 import wave
@@ -265,7 +266,6 @@ def generate_multi_speaker_tts(transcript_text: str, word_offsets: list = None,
     if word_offsets:
         speaker_count, speaker_list = extract_unique_speakers(word_offsets)
     else:
-        import re
         speaker_matches = re.findall(r'SPEAKER_(\d+)', transcript_text)
         unique_speakers = set(speaker_matches)
         speaker_list = sorted([f'SPEAKER_{i}' for i in unique_speakers])
@@ -276,40 +276,41 @@ def generate_multi_speaker_tts(transcript_text: str, word_offsets: list = None,
     # Assign randomized voices
     speaker_to_voice = assign_randomized_voices(speaker_list)
     
-    # Split transcript into speaker segments
+    # Transcript lines in original order (defines speaking order)
     lines = transcript_text.strip().split('\n')
-    segments_by_speaker = defaultdict(list)
-    
-    for line in lines:
-        import re
-        match = re.match(r'^(SPEAKER_\d+):\s*(.*)$', line.strip())
-        if match:
-            speaker = match.group(1)
-            text = match.group(2)
-            if text.strip():
-                segments_by_speaker[speaker].append(text.strip())
     
     # Merge consecutive same-speaker segments
     merged_segments = []
     current_speaker = None
-    current_text = []
+    current_texts = []
 
-    for speaker in sorted(segments_by_speaker.keys()):
-        voice_id = speaker_to_voice.get(speaker, SPEAKER_VOICE_MAP['DEFAULT'])
+    for line in lines:
+        match = re.match(r'^(SPEAKER_\d+):\s*(.*)$', line.strip())
+        if not match:
+            continue                                    # skip blank/non-labelled lines
+        speaker = match.group(1)
+        text = match.group(2).strip()
+        if not text:
+            continue
         
-        for segment_text in segments_by_speaker[speaker]:
-            merged_segments.append({
-                'speaker': speaker,
-                'voice': voice_id,
-                'text': segment_text
-            })
-    
-    if not merged_segments and transcript_text.strip():
-        fallback_text = re.sub(r'\[([A-Z_][A-Z0-9_]*)\]', r'\1', transcript_text)
+        if speaker == current_speaker:
+            current_texts.append(text)                  # adjacent same speaker → merge
+        else:
+            if current_speaker is not None:
+                merged_segments.append({
+                    'speaker': current_speaker,
+                    'voice': speaker_to_voice.get(current_speaker, SPEAKER_VOICE_MAP['DEFAULT']),
+                    'text': ' '.join(current_texts),
+                })
+            current_speaker = speaker
+            current_texts = [text]
+
+    # Flush the final segment
+    if current_speaker is not None:
         merged_segments.append({
-            'speaker': 'SPEAKER_00',
-            'voice': speaker_to_voice.get('SPEAKER_00') or SPEAKER_VOICE_MAP['DEFAULT'],
-            'text': fallback_text.strip(),
+            'speaker': current_speaker,
+            'voice': speaker_to_voice.get(current_speaker, SPEAKER_VOICE_MAP['DEFAULT']),
+            'text': ' '.join(current_texts),
         })
     
     # Generate audio for each segment
@@ -365,7 +366,6 @@ def generate_multi_speaker_tts(transcript_text: str, word_offsets: list = None,
 
 def synthesize_segment(text: str, speaker: str = 'SPEAKER_00', emotion: str = None):
     """Synthesize a single speaker segment."""
-    import re
     clean_text = re.sub(r'^SPEAKER_\d+:\s*', '', text)
     if not clean_text.strip():
         return None
