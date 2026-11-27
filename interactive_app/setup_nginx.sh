@@ -25,8 +25,6 @@ if [[ -f "config.sh" ]]; then
     source config.sh
 fi
 
-ENABLE_CSP_HEADER="true"
-
 MAX_BODY_SIZE="5G"
 PROXY_READ_TIMEOUT="600s"
 PROXY_SEND_TIMEOUT="600s"
@@ -327,7 +325,7 @@ server {
 
 NGINX_HTTP
     else
-        cat >> "$SPEECH_SITE" << 'NGINX_HTTP_ONLY'
+        cat >> "$SPEECH_SITE" << NGINX_HTTP_ONLY
 # HTTP Server Only (No SSL — NOT recommended for medical data)
 server {
     listen 80;
@@ -338,29 +336,25 @@ server {
     client_header_timeout 600s;
     send_timeout 600s;
 
-    # ===================================================
-    # LOGOS STATIC FILES (/logos/)
-    # ===================================================
     location ^~ /logos/ {
         alias ${LOGOS_PATH}/;
         expires 30d;
         add_header Cache-Control "public, immutable";
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Frame-Options "DENY" always;
         try_files \$uri =404;
     }
 
-    # ===================================================
-    # REACT FRONTEND (/app/) - PROXY TO DOCKER CONTAINER
-    # ===================================================
     location ^~ /app/ {
         limit_req zone=api burst=50 nodelay;
 
-        proxy_pass http://127.0.0.1:8080;
+        proxy_pass http://127.0.0.1:${REACT_PORT};
         proxy_http_version 1.1;
 
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
         proxy_set_header Connection "";
 
         proxy_read_timeout 600s;
@@ -368,38 +362,31 @@ server {
         proxy_connect_timeout 60s;
     }
 
-    # ===================================================
-    # STATIC FILES (/static/)
-    # ===================================================
     location /static/ {
-        alias /mnt/Data_Mount/VERANDA_DataMount/Experimental/ATA/interactive_app/static/;
+        alias ${STATIC_FILES_PATH}/;
         expires 30d;
         add_header Cache-Control "public, immutable";
-        try_files $uri $uri/ =404;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Frame-Options "DENY" always;
+        try_files \$uri \$uri/ =404;
     }
 
-    # ===================================================
-    # HEALTH CHECK (/health) - PROXY TO FLASK (HTTP)
-    # ===================================================
     location /health {
         proxy_pass http://127.0.0.1:5001/health;
         access_log off;
         limit_req zone=api burst=100 nodelay;
     }
 
-    # ===================================================
-    # API ENDPOINTS (ALL OTHER PATHS) - PROXY TO FLASK
-    # ===================================================
     location / {
         limit_req zone=api burst=20 nodelay;
 
         proxy_pass http://127.0.0.1:5001;
         proxy_http_version 1.1;
 
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
         proxy_set_header Connection "";
 
         proxy_request_buffering off;
@@ -441,17 +428,8 @@ server {
     proxy_ssl_protocols TLSv1.2 TLSv1.3;
 
     # Security headers
-    add_header X-Frame-Options "SAMEORIGIN" always;
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header X-XSS-Protection "1; mode=block" always;
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
 EOF
-
-        if [[ -n "$ENABLE_CSP_HEADER" ]]; then
-            cat >> "$SPEECH_SITE" << 'EOF'
-    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self';" always;
-EOF
-        fi
 
         cat >> "$SPEECH_SITE" << EOF
 
@@ -469,6 +447,10 @@ EOF
         alias ${LOGOS_PATH}/;
         expires 30d;
         add_header Cache-Control "public, immutable";
+        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Frame-Options "DENY" always;
+        add_header Content-Security-Policy "default-src 'none'; img-src 'self' data:; style-src 'self'; frame-ancestors 'none';" always;
         try_files \$uri =404;
     }
 
@@ -499,6 +481,10 @@ EOF
         alias ${STATIC_FILES_PATH}/;
         expires 30d;
         add_header Cache-Control "public, immutable";
+        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Frame-Options "DENY" always;
+        add_header Content-Security-Policy "default-src 'none'; img-src 'self' data:; style-src 'self'; frame-ancestors 'none';" always;
         try_files \$uri \$uri/ =404;
     }
 

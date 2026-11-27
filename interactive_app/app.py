@@ -292,7 +292,9 @@ def add_security_headers(response):
         "script-src 'self' 'unsafe-inline'; "
         "style-src 'self' 'unsafe-inline'; "
         "media-src 'self' blob: data:; "
-        "img-src 'self' data: https:;"
+        "img-src 'self' data: https:; "
+        "frame-ancestors 'none'; "
+        "base-uri 'self';"
     )
     if not request.path.startswith('/static/'):
         response.headers['Cache-Control'] = 'no-store'      # transcripts/audio must not be cached
